@@ -1,10 +1,12 @@
 # PhaseEQ
 
-リリースバージョン: **v1.20.8**
+リリースバージョン: **v1.20.9**
 
-文書更新日: **2026-09-29**
+文書更新日: **2026-10-01**
 
 PhaseEQはスピーカーの測定応答から、目標特性、IIR／FIR補正、帯域分割を設計するアプリです。マルチウェイ画面では各チャンネルを合成し、位相・時間整合を調整して実機DSP用の係数を出力できます。
+
+音楽再生機能はありません。係数の利用には外部ソフトウェア／DSPが必要です。[概要・仕様](docs/distribution/user-guide.md#overview-specifications)、[設計値の選び方](docs/distribution/user-guide.md#design-parameters)、[利用条件](docs/distribution/user-guide.md#usage-terms)を確認してください。出力形式への対応と実機動作確認は区別しています。
 
 ## 起動する
 
@@ -30,12 +32,12 @@ FIR OFFでもIIRによる設計を続けられます。FIRイコライザーの�
 
 | 文書 | 内容 |
 |---|---|
-| [画像付き操作マニュアル（PDF）](docs/distribution/manual/PhaseEQ_v1.20.8_画像付き操作マニュアル_日本語.pdf) | 現行UIの実画面、操作順、図解を収録（対応版はPDF表紙に記載） |
+| [画像付き操作マニュアル（PDF）](docs/distribution/manual/PhaseEQ_v1.20.9_画像付き操作マニュアル_日本語.pdf) | 現行UIの実画面、操作順、図解を収録（対応版はPDF表紙に記載） |
 | [操作ガイド](docs/distribution/user-guide.md) | 現在の画面名、操作順、設定条件、グラフの読み方 |
 | [出力ファイル仕様](docs/distribution/output-format.md) | FIR／IIR係数、作業保存、DSP用パッケージ |
 | [インストールガイド](docs/distribution/installation.md) | 導入・更新・起動 |
 | [更新履歴](docs/distribution/history.md) | バージョン別の変更と旧ガイドの更新記録 |
-| [v1.20.8 更新案内](docs/distribution/release-notes-v1.20.8.md) | 最新公開版の変更点 |
+| [v1.20.9 更新案内](docs/distribution/release-notes-v1.20.9.md) | 最新公開版の変更点 |
 
 リリースZIPには画像付きPDFと利用者向け文書を同梱します。テストプログラム・開発補助スクリプト・開発文書は含みません。[一般公開リポジトリ](https://github.com/tomii323/PhaseEQ-public)から実行用ソースを取得できます。開発資産は非公開リポジトリで管理しています。
 
