@@ -1,0 +1,27 @@
+{
+  "application": "APPY Multiway FIR Studio",
+  "version": "1.1.3",
+  "commit": "2357b42ebac4bc58248390de15b3d7c8664b9904",
+  "algorithm": "sha256",
+  "files": {
+    "APPY_MultiwayFIRStudio.py": "e55df70b02c3940310d8aed9b04f48c12a9481482b34f2b5406e51848e01c756",
+    "components/visualization.py": "01fa25502fc06d5caef69dd1355533e8975b6cad1fedee67cfd5c5fc4947b767",
+    "processing/filter.py": "9c180b90f1a791c07456f0761a177885e1a84eab8043617091e7dcb008033773",
+    "processing/fractional_centering.py": "d61da5f87d5a2e0095e756f3ee42a969135f9a7830e452fd016646b163a0fc63",
+    "processing/slope.py": "9b8ebea247b9d22342311ae81e56747b81f08035a8ced6da5693965b1a2638f3",
+    "utils/auto_crop.py": "3135ebfe529101daca9be0e1655070662a250dd2806350042be61381b466046b",
+    "utils/io.py": "3380e383232375e1b942ca274bcf14199f5e568e3b5b9960b8f9339394f0f8af",
+    "utils/kaiser.py": "680bf866e323c497da486cff5b996f479c8e390edeb11ab92fc605ab306c59ca",
+    "utils/ui_index.py": "a8f537b4409629f2d31a9d0d53ce0854811bbd747c4afba10bca67ed1f8515f8",
+    "VERSION": "5dae0c0a5ed3cdaa78704e25bb38d72c31018311e933283d06ed4f93360bfc6c",
+    "README.md": "efc4e5d00abce41a934bfc2f2aad4b7c622654829251f0898f0ff641705b1675"
+  },
+  "modified_after_import": [
+    "APPY_MultiwayFIRStudio.py",
+    "components/visualization.py",
+    "processing/filter.py",
+    "processing/fractional_centering.py",
+    "processing/slope.py",
+    "utils/ui_index.py"
+  ]
+}

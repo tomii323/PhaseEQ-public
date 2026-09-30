@@ -1,0 +1,3 @@
+*.bat -text
+*.pdf binary
+.github export-ignore

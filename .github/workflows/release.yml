@@ -1,0 +1,164 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "再実行する既存タグ（例: v1.19.1）"
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Verify tag and project versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          version="${RELEASE_TAG#v}"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+          test "$(tr -d '\r\n' < VERSION)" = "$version"
+          python - "$version" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          expected = sys.argv[1]
+          pyproject = pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          readme = pathlib.Path("README.md").read_text(encoding="utf-8")
+          assert re.search(rf'^version = "{re.escape(expected)}"$', pyproject, re.MULTILINE)
+          assert f"リリースバージョン: **v{expected}**" in readme
+          PY
+
+      - name: Build source archive and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum --check PUBLIC_FILES.sha256
+          archive="PhaseEQ_${RELEASE_TAG}.zip"
+          git archive --format=zip --prefix="PhaseEQ_${RELEASE_TAG}/" --output="$archive" HEAD
+          python - "$archive" <<'PYCODE'
+          import pathlib, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              names = [n.split('/', 1)[1] for n in z.namelist() if not n.endswith('/')]
+              assert not any(n.startswith(('scripts/', 'tests/', 'test/', 'legacy/', 'docs/development/', 'development/')) for n in names)
+          PYCODE
+          sha256sum "$archive" > "$archive.sha256"
+
+      - name: Prepare Japanese GitHub Release description
+        shell: bash
+        env:
+          RELEASE_BODY_PATH: ${{ runner.temp }}/phaseeq-release-body.md
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          previous_tag="$(git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --abbrev=0 "${RELEASE_TAG}^" 2>/dev/null || true)"
+          python - "$version" "$previous_tag" "$RELEASE_BODY_PATH" <<'PY'
+          from pathlib import Path
+          import sys
+
+          import re
+          version, previous, output = sys.argv[1:]
+          note = Path(f"docs/distribution/release-notes-v{version}.md").read_text()
+          assert note.startswith(f"# PhaseEQ v{version} 更新案内")
+          body = note.split("\n", 1)[1].strip()
+          from urllib.parse import urljoin, urlsplit
+          base = f"https://github.com/tomii323/PhaseEQ-public/blob/v{version}/docs/distribution/"
+          body = re.sub(r"\]\(([^)]+)\)", lambda m: m[0] if urlsplit(m[1]).scheme or m[1].startswith('#') else '](' + urljoin(base,m[1]) + ')', body)
+          Path(output).write_text(body + "\n")
+          PY
+
+      - name: Create or update GitHub Release
+        uses: actions/github-script@v7
+        env:
+          TAG: ${{ env.RELEASE_TAG }}
+          RELEASE_BODY_PATH: ${{ runner.temp }}/phaseeq-release-body.md
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require("fs");
+            const tag = process.env.TAG;
+            const archive = `PhaseEQ_${tag}.zip`;
+            const checksum = `${archive}.sha256`;
+            const body = fs.readFileSync(process.env.RELEASE_BODY_PATH, "utf8");
+            let release;
+            let created = false;
+            try {
+              release = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              release = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tag,
+                name: `PhaseEQ ${tag}`,
+                body,
+              });
+              created = true;
+            }
+            if (!created) {
+              release = await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.data.id,
+                body,
+              });
+            }
+            const existingAssets = await github.paginate(
+              github.rest.repos.listReleaseAssets,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.data.id,
+                per_page: 100,
+              },
+            );
+            for (const [path, contentType] of [
+              [archive, "application/zip"],
+              [checksum, "text/plain"],
+            ]) {
+              const existing = existingAssets.find((asset) => asset.name === path);
+              if (existing) {
+                await github.rest.repos.deleteReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  asset_id: existing.id,
+                });
+              }
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.data.id,
+                name: path,
+                data: fs.readFileSync(path),
+                headers: {
+                  "content-type": contentType,
+                  "content-length": fs.statSync(path).size,
+                },
+              });
+            }
+            core.info(`Release ready: ${release.data.html_url}`);
