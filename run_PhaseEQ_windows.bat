@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+set "PHASEEQ_LAUNCH_ARGS=%*"
 
 cd /d "%~dp0"
 
@@ -96,6 +97,20 @@ if errorlevel 1 exit /b 1
 
 call :check_python_version
 if errorlevel 1 exit /b 1
+
+if exist ".phaseeq-updates\pending.json" goto apply_app_update
+if exist ".phaseeq-updates\journal.json" goto apply_app_update
+goto app_update_done
+:apply_app_update
+(
+    %PY% runtime\app_update.py --apply
+    if errorlevel 10 (
+        call "%~f0" %PHASEEQ_LAUNCH_ARGS%
+        exit /b
+    )
+    if errorlevel 1 exit /b 1
+)
+:app_update_done
 
 call :ensure_venv
 if errorlevel 1 exit /b 1

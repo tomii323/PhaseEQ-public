@@ -1,8 +1,25 @@
 """Navigation policy for channels whose DSP has no FIR output."""
 
 
+DESIGN_PAGES = ('Input', 'Target', 'IIR EQ', 'FIR EQ', 'Linear FIR', 'Export')
+
+
+def nearest_available_page(page, pages, unavailable=()):
+    """Keep the current page, otherwise search left in the displayed menu order."""
+    available = [candidate for candidate in pages if candidate not in unavailable]
+    if page in available:
+        return page
+    if page in pages:
+        for candidate in reversed(pages[:pages.index(page)]):
+            if candidate in available:
+                return candidate
+    return available[0] if available else None
+
+
 def available_page(page, fir_enabled):
-    return 'IIR EQ' if page == 'FIR EQ' and not fir_enabled else page
+    if page not in DESIGN_PAGES:
+        return page
+    return nearest_available_page(page, DESIGN_PAGES, () if fir_enabled else ('FIR EQ',))
 
 
 def render_fir_output_toggle(enabled, *, inherited, on_change):

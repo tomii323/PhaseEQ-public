@@ -36,3 +36,6 @@ dist/
 
 # Local numerical studies and UI verification artifacts
 outputs/
+
+# Recoverable application update staging and backups
+.phaseeq-updates/

@@ -62,6 +62,17 @@ main() {
 
     find_python
     check_python_version
+    if [ -f ".phaseeq-updates/pending.json" ] || [ -f ".phaseeq-updates/journal.json" ]; then
+        if "$PYTHON" runtime/app_update.py --apply; then
+            :
+        else
+            update_status=$?
+            if [ "$update_status" -eq 10 ]; then
+                exec sh "$0" "$@"
+            fi
+            return "$update_status"
+        fi
+    fi
     check_python_venv
     ensure_venv
 
@@ -595,8 +606,8 @@ if [ "$ENABLE_LOG" -eq 1 ]; then
 
     {
         echo "==== $(date) ===="
-        main
+        main "$@"
     } >> "$LOG_FILE" 2>&1
 else
-    main
+    main "$@"
 fi

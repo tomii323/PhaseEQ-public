@@ -49,6 +49,9 @@ def _prefer_pyarrow_system_memory_pool() -> None:
 _prefer_pyarrow_system_memory_pool()
 
 APP_ROOT = Path(__file__).resolve().parent
+from runtime.app_update import register_running_app, writable_installation
+if writable_installation(APP_ROOT):
+    register_running_app(APP_ROOT)
 PROJECT_SRC = APP_ROOT / "src"
 if PROJECT_SRC.exists() and str(PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(PROJECT_SRC))
@@ -2014,6 +2017,9 @@ initialize_language()
 from utils.ui_help import initialize_help, render_help_setting
 initialize_help()
 _apply_app_theme()
+from ui.app_update import initialize_updates, render_update_notice, render_update_settings
+initialize_updates(APP_ROOT, APP_VERSION)
+render_update_notice()
 
 
 def _current_server_port() -> int:
@@ -2427,7 +2433,9 @@ def _clear_indexed_group_widget_keys(prefix: str, *, count_hint: int | None = No
 
 
 def _registry_widget_key(widget_kind: str, list_key: str, item_id: str, field: str) -> str:
-    return f"__reg_{widget_kind}_{list_key}_{item_id}_{field}"
+    key = f"__reg_{widget_kind}_{list_key}_{item_id}_{field}"
+    generation = int(st.session_state.get("_registry_context_generation", 0))
+    return f"{key}_context_{generation}" if generation else key
 
 
 def _clear_registry_widget_keys(list_key: str) -> None:
@@ -3013,6 +3021,15 @@ def _items_for(list_key: str) -> list[dict[str, Any]]:
     return _refresh_filter_registry_items_from_state(list_key)
 
 
+def _replace_registry_state(list_key: str, items: list[dict[str, Any]]) -> None:
+    """Replace domain filters and invalidate their previous UI projection together."""
+    spec = FILTER_REGISTRY_ADAPTERS[list_key]
+    _clear_registry_widget_keys(list_key)
+    st.session_state[list_key] = items
+    ensure_list_state(list_key, item_type=spec["item_type"])
+    st.session_state[spec["count_key"]] = len(items)
+
+
 def _set_registry_items(list_key: str, raw_items: list[dict[str, Any]]) -> None:
     spec = FILTER_REGISTRY_ADAPTERS[list_key]
     prefix = str(spec["prefix"])
@@ -3026,14 +3043,11 @@ def _set_registry_items(list_key: str, raw_items: list[dict[str, Any]]) -> None:
         )
         for idx, raw_item in enumerate(raw_items)
     ]
-    _clear_registry_widget_keys(list_key)
-    st.session_state[list_key] = items
+    _replace_registry_state(list_key, items)
     if list_key == "linear_fir_items":
         # This path includes intentional layout changes. Selecting None writes
         # an empty backup, while Hi/Mid/Lo writes the new authoritative layout.
         st.session_state["_linear_fir_domain_backup"] = [dict(item) for item in items]
-    ensure_list_state(list_key, item_type=spec["item_type"])
-    st.session_state[spec["count_key"]] = len(items)
     _clear_indexed_group_widget_keys(prefix, count_hint=len(items) + 1)
     _invalidate_live_result_cache()
 
@@ -11378,8 +11392,7 @@ def _sync_auto_eq_sections_registry(prefix: str, sections: list[AutoEQSection]) 
                 order=idx,
             )
         )
-    st.session_state[list_key] = items
-    ensure_list_state(list_key, item_type=spec.get("item_type", "auto_eq_section"))
+    _replace_registry_state(list_key, items)
     register_list_schema(
         settings_key=list_key,
         item_type=spec.get("item_type", "auto_eq_section"),
@@ -11414,9 +11427,7 @@ def _sync_iir_registry(filters: list[IIRFilter]) -> None:
         )
         for idx, item in enumerate(filters)
     ]
-    st.session_state["iir_filter_items"] = items
-    ensure_list_state("iir_filter_items", item_type="iir_filter")
-    st.session_state["iir_filter_count"] = len(items)
+    _replace_registry_state("iir_filter_items", items)
     register_list_schema(
         settings_key="iir_filter_items",
         item_type="iir_filter",
@@ -11554,10 +11565,7 @@ def _sync_gain_eq_registry(
         ),
     )
     for settings_key, item_type, label, fields, path, count_key, items in list_schemas:
-        st.session_state[settings_key] = items
-        ensure_list_state(settings_key, item_type=item_type)
-        if settings_key in REGISTRY_DIRECT_LIST_KEYS:
-            st.session_state[count_key] = len(list_items(settings_key, include_disabled=True, sort_by_order=True))
+        _replace_registry_state(settings_key, items)
         register_list_schema(
             settings_key=settings_key,
             item_type=item_type,
@@ -11603,10 +11611,8 @@ def _sync_linear_fir_registry(
         )
         for idx, item in enumerate(normalized_filters)
     ]
-    st.session_state["linear_fir_items"] = items
+    _replace_registry_state("linear_fir_items", items)
     st.session_state["_linear_fir_domain_backup"] = [dict(item) for item in items]
-    ensure_list_state("linear_fir_items", item_type="linear_fir")
-    st.session_state["linear_fir_count"] = len(list_items("linear_fir_items", include_disabled=True, sort_by_order=True))
     register_list_schema(
         settings_key="linear_fir_items",
         item_type="linear_fir",
@@ -11758,8 +11764,7 @@ def _sync_phase_eq_registry(
         ),
     )
     for settings_key, item_type, label, fields, path, count_key, items in list_schemas:
-        st.session_state[settings_key] = items
-        ensure_list_state(settings_key, item_type=item_type)
+        _replace_registry_state(settings_key, items)
         register_list_schema(
             settings_key=settings_key,
             item_type=item_type,
@@ -12073,9 +12078,11 @@ def _compact_navigation(
     return str(selected)
 
 
+from ui.fir_navigation import DESIGN_PAGES
+
 _WORKSPACE_PAGES = {
     "Speaker Package": ("Project", "Multiway Assignment", "Library", "Measurement Notes"),
-    "PhaseEQ": ("Input", "Target", "IIR EQ", "FIR EQ", "Linear FIR", "Export"),
+    "PhaseEQ": DESIGN_PAGES,
     "Measure": ("Measure",),
     "Mic Calibration": ("Mic Library", "Mic Profiles"),
     "Speaker Specifications": ("Speaker Specs",),
@@ -12647,7 +12654,8 @@ if _active_target_edit_session is None and (
         _drafts = dict(st.session_state.get("_composite_channel_drafts", {}))
         if _source_payload is not None:
             _drafts[_current_context_id or "Standalone"] = _source_payload
-        _payload = None if _destination is not None else _source_payload
+        _payload = (deepcopy(_drafts.get(_requested_context_id))
+                    if _destination is not None else _source_payload)
         if _destination is None and _current_assignment is not None:
             _payload = deepcopy(_drafts.get("Standalone"))
             if _payload is None:
@@ -12741,6 +12749,20 @@ if _active_target_edit_session is None and (
             st.session_state.pop("_composite_linear_fir_assignment_id", None)
             for _key in ("assignment", "channel"):
                 st.query_params.pop(_key, None)
+        if _context_initialized:
+            # A retained page needs fresh widget identities; its old browser
+            # inputs must not be reattached to the destination's filter IDs.
+            st.session_state["_registry_context_generation"] = int(
+                _context_before.get("_registry_context_generation", 0)
+            ) + 1
+            from ui.fir_navigation import available_page
+            st.session_state["_pending_page_navigation"] = {
+                "page": available_page(
+                    _canonical_page_name(_context_before.get("active_page", "Input")),
+                    _dsp_fir_editor_available(),
+                ),
+                "state_updates": {},
+            }
     except Exception as exc:
         for _key in list(st.session_state):
             if _key not in _context_before:
@@ -16854,10 +16876,10 @@ if active_composite_assignment is not None:
         )
     if st.session_state.get("active_composite_assignment_id") != active_assignment_id:
         st.session_state["active_composite_assignment_id"] = active_assignment_id
-        st.session_state["_pending_page_navigation"] = {
+        st.session_state.setdefault("_pending_page_navigation", {
             "page": "Export",
             "state_updates": {},
-        }
+        })
         try:
             mark_assignment_status(
                 STORAGE_PATHS["composite_exchange"],
@@ -17036,6 +17058,7 @@ if active_page == "Common Settings":
   with editor_window:
         render_language_setting(key="phaseeq_ui_language")
         render_help_setting(key="phaseeq_help_delay")
+        render_update_settings(APP_ROOT, APP_VERSION)
         with st.container(border=True):
             st.markdown(display_text("#### 予測応答の表示設定"))
             _sync_live_result_controls_state()
