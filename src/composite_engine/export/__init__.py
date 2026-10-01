@@ -109,6 +109,8 @@ def build_multichannel_export_zip(result: MultichannelCompositeResult) -> bytes:
     exported = build_multichannel_export(result)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        from phase_fir_designer.output_terms import write_output_terms
+        write_output_terms(archive)
         for path, data in exported.files.items():
             archive.writestr(path, data)
     return buffer.getvalue()
@@ -290,6 +292,8 @@ def build_dsp_resume_zip(
         "time_reference": "tap_center", "normalization": "none",
         "channels": manifest_channels,
     }, ensure_ascii=False, indent=2).encode()
+    from phase_fir_designer.output_terms import OUTPUT_TERMS_FILENAME, OUTPUT_TERMS_BYTES
+    files[OUTPUT_TERMS_FILENAME] = OUTPUT_TERMS_BYTES
     checksum_lines = [
         f"{hashlib.sha256(data).hexdigest()}  {path}"
         for path, data in sorted(files.items())

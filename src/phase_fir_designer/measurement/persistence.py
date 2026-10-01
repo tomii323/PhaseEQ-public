@@ -224,6 +224,8 @@ def session_zip_bytes(snapshot: SessionSnapshot) -> bytes:
         root = export_measurement_session(snapshot, Path(temp) / "measurement_session")
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            from ..output_terms import write_output_terms
+            write_output_terms(archive)
             for path in root.rglob("*"):
                 if path.is_file():
                     archive.write(path, path.relative_to(root.parent))

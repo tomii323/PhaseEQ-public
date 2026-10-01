@@ -2228,6 +2228,8 @@ def _build_filter_package(
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        from phase_fir_designer.output_terms import write_output_terms
+        write_output_terms(zf)
         for row in output_rows:
             band = row["band"]
             data, _, ext, fmt_label = _serialize_fir_for_download(

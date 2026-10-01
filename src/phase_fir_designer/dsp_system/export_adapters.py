@@ -23,6 +23,8 @@ class DSPExportPackage:
     def zip_bytes(self) -> bytes:
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            from ..output_terms import write_output_terms
+            write_output_terms(archive)
             for path, data in sorted(self.files.items()):
                 archive.writestr(path, data)
         return buffer.getvalue()

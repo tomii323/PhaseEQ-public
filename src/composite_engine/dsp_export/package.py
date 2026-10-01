@@ -124,6 +124,8 @@ def build_dsp_export_zip(
     files["configuration/workspace.json"] = json.dumps(
         package.workspace, ensure_ascii=False, indent=2, default=_json_default,
     ).encode()
+    from phase_fir_designer.output_terms import OUTPUT_TERMS_FILENAME, OUTPUT_TERMS_BYTES
+    files[OUTPUT_TERMS_FILENAME] = OUTPUT_TERMS_BYTES
     file_index = [
         {"path": path, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
         for path, data in sorted(files.items())

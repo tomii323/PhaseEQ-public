@@ -195,6 +195,8 @@ def calibrated_export_zip(original: MeasurementOriginal, response_kind: str = 'm
     np.savetxt(frd, rows, fmt='%.12g', header=f"Frequency(Hz) Gain({meta['gain_unit']}) Phase(deg); calibrated, {response_kind}", comments='* ')
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
+        from ..output_terms import write_output_terms
+        write_output_terms(archive)
         archive.writestr('calibrated_ir.wav', wav.getvalue())
         archive.writestr('calibrated_response.frd', frd.getvalue())
         archive.writestr('calibrated_output.json', json.dumps(_external_metadata(meta), ensure_ascii=False, indent=2, allow_nan=False))

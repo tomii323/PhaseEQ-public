@@ -1,6 +1,6 @@
 # PhaseEQ
 
-リリースバージョン: **v1.20.9**
+リリースバージョン: **v1.20.10**
 
 文書更新日: **2026-10-01**
 
@@ -32,12 +32,12 @@ FIR OFFでもIIRによる設計を続けられます。FIRイコライザーの�
 
 | 文書 | 内容 |
 |---|---|
-| [画像付き操作マニュアル（PDF）](docs/distribution/manual/PhaseEQ_v1.20.9_画像付き操作マニュアル_日本語.pdf) | 現行UIの実画面、操作順、図解を収録（対応版はPDF表紙に記載） |
+| [画像付き操作マニュアル（PDF）](docs/distribution/manual/PhaseEQ_v1.20.10_画像付き操作マニュアル_日本語.pdf) | 現行UIの実画面、操作順、図解を収録（対応版はPDF表紙に記載） |
 | [操作ガイド](docs/distribution/user-guide.md) | 現在の画面名、操作順、設定条件、グラフの読み方 |
 | [出力ファイル仕様](docs/distribution/output-format.md) | FIR／IIR係数、作業保存、DSP用パッケージ |
 | [インストールガイド](docs/distribution/installation.md) | 導入・更新・起動 |
 | [更新履歴](docs/distribution/history.md) | バージョン別の変更と旧ガイドの更新記録 |
-| [v1.20.9 更新案内](docs/distribution/release-notes-v1.20.9.md) | 最新公開版の変更点 |
+| [v1.20.10 更新案内](docs/distribution/release-notes-v1.20.10.md) | 最新公開版の変更点 |
 
 リリースZIPには画像付きPDFと利用者向け文書を同梱します。テストプログラム・開発補助スクリプト・開発文書は含みません。[一般公開リポジトリ](https://github.com/tomii323/PhaseEQ-public)から実行用ソースを取得できます。開発資産は非公開リポジトリで管理しています。
 
@@ -50,3 +50,12 @@ FIR OFFでもIIRによる設計を続けられます。FIRイコライザーの�
 ## 主な依存関係
 
 Streamlit、NumPy、pandas、SciPy、Altair、Matplotlib、Plotly、SoundFile、pdfplumberを使用します。
+
+## 利用条件
+
+Copyright (c) Tomii323. PhaseEQは個人利用向けの無償フリーウェアです。MIT／GPL等のオープンソースライセンスではありません。正式条件は[LICENSE.md](LICENSE.md)を参照してください。
+
+- 本体の商用・業務利用は禁止します。個人的な調査・検証・デバッグ目的の改変は許可します。
+- GitHub上の閲覧・Fork・Pull Requestと、それに必要な変更共有は許可します。この例外を除き、改変版・派生版の公開・提供・再配布は禁止し、オリジナル版の再配布には権利者の事前承諾が必要です。本体の販売・有償配布・再許諾・第三者製品への組み込み配布は禁止します。
+- 個人利用で生成したFIR、WAV、BIN、TXT、CSV、FRD、測定結果、設定データ等は、その後の商用・業務用機器への組み込み・利用・配布を含め自由に利用できます。ただし、商用・業務目的で本体を使用して新たに生成・調整することは禁止します。
+- 第三者ライブラリには各固有のライセンスを適用します。著作権・ライセンス表示の削除・変更は禁止します。本体と生成物は無保証で、法令が許す範囲で権利者は免責されます。

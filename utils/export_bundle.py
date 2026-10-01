@@ -317,6 +317,8 @@ def build_project_zip(
     project_stem = safe_project_stem(project_name, fallback=app_slug)
     package_stamp = output_timestamp_label(generated_at)
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        from phase_fir_designer.output_terms import write_output_terms
+        write_output_terms(archive)
         composite_channel_name = " ".join(
             value for value in (project_name.strip(), band_name.strip()) if value
         ) or project_stem

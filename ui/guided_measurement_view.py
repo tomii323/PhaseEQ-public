@@ -66,6 +66,8 @@ def _download_tracks(root, tracks, media):
             archive.write(path, arcname=path.name)
             lines.append(f"{track.number:02d}  {track.title}")
         archive.writestr("曲順表.txt", "\n".join(lines))
+        from phase_fir_designer.output_terms import write_output_terms
+        write_output_terms(archive)
     return data.getvalue()
 
 
