@@ -375,7 +375,12 @@ def apply_pending(root):
         if not re.fullmatch('[0-9a-f]{32}', pending['id']):
             raise ValueError('Invalid staged update identifier')
         if version(pending['version']) <= version((root / 'VERSION').read_text()):
-            raise ValueError('Pending release is not newer than this installation')
+            # A stale reservation must not block startup or overwrite the
+            # current application. Keep its record and staged files recoverable.
+            retired = directory / f'cancelled-{time.time_ns()}.json'
+            os.replace(directory / 'pending.json', retired)
+            print('PhaseEQ stale update reservation cancelled; application files unchanged:', retired)
+            return False
         staged = directory / pending['id']
         incoming = pending['files']
         previous_path = root / 'PUBLIC_FILES.sha256'
@@ -389,13 +394,27 @@ def apply_pending(root):
             source = _destination(staged, name)
             if hashlib.sha256(source.read_bytes()).hexdigest() != digest:
                 raise ValueError('Staged file checksum mismatch: ' + name)
+        modified_metadata = []
         for name, digest in previous.items():
             if name.startswith('.github/'):
                 continue
             destination = _destination(root, name)
             if destination.exists() and hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
+                if name in {'.gitattributes', '.gitignore'}:
+                    modified_metadata.append(name)
+                    continue
                 raise ValueError('Locally modified application file: ' + name)
         previous_backups = _previous_backups(directory)
+        metadata_recovery = None
+        if modified_metadata:
+            # Git metadata is not runtime configuration. Preserve local edits
+            # separately from successful-update backups, which are pruned.
+            metadata_recovery = 'metadata-recovery-' + uuid.uuid4().hex
+            recovery = directory / metadata_recovery
+            recovery.mkdir()
+            for name in modified_metadata:
+                shutil.copy2(_destination(root, name), recovery / name)
+            print('Local Git metadata preserved:', recovery)
         backup_name = 'backup-' + str(time.time_ns())
         backup = directory / backup_name
         backup.mkdir()
@@ -410,6 +429,7 @@ def apply_pending(root):
                 new.append(name)
         journal = {'backup': backup_name, 'files': names, 'new': new,
                    'result': {'version': pending['version'], 'backup': backup_name,
+                              'metadata_recovery': metadata_recovery,
                               'cleanup_pending': [*previous_backups, backup_name]}}
         _atomic_json(journal_path, journal)
         try:
