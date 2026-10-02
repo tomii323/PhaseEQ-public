@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 
 from utils.eq_links import EQLinks, extract_eq, transaction, standalone_payload
-from utils.link_change import plan_change, commit_change
+from utils.link_change import plan_change, commit_change, RestoreChange
 
 
 def channel_context(state, root, assignment, assignments=()):
@@ -44,18 +44,27 @@ def prepare(state, root, assignment, assignments, default_payload, apply):
         return
     with model_for(state, root, scope) as model:
         model.ensure(channel, payload)
-        if loaded and "eq_links" not in loaded and (
-            state.get("_stereo_context") == (scope, channel)
-            or not model.channels[channel]["group"]
-        ):
-            # Loading EQ is an edit to the currently resolved owner.
-            model.update(channel, payload)
         effective = model.effective(channel, payload)
-        expected = deepcopy(model.resolve_eq(channel))
-    if extract_eq(effective) != extract_eq(payload) or state.get("_stereo_context") != (scope, channel):
+        expected = model.projection_token(channel)
+    if state.get("_stereo_context") != (scope, channel):
+        state.pop("_stereo_conflict", None)
+        draft = state.get("_stereo_conflicts", {}).get((scope, channel))
+        if draft is not None:
+            state["_stereo_conflict"] = deepcopy(draft)
+            state["_stereo_context"] = (scope, channel)
+            state["_stereo_options"] = options
+            state["_stereo_live_payload"] = effective
+            apply(draft)
+    if state.get("_stereo_conflict") is not None:
+        return
+    project = (state.pop("_stereo_refresh_projection", False) or loaded is not None
+               or state.get("_stereo_context") != (scope, channel)
+               or "_stereo_applied_payload" not in state)
+    if project:
         apply(effective)
+        state["_stereo_expected"] = expected
+        state["_stereo_applied_payload"] = deepcopy(effective)
     state["_stereo_context"] = (scope, channel)
-    state["_stereo_expected"] = expected
     state["_stereo_live_payload"] = effective
     state["_stereo_options"] = options
     state.pop("_stereo_loaded_payload", None)
@@ -67,12 +76,24 @@ def finish(state, root, payload):
         effective = standalone_payload(payload)
         state["_stereo_live_payload"] = effective
         return effective
+    if state.get("_stereo_conflict") is not None:
+        return payload
     with model_for(state, root, scope) as model:
-        # Do not write an unchanged stale projection over a newer owner's edit.
-        if extract_eq(payload) != extract_eq(state["_stereo_live_payload"]):
-            model.update(channel, payload, expected=state["_stereo_expected"])
+        dirty = extract_eq(payload) != extract_eq(state["_stereo_applied_payload"])
+        if dirty:
+            if model.projection_token(channel) != state["_stereo_expected"]:
+                state["_stereo_conflict"] = deepcopy(payload)
+                state.setdefault("_stereo_conflicts", {})[(scope, channel)] = deepcopy(payload)
+                return payload
+            model.update(channel, payload)
+            state["_stereo_applied_payload"] = deepcopy(payload)
+            state["_stereo_expected"] = model.projection_token(channel)
         effective = model.effective(channel, payload)
-        state["_stereo_expected"] = deepcopy(model.resolve_eq(channel))
+        if extract_eq(effective) != extract_eq(payload):
+            state["_stereo_refresh_projection"] = True
+        elif not dirty:
+            state["_stereo_expected"] = model.projection_token(channel)
+    # Observing an external value does not mean widgets have received it.
     state["_stereo_live_payload"] = effective
     return effective
 
@@ -103,6 +124,28 @@ def render(state, root, load_channel, load_other=None, *, toggle_host=None, deta
         return
     import streamlit as st
     options = state["_stereo_options"]
+    conflict = state.get("_stereo_conflict")
+    if conflict is not None:
+        st.warning(ui_message("ui.e53f023a382ffe"))
+        latest, review = st.columns(2)
+        if latest.button(ui_message("ui.0c36126f18c129")):
+            state.pop("_stereo_conflict", None)
+            state.get("_stereo_conflicts", {}).pop((scope, channel), None)
+            state["_stereo_refresh_projection"] = True
+            st.rerun()
+        if review.button(ui_message("ui.84697fd90d8685")):
+            from utils.link_change import plan_edit
+            with model_for(state, root, scope) as model:
+                change = plan_edit(model, channel=channel, payload=conflict)
+            state["_stereo_pending_change"] = (scope, change)
+            st.rerun()
+    pending = state.get("_stereo_pending_change")
+    if pending and (pending[0], pending[1].channel) == (scope, channel):
+        # Omit the settings popover entirely while a confirmation owns input.
+        render_confirmation(state, root, scope, pending[1], options)
+        return
+    if conflict is not None:
+        return
     with model_for(state, root, scope) as model:
         record = model.channels[channel]
         group_id = record["group"]
@@ -118,10 +161,14 @@ def render(state, root, load_channel, load_other=None, *, toggle_host=None, deta
     state[enabled_key] = bool(group_id)
     controls_generation = (group_id, tuple(members), tuple(categories))
     generation_key = f"_stereo_controls_{scope}_{channel}"
+    draft_key = f"_stereo_settings_draft_{scope}_{channel}"
     if state.get(generation_key) != controls_generation:
         state[selected_key] = [member for member in members if member != channel and member in options]
         state[settings_key] = list(categories)
         state[generation_key] = controls_generation
+        state.pop(draft_key, None)
+    for key, value in state.get(draft_key, {}).items():
+        state.setdefault(key, deepcopy(value))
     state.setdefault(selected_key, [member for member in members if member != channel and member in options])
     state.setdefault(settings_key, list(categories))
     if toggle_host is None or detail_host is None:
@@ -142,6 +189,7 @@ def render(state, root, load_channel, load_other=None, *, toggle_host=None, deta
             format_func=lambda key: {"iir": "IIR EQ", "fir": ui_message("ui.ca46694f443358"), "target": ui_message("ui.d7b5054c74e1ea")}[key], key=settings_key)
         st.caption(ui_message("ui.3454bed137c4ea"))
         apply_clicked = st.button(ui_message("ui.2b22a780e4da52"), disabled=not selected or not shared)
+    state[draft_key] = {selected_key: list(selected), source_key: source, settings_key: list(shared)}
     if apply_clicked or enabled != bool(group_id):
         try:
             seeds = {}
@@ -180,7 +228,29 @@ def render_confirmation(state, root, scope, change, options):
         st.write(ui_message("ui.6fadad233a13a4"))
         for member in change.affected:
             st.write("• " + options.get(member, member))
-        if change.linking:
+        if isinstance(change, RestoreChange):
+            st.write(ui_message("ui.fa4e25962fbd75"))
+            successor = EQLinks(change.successor)
+            for member in change.affected:
+                if member in successor.channels:
+                    group = successor.channels[member]["group"]
+                    st.write(options.get(member, member), "Linked" if group else "Unlinked")
+                    categories = successor.groups[group]["categories"] if group else ["iir", "fir", "target"]
+                    st.write(ui_message("ui.aaa58681013d7c") + ", ".join(
+                        {"iir": "IIR EQ", "fir": ui_message("ui.ca46694f443358"),
+                         "target": ui_message("ui.d7b5054c74e1ea")}[name] for name in categories))
+                    eq = successor.effective(member, {"config": {}, "ui": {}, "io": {}})["config"]
+                    filters = []
+                    for name in ("iir_filters", "peq_filters", "gain_peq_filters", "shelf_filters",
+                                 "gain_shelf_filters", "tilt_filters", "gain_tilt_filters", "allpass_filters"):
+                        for item in eq.get(name, []):
+                            filters.append({"EQ": "IIR" if name == "iir_filters" else "FIR",
+                                            "Filter": item.get("kind", name.removesuffix("_filters")),
+                                            "Hz": str(item.get("fc", "")), "Q": str(item.get("q", "")),
+                                            "dB": str(item.get("gain_db", ""))})
+                    if filters:
+                        st.table(filters)
+        elif change.linking:
             detached = [member for member in change.affected if member not in change.candidates]
             if detached:
                 st.write(ui_message("ui.e81bcd17291bb6") + ", ".join(options.get(member, member) for member in detached))
@@ -195,6 +265,12 @@ def render_confirmation(state, root, scope, change, options):
                 with model_for(state, root, scope) as model:
                     commit_change(model, change, approved=True)
                 state.pop("_stereo_pending_change", None)
+                state.pop("_stereo_conflict", None)
+                state.get("_stereo_conflicts", {}).pop((scope, change.channel), None)
+                state["_stereo_refresh_projection"] = True
+                if isinstance(change, RestoreChange) and change.payload:
+                    state["_pending_config_payload"] = change.payload
+                    state["_stereo_restore_approved"] = True
                 state["_stereo_reset_toggle"] = True
                 st.rerun()
             except (OSError, ValueError) as exc:

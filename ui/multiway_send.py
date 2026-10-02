@@ -5,7 +5,8 @@ from collections.abc import Callable
 import streamlit as st
 
 
-def render_multiway_send_shortcut(assignment, navigate: Callable[..., None], *, compact: bool = False) -> bool:
+def render_multiway_send_shortcut(assignment, navigate: Callable[..., None], *, compact: bool = False,
+                                 blocked: bool = False) -> bool:
     if assignment is None:
         return False
     with st.container(border=not compact, gap="small"):
@@ -17,6 +18,7 @@ def render_multiway_send_shortcut(assignment, navigate: Callable[..., None], *, 
             type="primary",
             icon=":material/send:",
             width="stretch",
+            disabled=blocked,
             help=ui_message('ui.6c9587b866066b'),
             on_click=navigate,
             args=("Export",),

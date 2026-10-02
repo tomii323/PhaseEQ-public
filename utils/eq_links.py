@@ -74,6 +74,14 @@ class EQLinks:
         record = self.channels[channel]
         return self.groups[record["group"]]["eq"] if record["group"] else record["local"]
 
+    def projection_token(self, channel):
+        """Include ownership and private EQ in the optimistic edit baseline."""
+        record = self.channels[channel]
+        group = record["group"]
+        return deepcopy({"record": record, "owner": self.groups.get(group),
+                         "members": sorted(key for key, item in self.channels.items()
+                                           if group and item["group"] == group)})
+
     def effective(self, channel, payload):
         record = self.channels[channel]
         eq = record["local"]

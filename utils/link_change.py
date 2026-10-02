@@ -19,6 +19,53 @@ class LinkChange:
     affected: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class RestoreChange:
+    channel: str
+    baseline: dict
+    successor: dict
+    affected: tuple[str, ...]
+    payload: dict
+
+
+def plan_restore(model: EQLinks, *, channel, payload, available):
+    """Restore only the selected saved owner, retaining unrelated groups."""
+    successor = EQLinks(model.snapshot())
+    saved = EQLinks(payload["eq_links"]) if "eq_links" in payload else None
+    source = payload.get("eq_link_channel", channel)
+    if saved is not None and source != channel:
+        raise ValueError("保存データのチャンネルと編集対象が一致しません。")
+    if saved is not None and source not in saved.channels:
+        raise ValueError("保存データのチャンネルが見つかりません。")
+    group = saved.channels[source]["group"] if saved else None
+    members = [key for key, record in saved.channels.items() if record["group"] == group] if group else [channel]
+    if not set(members) <= set(available):
+        raise ValueError("保存されたリンク先チャンネルが現在のシステムに存在しません。")
+    affected = set(members)
+    for member in members:
+        old_group = model.channels.get(member, {}).get("group")
+        if old_group:
+            affected.update(key for key, record in model.channels.items() if record["group"] == old_group)
+    successor.unlink(members)
+    for member in members:
+        seed = saved.effective(member, {"config": {}, "ui": {}, "io": {}}) if saved else payload
+        successor.ensure(member, seed)
+        successor.update(member, seed)
+    if group:
+        successor.link(members, source, saved.groups[group]["categories"])
+    return RestoreChange(channel, model.snapshot(), successor.snapshot(),
+                         tuple(sorted(affected)), deepcopy(payload))
+
+
+def plan_edit(model: EQLinks, *, channel, payload):
+    successor = EQLinks(model.snapshot())
+    successor.update(channel, payload)
+    group = model.channels[channel]["group"]
+    affected = tuple(key for key, record in model.channels.items()
+                     if key == channel or (group and record["group"] == group))
+    return RestoreChange(channel, model.snapshot(), successor.snapshot(), affected, {})
+
+
 def plan_change(model: EQLinks, *, channel, linking, candidates, source, categories, seeds):
     """Compute a reviewable replacement without modifying any existing owner."""
     candidates = tuple(dict.fromkeys(candidates))
@@ -41,7 +88,7 @@ def plan_change(model: EQLinks, *, channel, linking, candidates, source, categor
                       deepcopy(seeds), model.snapshot(), tuple(sorted(affected)))
 
 
-def commit_change(model: EQLinks, change: LinkChange, *, approved: bool):
+def commit_change(model: EQLinks, change: LinkChange | RestoreChange, *, approved: bool):
     """The only ownership mutation path; cancellation and conflicts are inert."""
     if not approved:
         return False
@@ -49,7 +96,9 @@ def commit_change(model: EQLinks, change: LinkChange, *, approved: bool):
         raise ValueError("確認中に設定が変更されました。最新状態で再度確認してください。")
     # Build a complete successor first. Validation cannot leave a partial group.
     successor = EQLinks(model.snapshot())
-    if change.linking:
+    if isinstance(change, RestoreChange):
+        successor = EQLinks(change.successor)
+    elif change.linking:
         for target, seed in change.seeds.items():
             successor.ensure(target, seed)
         successor.link(change.candidates, change.source, change.categories)

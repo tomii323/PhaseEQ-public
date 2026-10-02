@@ -4568,6 +4568,25 @@ def _apply_pending_config_payload() -> bool:
             if assignment is None:
                 raise ValueError("Composite Assignmentが見つかりません。")
         from utils.channel_input_policy import preserve_channel_input
+        approved = st.session_state.pop("_stereo_restore_approved", False)
+        if assignment is not None and not approved:
+            payload = validate_current_config_payload(
+                payload, expected_schema_version=SETTINGS_SCHEMA_VERSION,
+            )
+            config_from_payload(payload).normalized().validate()
+            from utils.link_change import plan_restore
+            from utils.eq_links import transaction
+            scope = f"{assignment.system_id}:{assignment.sample_rate_hz}"
+            available = list_switchable_composite_assignments(
+                STORAGE_PATHS["composite_exchange"], assignment=assignment,
+            )
+            with transaction(STORAGE_PATHS["composite_exchange"], scope) as model:
+                model.ensure(assignment.channel_id, st.session_state.get("_stereo_live_payload") or payload)
+                change = plan_restore(model, channel=assignment.channel_id, payload=payload,
+                                      available=[item.channel_id for item in available])
+            st.session_state["_stereo_pending_change"] = (scope, change)
+            st.session_state["_pending_config_source"] = source_label
+            return False
         with preserve_channel_input(st.session_state):
             config = _apply_config_payload_to_state(payload, assignment=assignment)
         overlap_warning = st.session_state.pop("_auto_eq_load_overlap_warning", "")
@@ -16962,6 +16981,7 @@ with st.container(key="compact_workspace", gap="small"):
         multiway_send_requested = render_multiway_send_shortcut(
             active_composite_assignment if _active_target_edit_session is None else None, _navigate_to_page,
             compact=True,
+            blocked=st.session_state.get("_stereo_conflict") is not None,
         )
         multiway_send_feedback = st.empty()
     with workspace_columns[2]:
@@ -21792,14 +21812,18 @@ with live_result_body_window:
             width="stretch",
             icon=":material/publish:",
             key="publish_composite_exchange_source",
-            disabled=standalone_composite_disabled or not design_matches_assignment,
+            disabled=standalone_composite_disabled or not design_matches_assignment
+                     or st.session_state.get("_stereo_conflict") is not None,
         )
+        if multiway_send_requested and st.session_state.get("_stereo_conflict") is not None:
+            multiway_send_feedback.warning(ui_message("ui.e53f023a382ffe"))
         if multiway_send_requested and (standalone_composite_disabled or not design_matches_assignment):
             multiway_send_feedback.warning(ui_message('ui.26c0df9794e82a'))
         if (
             (export_send_requested or multiway_send_requested)
             and not standalone_composite_disabled
             and design_matches_assignment
+            and st.session_state.get("_stereo_conflict") is None
         ):
             try:
                 if acoustic_target_enabled(config) and (config.speaker_response is None or config.speaker_response.phase_deg is None):

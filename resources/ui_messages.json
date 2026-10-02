@@ -16488,5 +16488,25 @@
     "source": "リンクから外して独立設定を保持するチャンネル：",
     "ja": "リンクから外して独立設定を保持するチャンネル：",
     "en": "Channels leaving the link and keeping independent settings: "
+  },
+  "ui.e53f023a382ffe": {
+    "source": "別の画面でEQまたはリンク構成が変更されました。編集中の設定は保持しています。",
+    "ja": "別の画面でEQまたはリンク構成が変更されました。編集中の設定は保持しています。",
+    "en": "EQ or link settings changed in another window. Your draft has been retained."
+  },
+  "ui.0c36126f18c129": {
+    "source": "最新の共有設定を読み込む",
+    "ja": "最新の共有設定を読み込む",
+    "en": "Load latest shared settings"
+  },
+  "ui.84697fd90d8685": {
+    "source": "編集中の設定の反映を確認する",
+    "ja": "編集中の設定の反映を確認する",
+    "en": "Review applying draft settings"
+  },
+  "ui.fa4e25962fbd75": {
+    "source": "保存データまたは編集中のEQとリンク構成を反映します。",
+    "ja": "保存データまたは編集中のEQとリンク構成を反映します。",
+    "en": "Apply saved or draft EQ and link settings."
   }
 }
