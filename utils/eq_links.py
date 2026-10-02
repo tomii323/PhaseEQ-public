@@ -136,3 +136,14 @@ def transaction(root: Path, scope: str):
         encoded = json.dumps(model.snapshot(), ensure_ascii=False, sort_keys=True)
         if not row or encoded != row[0]:
             connection.execute("INSERT INTO eq_links VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET snapshot=excluded.snapshot", (scope, encoded))
+
+
+def standalone_payload(payload):
+    """Resolve the selected legacy EQ once, preserving channel-specific inputs."""
+    if "eq_links" in payload:
+        model = EQLinks(payload["eq_links"])
+        channel = payload.get("eq_link_channel")
+        if channel not in model.channels:
+            raise ValueError("Missing Stereo Link channel")
+        payload = model.effective(channel, payload)
+    return deepcopy({key: value for key, value in payload.items() if not key.startswith("eq_link")})

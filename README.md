@@ -1,6 +1,6 @@
 # PhaseEQ
 
-リリースバージョン: **v1.20.13**
+リリースバージョン: **v1.20.14**
 
 文書更新日: **2026-10-02**
 
@@ -32,12 +32,12 @@ FIR OFFでもIIRによる設計を続けられます。FIRイコライザーの�
 
 | 文書 | 内容 |
 |---|---|
-| [画像付き操作マニュアル（PDF）](docs/distribution/manual/PhaseEQ_v1.20.12_画像付き操作マニュアル_日本語.pdf) | 現行UIの実画面、操作順、図解を収録（対応版はPDF表紙に記載） |
+| [画像付き操作マニュアル（PDF）](docs/distribution/manual/PhaseEQ_v1.20.14_画像付き操作マニュアル_日本語.pdf) | 現行UIの実画面、操作順、図解を収録（対応版はPDF表紙に記載） |
 | [操作ガイド](docs/distribution/user-guide.md) | 現在の画面名、操作順、設定条件、グラフの読み方 |
 | [出力ファイル仕様](docs/distribution/output-format.md) | FIR／IIR係数、作業保存、DSP用パッケージ |
 | [インストールガイド](docs/distribution/installation.md) | 導入・更新・起動 |
 | [更新履歴](docs/distribution/history.md) | バージョン別の変更と旧ガイドの更新記録 |
-| [v1.20.13 更新案内](docs/distribution/release-notes-v1.20.13.md) | 最新公開版の変更点 |
+| [v1.20.14 更新案内](docs/distribution/release-notes-v1.20.14.md) | 最新公開版の変更点 |
 
 リリースZIPには画像付きPDFと利用者向け文書を同梱します。テストプログラム・開発補助スクリプト・開発文書は含みません。[一般公開リポジトリ](https://github.com/tomii323/PhaseEQ-public)から実行用ソースを取得できます。開発資産は非公開リポジトリで管理しています。
 

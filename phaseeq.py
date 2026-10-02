@@ -16957,7 +16957,7 @@ with st.container(key="compact_navigation", gap="small"):
 with st.container(key="compact_workspace", gap="small"):
     workspace_columns = st.columns([0.60, 0.22, 0.18], gap="small", vertical_alignment="center")
     with workspace_columns[0]:
-        assignment_switcher_slot = st.empty() if _active_target_edit_session is None else None
+        assignment_switcher_slot = st.container(border=False, gap="small") if _active_target_edit_session is None else None
     with workspace_columns[1]:
         multiway_send_requested = render_multiway_send_shortcut(
             active_composite_assignment if _active_target_edit_session is None else None, _navigate_to_page,
@@ -20426,10 +20426,16 @@ if assignment_switcher_slot is not None:
         # to select and reset another Composite channel.
         st.session_state["composite_phaseeq_channel_switcher"] = active_assignment_id
         st.session_state["_composite_channel_switcher_context"] = active_assignment_id
-    with assignment_switcher_slot.container(border=False, gap="small"):
+    with assignment_switcher_slot:
         _selected_assignment_id = active_assignment_id
+        _link_toggle_host = _link_detail_host = None
         if len(_assignment_options) > 1:
-            _channel_label, _channel_control = st.columns([0.14, 0.86], gap="small", vertical_alignment="center")
+            if active_composite_assignment is not None:
+                _channel_label, _channel_control, _link_toggle_host, _link_detail_host = st.columns(
+                    [0.10, 0.52, 0.32, 0.06], gap="small", vertical_alignment="center", wrap=False,
+                )
+            else:
+                _channel_label, _channel_control = st.columns([0.14, 0.86], gap="small", vertical_alignment="center")
             _channel_label.markdown(display_text("編集対象"))
             # This selector must send programmatic rollback values to the browser.
             # The generic choice wrapper consumes Session State as a default only.
@@ -20468,7 +20474,8 @@ if assignment_switcher_slot is not None:
             return config_payload_from_project_zip(io.BytesIO(path.read_bytes())) if path else _stereo_default
         stereo_link.render(st.session_state, STORAGE_PATHS["composite_exchange"],
                            lambda payload: _queue_config_payload(payload, "Stereo Link"),
-                           _stereo_other_payload)
+                           _stereo_other_payload, toggle_host=_link_toggle_host,
+                           detail_host=_link_detail_host)
         _context_notice = str(st.session_state.get("_settings_notice", ""))
         if _context_notice.startswith(("切替できません", "設定を読み込めません", "Composite Workspaceを復元できません")):
             st.warning(_context_notice)

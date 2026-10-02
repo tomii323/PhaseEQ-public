@@ -5,17 +5,14 @@ from utils.ui_localization import ui_message, display_text
 
 from contextlib import contextmanager
 from copy import deepcopy
-from uuid import uuid4
 
-from utils.eq_links import EQLinks, extract_eq, transaction
+from utils.eq_links import EQLinks, extract_eq, transaction, standalone_payload
 from utils.link_change import plan_change, commit_change
 
 
 def channel_context(state, root, assignment, assignments=()):
     if assignment is None:
-        names = {"Left": "Left", "Right": "Right"}
-        names.update({name: name for name in state.get("_stereo_links", EQLinks()).channels})
-        return "standalone", str(state.get("_stereo_channel", "Left")), names
+        return "standalone", "standalone", {"standalone": "Standalone"}
     options = {item.channel_id: f"{item.group} / {item.channel_name} ({item.way})" for item in assignments}
     options[assignment.channel_id] = f"{assignment.group} / {assignment.channel_name} ({assignment.way})"
     return f"{assignment.system_id}:{assignment.sample_rate_hz}", assignment.channel_id, options
@@ -24,24 +21,27 @@ def channel_context(state, root, assignment, assignments=()):
 @contextmanager
 def model_for(state, root, scope):
     if scope == "standalone":
-        model = state.setdefault("_stereo_links", EQLinks())
+        raise ValueError("Stereo Link is unavailable in standalone mode")
+    with transaction(root, scope) as model:
         yield model
-    else:
-        with transaction(root, scope) as model:
-            yield model
 
 
 def prepare(state, root, assignment, assignments, default_payload, apply):
     scope, channel, options = channel_context(state, root, assignment, assignments)
     loaded = state.pop("_stereo_loaded_payload", None)
     payload = loaded or state.get("_stereo_live_payload") or default_payload
-    if loaded and assignment is None and "eq_links" in loaded:
-        state["_stereo_links"] = EQLinks(loaded["eq_links"])
-        state["_stereo_channel"] = loaded.get("eq_link_channel", "Left")
-        channel = state["_stereo_channel"]
-        state["_stereo_channel_selector"] = channel
-        options.update({name: name for name in state["_stereo_links"].channels})
-        state["_stereo_channel_payloads"] = deepcopy(loaded.get("eq_link_channels", {}))
+    if assignment is None:
+        effective = standalone_payload(payload)
+        if extract_eq(effective) != extract_eq(payload) or state.get("_stereo_context") != (scope, channel):
+            apply(effective)
+        for key in ("_stereo_links", "_stereo_channel", "_stereo_channel_selector", "_stereo_channel_payloads"):
+            state.pop(key, None)
+        if state.get("_stereo_pending_change", (None,))[0] == "standalone":
+            state.pop("_stereo_pending_change", None)
+        state["_stereo_context"] = (scope, channel)
+        state["_stereo_live_payload"] = effective
+        state["_stereo_options"] = options
+        return
     with model_for(state, root, scope) as model:
         model.ensure(channel, payload)
         if loaded and "eq_links" not in loaded and (
@@ -63,6 +63,10 @@ def prepare(state, root, assignment, assignments, default_payload, apply):
 
 def finish(state, root, payload):
     scope, channel = state["_stereo_context"]
+    if scope == "standalone":
+        effective = standalone_payload(payload)
+        state["_stereo_live_payload"] = effective
+        return effective
     with model_for(state, root, scope) as model:
         # Do not write an unchanged stale projection over a newer owner's edit.
         if extract_eq(payload) != extract_eq(state["_stereo_live_payload"]):
@@ -70,8 +74,6 @@ def finish(state, root, payload):
         effective = model.effective(channel, payload)
         state["_stereo_expected"] = deepcopy(model.resolve_eq(channel))
     state["_stereo_live_payload"] = effective
-    if scope == "standalone":
-        state.setdefault("_stereo_channel_payloads", {})[channel] = clean_payload(effective)
     return effective
 
 
@@ -84,10 +86,10 @@ def saved_fields(state, root):
     if context is None:
         return {}
     scope, channel = context
+    if scope == "standalone":
+        return {}
     with model_for(state, root, scope) as model:
         fields = {"eq_links": model.snapshot(), "eq_link_channel": channel}
-    if scope == "standalone":
-        fields["eq_link_channels"] = deepcopy(state.get("_stereo_channel_payloads", {}))
     return fields
 
 
@@ -95,10 +97,11 @@ def queue_toggle(state, enabled_key, scope, channel):
     state["_stereo_toggle_request"] = (scope, channel, bool(state[enabled_key]))
 
 
-def render(state, root, load_channel, load_other=None):
-    import streamlit as st
-
+def render(state, root, load_channel, load_other=None, *, toggle_host=None, detail_host=None):
     scope, channel = state["_stereo_context"]
+    if scope == "standalone":
+        return
+    import streamlit as st
     options = state["_stereo_options"]
     with model_for(state, root, scope) as model:
         record = model.channels[channel]
@@ -121,14 +124,7 @@ def render(state, root, load_channel, load_other=None):
         state[generation_key] = controls_generation
     state.setdefault(selected_key, [member for member in members if member != channel and member in options])
     state.setdefault(settings_key, list(categories))
-    selected_channel = channel
-    if scope == "standalone":
-        state.setdefault("_stereo_channel_selector", channel)
-        channel_host, toggle_host, detail_host = st.columns([0.48, 0.46, 0.06], gap="small", vertical_alignment="center")
-        with channel_host:
-            selected_channel = st.selectbox(ui_message("ui.9267e2eb2d3ca4"), list(options),
-                                            key="_stereo_channel_selector", label_visibility="collapsed")
-    else:
+    if toggle_host is None or detail_host is None:
         toggle_host, detail_host = st.columns([0.90, 0.10], gap="small", vertical_alignment="center")
     with toggle_host:
         enabled = st.toggle("🔗 Stereo Link · Linked" if group_id else "⛓ Stereo Link · Unlinked",
@@ -136,7 +132,7 @@ def render(state, root, load_channel, load_other=None):
                             on_change=queue_toggle, args=(state, enabled_key, scope, channel))
     if requested and requested[:2] == (scope, channel):
         enabled = requested[2]
-    with detail_host, st.popover("⚙", help=ui_message("ui.dcba367abef085"), use_container_width=False):
+    with detail_host, st.popover("⚙", help=ui_message("ui.dcba367abef085"), width="content"):
         selected = st.multiselect(ui_message("ui.b911e2e20811d2"), [key for key in options if key != channel],
             format_func=lambda key: options[key], key=selected_key)
         candidates = [channel, *selected]
@@ -146,15 +142,6 @@ def render(state, root, load_channel, load_other=None):
             format_func=lambda key: {"iir": "IIR EQ", "fir": ui_message("ui.ca46694f443358"), "target": ui_message("ui.d7b5054c74e1ea")}[key], key=settings_key)
         st.caption(ui_message("ui.3454bed137c4ea"))
         apply_clicked = st.button(ui_message("ui.2b22a780e4da52"), disabled=not selected or not shared)
-        if scope == "standalone":
-            new_name = st.text_input(ui_message("ui.e2d4a90ec7d2cf"), key="_stereo_new_name")
-            if st.button(ui_message("ui.31aa8cc845b8ab"), disabled=not new_name.strip()):
-                if new_name.strip() in options:
-                    st.error(ui_message("ui.ffeb8315e37c62"))
-                else:
-                    with model_for(state, root, scope) as model:
-                        model.ensure(new_name.strip(), state["_stereo_live_payload"])
-                    st.rerun()
     if apply_clicked or enabled != bool(group_id):
         try:
             seeds = {}
@@ -165,8 +152,6 @@ def render(state, root, load_channel, load_other=None):
                 for target in candidates:
                     if target == channel:
                         seeds[target] = state["_stereo_live_payload"]
-                    elif scope == "standalone":
-                        seeds[target] = state.get("_stereo_channel_payloads", {}).get(target, state["_stereo_live_payload"])
                     elif load_other is not None:
                         seeds[target] = load_other(target)
                     if not seeds.get(target):
@@ -184,20 +169,6 @@ def render(state, root, load_channel, load_other=None):
     pending = state.get("_stereo_pending_change")
     if pending and (pending[0], pending[1].channel) == (scope, channel):
         render_confirmation(state, root, scope, pending[1], options)
-    if scope == "standalone":
-        if selected_channel != channel:
-            state.setdefault("_stereo_channel_payloads", {})[channel] = clean_payload(state["_stereo_live_payload"])
-            target = state["_stereo_channel_payloads"].get(selected_channel)
-            if target is None:
-                target = clean_payload(state["_stereo_live_payload"])
-                target["config"]["speaker_response"] = None
-                target["io"] = {key: value for key, value in target.get("io", {}).items() if key.startswith("target_")}
-                target["ui"].update({name: None for name in ("current_speaker_measurement", "current_mic_calibration", "current_near_field_measurement", "current_port_measurement")})
-                target["ui_profile"] = {}
-                target["ui"]["design_history_id"] = str(uuid4())
-            state["_stereo_channel"] = selected_channel
-            load_channel(target)
-            st.rerun()
 
 
 def render_confirmation(state, root, scope, change, options):
