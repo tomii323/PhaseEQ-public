@@ -2323,6 +2323,17 @@ def render_composite_sidebar(
                 # absent from the direct response while waiting for a return.
                 row.pop("phaseeq_fir_response", None)
 
+        from utils.eq_link_exchange import invalidate_stale_returns
+        try:
+            _link_pending_names = invalidate_stale_returns(channel_rows, _exchange_root(),
+                f"{current_system.id if current_system is not None else ''}:{int(sample_rate_hz)}")
+            if _link_pending_names:
+                st.warning(ui_message("ui.f1859f958520b5") + ", ".join(_link_pending_names))
+        except (OSError, ValueError) as exc:
+            st.error(f"Stereo Linkの返却設定を確認できません: {exc}")
+            for row in channel_rows:
+                row["phaseeq_link_pending"] = True
+
         st.markdown(ui_message('ui.42cbe1ed92e65b'))
         current_system = _render_system_library_save(
             channel_rows,
@@ -2387,6 +2398,13 @@ def render_composite_sidebar(
             )
         assignment_rows = _phaseeq_assignment_rows(channel_rows)
         assignment_options = list(assignment_rows)
+        from ui.studio_stereo_link import render_studio_link
+        try:
+            render_studio_link(st.session_state, _exchange_root(),
+                current_system.id if current_system is not None else "",
+                int(sample_rate_hz), assignment_rows)
+        except (OSError, ValueError) as exc:
+            st.error(f"Stereo Linkを読み込めません: {exc}")
         send_all_assignments = render_phaseeq_send_controls(assignment_rows)
         _render_phaseeq_workspace_link("PhaseEQで開く", os.environ.get("PHASEEQ_URL", "http://localhost:8501"))
         st.caption(ui_message('ui.457dd6bee3b351'))
@@ -2636,6 +2654,10 @@ def _build_studio_pipelines(
 ) -> MultichannelCompositeResult:
     configured = st.session_state.get("composite_studio_channels", [])
     band_fir_states = st.session_state.get("composite_studio_band_fir_states", {})
+    pending = [str(row.get("name", "")) for row in configured
+               if isinstance(row, dict) and row.get("enabled", True) and row.get("phaseeq_link_pending")]
+    if pending:
+        raise ValueError(ui_message("ui.1379b62f3433eb") + ", ".join(pending))
     inputs: list[ChannelPipelineInput] = []
     generated_rows = [
         row for row in configured

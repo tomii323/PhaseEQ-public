@@ -16368,5 +16368,125 @@
     "source": "ON：応答処理と共通の帯域外補完を使います。Lo GainはDCゼロへ滑らかにつながる形で2 Hzまで延長。Hi Gainは末尾1/6・1/2 octで傾きを推定し1/3 octで接続。Lo・Hi Phaseは端部の傾きを線形Hzで延長します。点数不足時のHi Gainは端値保持です。OFF：元のデータ範囲を維持します。",
     "ja": "ON：応答処理と共通の帯域外補完を使います。Lo GainはDCゼロへ滑らかにつながる形で2 Hzまで延長。Hi Gainは末尾1/6・1/2 octで傾きを推定し1/3 octで接続。Lo・Hi Phaseは端部の傾きを線形Hzで延長します。点数不足時のHi Gainは端値保持です。OFF：元のデータ範囲を維持します。",
     "en": "ON: use shared Response Processing completion. Lo Gain extends to 2 Hz along a smooth connection to zero amplitude at DC. Hi Gain estimates slopes over the last 1/6 and 1/2 octave and joins over 1/3 octave. Lo/Hi Phase extends the edge slope in linear Hz. Sparse Hi Gain data holds the endpoint. OFF: retain the source range."
+  },
+  "ui.dcba367abef085": {
+    "source": "Stereo Link：リンク先と共有する設定",
+    "ja": "Stereo Link：リンク先と共有する設定",
+    "en": "Stereo Link: channels and shared settings"
+  },
+  "ui.b911e2e20811d2": {
+    "source": "リンク先チャンネル",
+    "ja": "リンク先チャンネル",
+    "en": "Link destination channels"
+  },
+  "ui.c99fa954c2e1d0": {
+    "source": "共有設定の採用元",
+    "ja": "共有設定の採用元",
+    "en": "Source of shared settings"
+  },
+  "ui.695a8a6f8f3e4b": {
+    "source": "現在のチャンネル",
+    "ja": "現在のチャンネル",
+    "en": "Current channel"
+  },
+  "ui.95eee0aefa9e15": {
+    "source": "共有する設定",
+    "ja": "共有する設定",
+    "en": "Shared settings"
+  },
+  "ui.ca46694f443358": {
+    "source": "FIR EQ・Auto EQ設定",
+    "ja": "FIR EQ・Auto EQ設定",
+    "en": "FIR EQ and Auto EQ settings"
+  },
+  "ui.d7b5054c74e1ea": {
+    "source": "Target設定",
+    "ja": "Target設定",
+    "en": "Target settings"
+  },
+  "ui.3454bed137c4ea": {
+    "source": "測定・Speaker Response・IR・Delay・Polarity・Channel Gain・帯域分割条件は各チャンネルで保持します。解除時は現在の共有設定を各チャンネルへ複製します。",
+    "ja": "測定・Speaker Response・IR・Delay・Polarity・Channel Gain・帯域分割条件は各チャンネルで保持します。解除時は現在の共有設定を各チャンネルへ複製します。",
+    "en": "Measurement, Speaker Response, IR, Delay, Polarity, Channel Gain and band split conditions stay channel-specific. Unlinking copies the current shared settings into each channel."
+  },
+  "ui.2b22a780e4da52": {
+    "source": "選択したチャンネルへリンク",
+    "ja": "選択したチャンネルへリンク",
+    "en": "Link selected channels"
+  },
+  "ui.e2d4a90ec7d2cf": {
+    "source": "追加するチャンネル名",
+    "ja": "追加するチャンネル名",
+    "en": "New channel name"
+  },
+  "ui.31aa8cc845b8ab": {
+    "source": "チャンネルを追加",
+    "ja": "チャンネルを追加",
+    "en": "Add channel"
+  },
+  "ui.ffeb8315e37c62": {
+    "source": "同じ名前のチャンネルがあります。",
+    "ja": "同じ名前のチャンネルがあります。",
+    "en": "A channel with this name already exists."
+  },
+  "ui.1f3503aa4fdefb": {
+    "source": "⚙でリンク先と共有する設定を選択してください。",
+    "ja": "⚙でリンク先と共有する設定を選択してください。",
+    "en": "Select destination channels and shared settings in ⚙."
+  },
+  "ui.3c13d23bdec3f3": {
+    "source": "リンク先のEQ設定を取得できません。先に対象チャンネルを開いて設定を保存してください。",
+    "ja": "リンク先のEQ設定を取得できません。先に対象チャンネルを開いて設定を保存してください。",
+    "en": "Cannot retrieve the destination EQ settings. Open the channel and save its settings first."
+  },
+  "ui.ec7446478d49c8": {
+    "source": "Stereo Linkの設定変更を確認",
+    "ja": "Stereo Linkの設定変更を確認",
+    "en": "Confirm Stereo Link changes"
+  },
+  "ui.6fadad233a13a4": {
+    "source": "次のチャンネルの既存EQ設定とリンク状態を書き換えます。",
+    "ja": "次のチャンネルの既存EQ設定とリンク状態を書き換えます。",
+    "en": "The existing EQ settings and link state of these channels will be replaced."
+  },
+  "ui.f284e4d4e94330": {
+    "source": "現在の共有設定を各チャンネルへ複製し、独立編集に切り替えます。",
+    "ja": "現在の共有設定を各チャンネルへ複製し、独立編集に切り替えます。",
+    "en": "Copy the current shared settings into each channel and switch to independent editing."
+  },
+  "ui.74a94d5556fc7e": {
+    "source": "測定・IR・Delay・Polarity・Channel Gainは各チャンネルの設定を保持します。キャンセルすると書き換えません。",
+    "ja": "測定・IR・Delay・Polarity・Channel Gainは各チャンネルの設定を保持します。キャンセルすると書き換えません。",
+    "en": "Measurement, IR, Delay, Polarity and Channel Gain stay channel-specific. Cancel keeps the existing settings."
+  },
+  "ui.5071fb2c5f0141": {
+    "source": "OK・設定を書き換える",
+    "ja": "OK・設定を書き換える",
+    "en": "OK: replace settings"
+  },
+  "ui.1bf6bea7b1cfae": {
+    "source": "採用元：",
+    "ja": "採用元：",
+    "en": "Source: "
+  },
+  "ui.aaa58681013d7c": {
+    "source": "共有対象：",
+    "ja": "共有対象：",
+    "en": "Shared settings: "
+  },
+  "ui.1379b62f3433eb": {
+    "source": "Stereo Linkの更新後にPhaseEQで再生成・送信が必要です：",
+    "ja": "Stereo Linkの更新後にPhaseEQで再生成・送信が必要です：",
+    "en": "Stereo Link changed. Recreate and send these channels from PhaseEQ: "
+  },
+  "ui.f1859f958520b5": {
+    "source": "Stereo Linkの設定が更新されています。PhaseEQで再生成して送信してください：",
+    "ja": "Stereo Linkの設定が更新されています。PhaseEQで再生成して送信してください：",
+    "en": "Stereo Link settings changed. Recreate and send these channels from PhaseEQ: "
+  },
+  "ui.e81bcd17291bb6": {
+    "source": "リンクから外して独立設定を保持するチャンネル：",
+    "ja": "リンクから外して独立設定を保持するチャンネル：",
+    "en": "Channels leaving the link and keeping independent settings: "
   }
 }

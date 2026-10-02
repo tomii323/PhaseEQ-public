@@ -3941,6 +3941,8 @@ def _config_payload(
             st.session_state.get("_current_target_pipeline_result"),
         ),
     )
+    from ui.stereo_link import saved_fields as stereo_saved_fields
+    arguments.update(stereo_saved_fields(st.session_state, STORAGE_PATHS["composite_exchange"]))
     arguments["processing"] = {
         **(arguments["processing"] or {}),
         "band_split_iir_crossover": st.session_state.get("_composite_iir_crossover"),
@@ -4513,6 +4515,7 @@ def _apply_config_payload_to_state(
         if history_id:
             st.session_state["_design_history_id"] = str(history_id)
         _invalidate_live_result_cache()
+        st.session_state["_stereo_loaded_payload"] = deepcopy(payload)
         return config
     except Exception:
         for key in list(st.session_state):
@@ -12835,6 +12838,31 @@ if isinstance(pending_target_variant_editor, dict):
 _apply_pending_project_reset()
 _enforce_standalone_target_scope()
 _enforce_standalone_fir_capability()
+from ui import stereo_link as stereo_link
+
+def _stereo_apply_projection(payload):
+    _clear_project_profile_widget_state()
+    _apply_ui_payload_to_state(payload)
+    projected_config = config_from_payload(payload)
+    _apply_config_to_state(projected_config)
+    _apply_response_payload_to_state(payload, projected_config)
+    _invalidate_live_result_cache()
+
+_stereo_assignment = st.session_state.get("_active_context_assignment")
+_stereo_assignments = list_switchable_composite_assignments(
+    STORAGE_PATHS["composite_exchange"], assignment=_stereo_assignment,
+) if _stereo_assignment is not None else ()
+_stereo_default = build_config_payload(
+    app_name=APP_NAME, app_version=APP_VERSION, app_author=APP_AUTHOR,
+    schema_version=SETTINGS_SCHEMA_VERSION, config=DEFAULT_CONFIG, ui_payload={}, ui_profile={},
+)
+try:
+    stereo_link.prepare(st.session_state, STORAGE_PATHS["composite_exchange"],
+                        _stereo_assignment, _stereo_assignments, _stereo_default,
+                        _stereo_apply_projection)
+except (OSError, ValueError, sqlite3.Error) as exc:
+    st.error(f"Stereo Linkを読み込めません: {exc}")
+    st.stop()
 _sync_design_condition_widget_state()
 register_default_dependencies(register_dependency)
 if "_registry_clean_initialized" not in st.session_state:
@@ -20350,6 +20378,18 @@ config = DesignConfig(
     target_response=base_target_response,
 )
 
+try:
+    _stereo_current = _config_payload(config, raw_speaker_response=raw_speaker_response_for_export,
+                                     raw_target_response=raw_target_response_for_export,
+                                     mic_cal_response=mic_cal_response_for_export)
+    _stereo_resolved = stereo_link.finish(st.session_state, STORAGE_PATHS["composite_exchange"], _stereo_current)
+    if stereo_link.extract_eq(_stereo_resolved) != stereo_link.extract_eq(_stereo_current):
+        # A different editor changed this owner while this screen was rendering.
+        st.rerun()
+except (OSError, ValueError, sqlite3.Error) as exc:
+    st.error(f"Stereo Linkの設定を保存できません: {exc}")
+    st.stop()
+
 if acoustic_target_enabled(config) and result_pane is not None:
     with result_pane:
         st.caption(ui_message('ui.bda6b51bbf0233'),
@@ -20387,31 +20427,48 @@ if assignment_switcher_slot is not None:
         st.session_state["composite_phaseeq_channel_switcher"] = active_assignment_id
         st.session_state["_composite_channel_switcher_context"] = active_assignment_id
     with assignment_switcher_slot.container(border=False, gap="small"):
-        _channel_label, _channel_control = st.columns([0.14, 0.86], gap="small", vertical_alignment="center")
-        _channel_label.markdown(display_text("編集対象"))
-        # This selector must send programmatic rollback values to the browser.
-        # The generic choice wrapper consumes Session State as a default only.
-        _selected_assignment_id = _channel_control.selectbox(
-            ui_message('ui.e3a1ac8c9dfeec'),
-            _assignment_options,
-            index=0,
-            format_func=lambda assignment_id: "Standalone" if not assignment_id else (
-                f"{_assignment_by_id[assignment_id].group} / {_assignment_by_id[assignment_id].channel_name}"
-                + (f"（{_assignment_by_id[assignment_id].way}）" if _assignment_by_id[assignment_id].way != _assignment_by_id[assignment_id].channel_name else "")
-                + f" · {_assignment_by_id[assignment_id].sample_rate_hz / 1000:g} kHz"
-                + (f" · {_assignment_by_id[assignment_id].tap_count:,} taps" if _assignment_by_id[assignment_id].tap_count > 0 else " · FIR OFF")
-                + (" · " + display_text("更新あり") if assignment_id == active_assignment_id and _latest_same_channel_id and _latest_same_channel_id != active_assignment_id else "")
-            ),
-            key="composite_phaseeq_channel_switcher",
-            on_change=queue_channel_switch,
-            args=(st.session_state,),
-            label_visibility="collapsed",
-            help=(
-                ui_message('ui.ea9968221d0a7c')
-                + (ui_message('ui.6627794a7e1fd5', p0=f'{active_assignment_id[:8]}', p1=f'{_active_assignment_state}') if active_assignment_id else "")
-                + (ui_message('ui.8b42ed255244a4') if _latest_same_channel_id and _latest_same_channel_id != active_assignment_id else "")
-            ),
-        )
+        _selected_assignment_id = active_assignment_id
+        if len(_assignment_options) > 1:
+            _channel_label, _channel_control = st.columns([0.14, 0.86], gap="small", vertical_alignment="center")
+            _channel_label.markdown(display_text("編集対象"))
+            # This selector must send programmatic rollback values to the browser.
+            # The generic choice wrapper consumes Session State as a default only.
+            _selected_assignment_id = _channel_control.selectbox(
+                ui_message('ui.e3a1ac8c9dfeec'),
+                _assignment_options,
+                index=0,
+                format_func=lambda assignment_id: "Standalone" if not assignment_id else (
+                    f"{_assignment_by_id[assignment_id].group} / {_assignment_by_id[assignment_id].channel_name}"
+                    + (f"（{_assignment_by_id[assignment_id].way}）" if _assignment_by_id[assignment_id].way != _assignment_by_id[assignment_id].channel_name else "")
+                    + f" · {_assignment_by_id[assignment_id].sample_rate_hz / 1000:g} kHz"
+                    + (f" · {_assignment_by_id[assignment_id].tap_count:,} taps" if _assignment_by_id[assignment_id].tap_count > 0 else " · FIR OFF")
+                    + (" · " + display_text("更新あり") if assignment_id == active_assignment_id and _latest_same_channel_id and _latest_same_channel_id != active_assignment_id else "")
+                ),
+                key="composite_phaseeq_channel_switcher",
+                on_change=queue_channel_switch,
+                args=(st.session_state,),
+                label_visibility="collapsed",
+                help=(
+                    ui_message('ui.ea9968221d0a7c')
+                    + (ui_message('ui.6627794a7e1fd5', p0=f'{active_assignment_id[:8]}', p1=f'{_active_assignment_state}') if active_assignment_id else "")
+                    + (ui_message('ui.8b42ed255244a4') if _latest_same_channel_id and _latest_same_channel_id != active_assignment_id else "")
+                ),
+            )
+        def _stereo_other_payload(channel_id):
+            item = next(item for item in _stereo_assignments if item.channel_id == channel_id)
+            draft = st.session_state.get("_composite_channel_drafts", {}).get(item.assignment_id)
+            if draft is not None:
+                return draft
+            path = assignment_working_session_path(STORAGE_PATHS["composite_exchange"], item.assignment_id)
+            if path is None:
+                previous = latest_published_assignment_working_session(
+                    STORAGE_PATHS["composite_exchange"], channel_id=channel_id,
+                    system_id=item.system_id, exclude_assignment_id=item.assignment_id)
+                path = previous[1] if previous else None
+            return config_payload_from_project_zip(io.BytesIO(path.read_bytes())) if path else _stereo_default
+        stereo_link.render(st.session_state, STORAGE_PATHS["composite_exchange"],
+                           lambda payload: _queue_config_payload(payload, "Stereo Link"),
+                           _stereo_other_payload)
         _context_notice = str(st.session_state.get("_settings_notice", ""))
         if _context_notice.startswith(("切替できません", "設定を読み込めません", "Composite Workspaceを復元できません")):
             st.warning(_context_notice)

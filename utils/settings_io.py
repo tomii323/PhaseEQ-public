@@ -140,6 +140,9 @@ def build_config_payload(
     response_refs: dict[str, dict[str, Any] | None] | None = None,
     embed_response_data: bool = True,
     processing: dict[str, Any] | None = None,
+    eq_links: dict[str, Any] | None = None,
+    eq_link_channel: str | None = None,
+    eq_link_channels: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     serialized_config = (
         config
@@ -182,6 +185,12 @@ def build_config_payload(
         "ui_profile": ui_profile,
         "config": config_payload,
     }
+    if eq_links is not None:
+        from utils.eq_links import EQLinks
+        payload["eq_links"] = EQLinks(eq_links).snapshot()
+        payload["eq_link_channel"] = eq_link_channel
+        if eq_link_channels is not None:
+            payload["eq_link_channels"] = eq_link_channels
     payload["processing"] = processing if processing is not None else processing_manifest()
     from response_completion.settings import migrate_config_extensions
     payload = migrate_config_extensions(payload)
@@ -273,6 +282,13 @@ def config_from_payload(
 ) -> DesignConfig:
     # Apply destination-owned conditions before frequency normalization.
     payload = validate_current_config_payload(payload)
+    if "eq_links" in payload:
+        from utils.eq_links import EQLinks
+        links = EQLinks(payload["eq_links"])
+        channel = payload.get("eq_link_channel")
+        if channel not in links.channels:
+            raise ValueError("Missing Stereo Link channel")
+        payload = links.effective(channel, payload)
     data = {**payload["config"], **(overrides or {})}
     # Before FIR input shaping entered Config, its shared IIR/FIR settings
     # lived only in UI state. Restore them before Config becomes authoritative.
