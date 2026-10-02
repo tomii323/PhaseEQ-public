@@ -460,8 +460,12 @@ def checkbox_stateful(
 
     widget_key = safe_widget_key("__chk_val_", settings_key, key)
     widget_args = {"key": widget_key, "help": help, "disabled": disabled, **widget_kwargs}
-    # A remounted browser control needs the persisted default on every render.
-    widget_args["value"] = bool(st.session_state.get(widget_key, st.session_state.get(settings_key, default)))
+    # State is the sole initialization source. Streamlit sends this explicit
+    # value to a remounted browser control without a competing default.
+    st.session_state[widget_key] = bool(
+        st.session_state.get(widget_key, st.session_state.get(settings_key, default))
+    )
+    widget_args.pop("value", None)
     bind_setting_commit(widget_args, settings_key, bool)
     value = bool(st.checkbox(display_text(label), **widget_args))
     register_ui_entry(
