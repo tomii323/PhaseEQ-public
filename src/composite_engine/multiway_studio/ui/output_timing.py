@@ -7,6 +7,21 @@ from utils.ui_localization import display_text, ui_message
 from ..processing.output_summary import output_timing_rows
 
 
+_TAP_COUNT_COLUMNS = (
+    "最終FIRタップ数", "補正用割り当てタップ数",
+    "帯域分割FIRタップ数", "分割＋追加EQタップ数",
+)
+
+
+def output_timing_frame(rows):
+    """Keep numerical results intact; normalize mixed tap/placeholder display columns."""
+    frame = pd.DataFrame(rows)
+    for column in _TAP_COUNT_COLUMNS:
+        if column in frame:
+            frame[column] = frame[column].map(str)
+    return frame.rename(columns=display_text)
+
+
 def render_band_tap_counts(package, hosts):
     counts = {
         channel.way: len(channel.final_fir) if channel.final_fir is not None else None
@@ -31,9 +46,9 @@ def render_output_timing(package, *, assigned_taps, split_lengths, intermediate_
     st.caption(display_text(
         "最終FIRタップ数は保存・出力するFIRと同じです。DSP追加Delayは手動・位相整合を含む合計値です。msかsamplesのどちらかで入力し、FIR自体の遅延を重ねて加えないでください。"
     ))
-    st.dataframe(pd.DataFrame(summary).rename(columns=display_text), hide_index=True, width="stretch")
+    st.dataframe(output_timing_frame(summary), hide_index=True, width="stretch")
     with st.expander(display_text("タップ数・Delayの明細"), expanded=False):
         st.caption(display_text(
             "補正用割り当てはPhaseEQで補正を設計する長さ、帯域分割FIRは分割フィルター単体の長さです。分割＋追加EQはPhaseEQ返却前の中間結果です。グラフ用の表示IR長はDSPへ入力しません。"
         ))
-        st.dataframe(pd.DataFrame(details).rename(columns=display_text), hide_index=True, width="stretch")
+        st.dataframe(output_timing_frame(details), hide_index=True, width="stretch")
