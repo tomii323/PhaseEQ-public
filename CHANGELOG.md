@@ -4,6 +4,11 @@ PhaseEQの主な変更点を、バージョンごとにまとめます。
 
 ## 未リリース
 
+## v1.20.13 - 2026-10-02
+
+- 公開ZIPにファイル一覧へ記載した公開用Release workflowを含め、本体更新時の「Release ZIP does not match its public inventory」を修正。v1.20.11／v1.20.12の更新処理でも検証できる配布構成へ変更。
+- 公開前のgit archive、公開Actions、匿名取得した公開ZIPを実際の本体更新検証で確認し、一覧とZIPの不一致を公開前に検出。
+
 ## v1.20.12 - 2026-10-02
 
 - Stereo Linkで選択した複数チャンネルのIIR EQ、FIR EQ・Auto EQ、Target設定を共有。採用元と共有対象を選び、確認後に適用。解除時は設定を各チャンネルへコピーして独立編集へ移行。

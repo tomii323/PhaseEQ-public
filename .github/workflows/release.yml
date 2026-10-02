@@ -62,6 +62,9 @@ jobs:
           with zipfile.ZipFile(sys.argv[1]) as z:
               names = [n.split('/', 1)[1] for n in z.namelist() if not n.endswith('/')]
               assert not any(n.startswith(('scripts/', 'tests/', 'test/', 'legacy/', 'docs/development/', 'development/')) for n in names)
+              sys.path.insert(0, str(pathlib.Path.cwd()))
+              from runtime.app_update import verified_files
+              verified_files(pathlib.Path(sys.argv[1]).read_bytes(), pathlib.Path("VERSION").read_text().strip())
           PYCODE
           sha256sum "$archive" > "$archive.sha256"
 
