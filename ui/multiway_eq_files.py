@@ -1,5 +1,4 @@
 """Optional Multiway EQ file controls; persistence is owned by the caller."""
-import soundfile as sf
 import streamlit as st
 
 from utils.ui_localization import ui_message
@@ -29,7 +28,7 @@ def render_eq_files(bands, files, *, enabled, save_upload, persist):
                         current[index] = stored_name
                         persist(files)
                         st.rerun()
-                    except (ValueError, OSError, sf.SoundFileError) as exc:
+                    except (ValueError, OSError) as exc:
                         st.error(ui_message('ui.ef3d2697f82aad', p0=str(exc)))
                 break
             for index, name in enumerate(current):

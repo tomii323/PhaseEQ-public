@@ -13,7 +13,7 @@ DEFAULT_MANUAL_FIR_TAPS = 1023
 @dataclass(frozen=True)
 class BandFIRState:
     enabled: bool
-    tap_source: Literal["none", "auto_split", "manual"]
+    tap_source: Literal["none", "auto_split", "auto_target", "manual"]
     tap_count: int | None
     split_fir_required: bool
 
@@ -47,6 +47,7 @@ def resolve_band_fir_states(
     *,
     fir_output_enabled: bool,
     split_firs: Mapping[str, np.ndarray] | None = None,
+    automatic_taps: Mapping[str, int] | None = None,
     auto_crop: bool = False,
 ) -> dict[str, BandFIRState]:
     bands = tuple(str(value) for value in ordered_bands)
@@ -60,6 +61,10 @@ def resolve_band_fir_states(
         manual_taps = int(configured_taps.get(band, 0) or 0)
         if manual_taps > 0:
             states[band] = BandFIRState(True, "manual", manual_taps, split_required)
+            continue
+        target_taps = int((automatic_taps or {}).get(band, 0) or 0)
+        if target_taps > 0:
+            states[band] = BandFIRState(True, "auto_target", target_taps, split_required)
             continue
         if not split_required:
             states[band] = BandFIRState(False, "none", None, False)
@@ -107,4 +112,40 @@ def initialize_manual_taps_for_enable(
     for band in result:
         if band not in required and result[band] < 1:
             result[band] = int(default_taps)
+    return result
+
+
+def plan_acoustic_target_taps(
+    ordered_bands: Sequence[str],
+    crossover_methods: Sequence[str],
+    acoustic_targets: Sequence[bool],
+    crossover_frequencies_hz: Sequence[float],
+    configured_taps: Mapping[str, int],
+    *,
+    sample_rate_hz: int,
+) -> dict[str, int]:
+    """Plan transient target headroom without changing configured tap values."""
+    bands = tuple(str(value) for value in ordered_bands)
+    methods = tuple(str(value) for value in crossover_methods)
+    targets = tuple(bool(value) for value in acoustic_targets)
+    frequencies = tuple(float(value) for value in crossover_frequencies_hz)
+    boundary_count = max(0, len(bands) - 1)
+    if not (
+        len(methods) == len(targets) == len(frequencies) == boundary_count
+    ):
+        raise ValueError("acoustic target boundary count does not match bands")
+
+    from crossover_engine.lr2_taps import automatic_lr2_taps
+    from crossover_engine.lr4_taps import automatic_lr4_taps
+
+    configured = {band: int(configured_taps.get(band, 0) or 0) for band in bands}
+    result = dict.fromkeys(bands, 0)
+    for index, enabled in enumerate(targets):
+        if not enabled:
+            continue
+        planner = automatic_lr4_taps if "4" in methods[index] else automatic_lr2_taps
+        target_taps = 2 * planner(sample_rate_hz, frequencies[index]).taps + 1
+        for band in bands[index:index + 2]:
+            if configured[band] == 0 and result[band] == 0:
+                result[band] = target_taps
     return result

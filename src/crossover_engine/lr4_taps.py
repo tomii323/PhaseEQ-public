@@ -2,7 +2,7 @@
 from functools import lru_cache
 
 from .filters import _linear_phase_lr4_fir, kaiser_overlap_edges_hz, odd_number
-from .lr2_taps import LR2TapPlan, _response_error
+from .lr2_taps import LR2TapPlan, _response_error, _response_errors
 
 MAX_TAPS = 131071
 
@@ -16,7 +16,17 @@ def estimate_lr4_taps(sample_rate, crossover_hz):
 
 def lr4_boundary_error(sample_rate, lowpass_hz, highpass_hz, taps, *, refine=False):
     low = _linear_phase_lr4_fir(sample_rate, "lp", lowpass_hz, taps)
-    high = low if lowpass_hz == highpass_hz else _linear_phase_lr4_fir(sample_rate, "lp", highpass_hz, taps)
+    if lowpass_hz == highpass_hz:
+        return max(_response_errors(
+            low,
+            sample_rate,
+            (
+                (lowpass_hz, "lp", 4, -100.0),
+                (highpass_hz, "hp", 4, -100.0),
+            ),
+            refine=refine,
+        ))
+    high = _linear_phase_lr4_fir(sample_rate, "lp", highpass_hz, taps)
     return max(_response_error(low, sample_rate, lowpass_hz, "lp", refine=refine,
                                order=4, target_floor_db=-100.0),
                _response_error(high, sample_rate, highpass_hz, "hp", refine=refine,

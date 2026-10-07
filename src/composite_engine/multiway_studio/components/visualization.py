@@ -1,3 +1,5 @@
+import io
+
 from utils.ui_localization import ui_message, display_text
 from utils.ui_language import current_language
 import numpy as np
@@ -28,6 +30,7 @@ GRAPH_MODE_OPTIONS = ("Light", "Interactive")
 DEFAULT_GRAPH_MODE = "Light"
 GRAPH_MAX_POINTS_OPTIONS = (1024, 2048, 4096)
 DEFAULT_GRAPH_MAX_POINTS = 1024
+STUDIO_LIGHT_IMAGE_MAX_WIDTH = 1460
 
 
 def studio_figure_revision(inputs):
@@ -109,6 +112,29 @@ def _localized_figure_text(figure):
             artist.set_text(text)
 
 
+def _display_ready_png(image_data, *, max_width=STUDIO_LIGHT_IMAGE_MAX_WIDTH):
+    """Return the final PNG bytes that Streamlit can display without resizing.
+
+    Streamlit limits stretch-width images to 1460 pixels.  Cache that final
+    artifact instead of caching a larger Matplotlib PNG which Pillow would
+    resize and recompress again on every rerun.
+    """
+    from PIL import Image
+
+    source = io.BytesIO(image_data)
+    image = Image.open(source)
+    if image.width <= int(max_width):
+        return image_data
+    target_height = int(image.height * int(max_width) / image.width)
+    resized = image.resize(
+        (int(max_width), target_height),
+        resample=Image.Resampling.BILINEAR,
+    )
+    output = io.BytesIO()
+    resized.save(output, format="PNG", quality=90)
+    return output.getvalue()
+
+
 def render_studio_figure(
     figure, *, mode="Light", interaction="both", clear_figure=False,
     max_points=DEFAULT_GRAPH_MAX_POINTS,
@@ -125,32 +151,39 @@ def render_studio_figure(
     if runtime_theme in _PLOT_THEMES:
         _apply_plot_theme(figure, list(figure.axes), theme=runtime_theme)
     display_limit = min(4096, int(max_points))
+    if selected_mode != "Interactive" and cache_key is not None:
+        from utils.ui_work_cache import prepared_value
+
+        def png():
+            with _localized_figure_text(figure), _limited_figure_lines(
+                figure,
+                display_limit,
+                preserve_visible_x_samples=(interaction == "x"),
+            ):
+                buffer = io.BytesIO()
+                figure.savefig(buffer, dpi=200, bbox_inches="tight", format="png")
+                return _display_ready_png(buffer.getvalue())
+
+        image = prepared_value(
+            st.session_state, '_studio_managed_png_v1',
+            (cache_key, current_language(), runtime_theme, display_limit, interaction,
+             dict(matplotlib.rcParams), _PLOT_THEMES, STUDIO_LIGHT_IMAGE_MAX_WIDTH),
+            png, max_entries=16, max_bytes=32*1024*1024,
+        )
+        st.image(image, width="stretch")
+        if clear_figure:
+            figure.clear()
+        return
+
     with _localized_figure_text(figure), _limited_figure_lines(
         figure,
         display_limit,
         preserve_visible_x_samples=(interaction == "x"),
     ):
         if selected_mode != "Interactive":
-            if cache_key is not None:
-                import io
-                from utils.ui_work_cache import prepared_value
-                def png():
-                    buffer = io.BytesIO()
-                    figure.savefig(buffer, dpi=200, bbox_inches="tight", format="png")
-                    return buffer.getvalue()
-                image = prepared_value(
-                    st.session_state, '_studio_managed_png_v1',
-                    (cache_key, current_language(), runtime_theme, display_limit, interaction,
-                     dict(matplotlib.rcParams), _PLOT_THEMES),
-                    png, max_entries=16, max_bytes=32*1024*1024,
-                )
-                st.image(image, width="stretch")
-                if clear_figure:
-                    figure.clear()
-                return
             st.pyplot(figure, clear_figure=clear_figure, width="stretch")
             return
-        interactive = interactive_studio_figure(figure, interaction=interaction)
+        interactive = _interactive_studio_spec(figure, interaction=interaction)
         st.plotly_chart(
             interactive,
             config={"displaylogo": False, "scrollZoom": True},
@@ -166,21 +199,18 @@ def _streamlit_runtime_theme(streamlit_module):
         return ""
 
 
-def interactive_studio_figure(figure, *, interaction="both"):
-    """Convert a Studio figure and apply PhaseEQ-compatible zoom constraints."""
+def _interactive_studio_spec(figure, *, interaction="both"):
+    """Build a transient Plotly spec without retaining duplicate graph data."""
     import matplotlib.colors as mpl_colors
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
 
     axes = list(figure.axes)
-    has_secondary_axis = len(axes) > 1
-    interactive = make_subplots(specs=[[{"secondary_y": has_secondary_axis}]])
     dash_styles = {
         "-": "solid", "solid": "solid",
         "--": "dash", "dashed": "dash",
         ":": "dot", "dotted": "dot",
         "-.": "dashdot", "dashdot": "dashdot",
     }
+    traces = []
     for axis_index, axis in enumerate(axes[:2]):
         for line in axis.lines:
             x_values = np.asarray(line.get_xdata())
@@ -189,22 +219,23 @@ def interactive_studio_figure(figure, *, interaction="both"):
                 continue
             color = mpl_colors.to_hex(line.get_color(), keep_alpha=False)
             label = str(line.get_label())
-            interactive.add_trace(
-                go.Scatter(
-                    x=x_values,
-                    y=y_values,
-                    mode="lines",
-                    name=label if label and not label.startswith("_") else None,
-                    showlegend=bool(label and not label.startswith("_")),
-                    line={
-                        "color": color,
-                        "width": float(line.get_linewidth()),
-                        "dash": dash_styles.get(str(line.get_linestyle()), "solid"),
-                    },
-                    opacity=float(line.get_alpha()) if line.get_alpha() is not None else 1.0,
-                ),
-                secondary_y=bool(axis_index),
-            )
+            trace = {
+                "type": "scatter",
+                "x": x_values,
+                "y": y_values,
+                "mode": "lines",
+                "name": label if label and not label.startswith("_") else None,
+                "showlegend": bool(label and not label.startswith("_")),
+                "line": {
+                    "color": color,
+                    "width": float(line.get_linewidth()),
+                    "dash": dash_styles.get(str(line.get_linestyle()), "solid"),
+                },
+                "opacity": float(line.get_alpha()) if line.get_alpha() is not None else 1.0,
+            }
+            if axis_index:
+                trace["yaxis"] = "y2"
+            traces.append(trace)
     primary_axis = axes[0]
     x_min, x_max = primary_axis.get_xlim()
     x_range = (
@@ -212,30 +243,41 @@ def interactive_studio_figure(figure, *, interaction="both"):
         if primary_axis.get_xscale() == "log" and x_min > 0
         else [float(x_min), float(x_max)]
     )
-    interactive.update_xaxes(
-        title_text=primary_axis.get_xlabel(),
-        type="log" if primary_axis.get_xscale() == "log" else "linear",
-        range=x_range,
-        showgrid=True,
-    )
+    x_axis = {
+        "title": {"text": primary_axis.get_xlabel()},
+        "type": "log" if primary_axis.get_xscale() == "log" else "linear",
+        "range": x_range,
+        "showgrid": True,
+    }
+    if interaction == "x":
+        x_axis["fixedrange"] = False
+    layout = {
+        "xaxis": x_axis,
+        "dragmode": "zoom",
+        "hovermode": "x unified",
+        "margin": {"l": 55, "r": 35, "t": 55, "b": 50},
+        "title": {"text": primary_axis.get_title(), "x": 0.5},
+    }
     for axis_index, axis in enumerate(axes[:2]):
         y_min, y_max = axis.get_ylim()
-        interactive.update_yaxes(
-            title_text=axis.get_ylabel(),
-            range=[float(y_min), float(y_max)],
-            showgrid=True,
-            secondary_y=bool(axis_index),
-        )
-    interactive.update_layout(
-        dragmode="zoom",
-        hovermode="x unified",
-        margin=dict(l=55, r=35, t=55, b=50),
-        title={"text": primary_axis.get_title(), "x": 0.5},
-    )
-    if interaction == "x":
-        interactive.update_xaxes(fixedrange=False)
-        interactive.update_yaxes(fixedrange=True)
-    return interactive
+        y_axis = {
+            "title": {"text": axis.get_ylabel()},
+            "range": [float(y_min), float(y_max)],
+            "showgrid": True,
+        }
+        if interaction == "x":
+            y_axis["fixedrange"] = True
+        if axis_index:
+            y_axis.update({"anchor": "x", "overlaying": "y", "side": "right"})
+        layout["yaxis2" if axis_index else "yaxis"] = y_axis
+    return {"data": traces, "layout": layout}
+
+
+def interactive_studio_figure(figure, *, interaction="both"):
+    """Convert a Studio figure and apply PhaseEQ-compatible zoom constraints."""
+    import plotly.graph_objects as go
+
+    return go.Figure(_interactive_studio_spec(figure, interaction=interaction))
 
 
 def set_time_response_xlim(axis):

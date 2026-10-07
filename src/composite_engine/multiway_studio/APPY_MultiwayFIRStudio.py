@@ -4,7 +4,6 @@ from utils.list_menu_ui import selectbox as shared_selectbox, radio as shared_ra
 from utils.ui_semantic_colors import semantic_button_css
 import hashlib
 import html
-import importlib
 import json
 import os
 import io
@@ -16,7 +15,6 @@ import numpy as np
 import datetime
 import copy
 import pandas as pd
-import soundfile as sf
 from scipy.signal import freqz
 # 旧互換APIは削除。新ui_index.pyに合わせてインポートを整理
 from composite_engine.multiway_studio.utils.ui_index import radio_indexed, selectbox_indexed, number_input_stateful_safe
@@ -34,8 +32,6 @@ from composite_engine.multiway_studio.processing.filter import (
     normalize_fir_group_response, odd_number, kaiser_overlap_edges_hz,
     generate_exclusive_kaiser_firs, generate_residual_multiband_filters,
 )
-import composite_engine.multiway_studio.processing.design_response as design_response
-design_response = importlib.reload(design_response)
 from composite_engine.multiway_studio.processing.design_response import (
     build_crossover_design_responses,
     build_speaker_phaseeq_responses,
@@ -59,15 +55,17 @@ from composite_engine.multiway_studio.processing.fir_state import (
     bands_requiring_split_fir,
     inferred_fir_output_enabled,
     initialize_manual_taps_for_enable,
+    plan_acoustic_target_taps,
     resolve_band_fir_states,
 )
 from composite_engine.multiway_studio.utils.io import load_fir_file
 import composite_engine.multiway_studio.components.visualization as visualization
-visualization = importlib.reload(visualization)
 from composite_engine.multiway_studio.components.visualization import (
-    plot_impulse_response, plot_step_response_centered, plot_group_delay_from_responses,
-    plot_sum_impulse_centered, plot_sum_freq_from_responses,
-    plot_crossover_design_response, center_fir_lengths
+    center_fir_lengths,
+)
+from composite_engine.multiway_studio.components.studio_charts import (
+    build_studio_chart_bundle,
+    render_studio_chart,
 )
 from composite_engine.multiway_studio.extension import _shared_iir_configs
 from composite_engine.multiway_studio.extension import (
@@ -82,10 +80,106 @@ from composite_engine.display_projection import normalize_display_value
 from composite_engine.speaker_timing import resolve_speaker_timing_projection
 
 
-def _render_cached_studio_figure(figure, **kwargs):
-    return visualization.render_studio_figure(
-        figure, cache_key=getattr(figure, '_studio_source_revision', None), **kwargs,
+def _studio_chart_source_revision(
+    dsp_revision, display, graph_max_points, db_min, db_max, phase_gain_mask_db,
+):
+    """Identify display projection inputs without coupling them to a renderer."""
+    payload = json.dumps(
+        {
+            "dsp": str(dsp_revision),
+            "display": str(display),
+            "points": int(graph_max_points),
+            "db_min": float(db_min),
+            "db_max": float(db_max),
+            "phase_mask": float(phase_gain_mask_db),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
     )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _project_studio_charts(source, *, source_revision, graph_max_points,
+                           db_min, db_max, phase_gain_mask_db):
+    """Commit one validated six-chart bundle from a renderer-neutral source."""
+    return build_studio_chart_bundle(
+        source["impulses"], source["frequency_hz"], source["responses"],
+        sample_rate_hz=source["sample_rate_hz"],
+        sum_groups=source["sum_groups"], way_sums=source["way_sums"],
+        db_min=db_min, db_max=db_max,
+        phase_gain_mask_db=phase_gain_mask_db,
+        phaseeq_responses=source["phaseeq_responses"],
+        speaker_responses=source["speaker_responses"],
+        baffle_response=source["baffle_response"],
+        baffle_label=source["baffle_label"],
+        max_points=graph_max_points, source_revision=source_revision,
+    )
+
+
+def _render_studio_chart(bundle, chart_id, *, graph_mode, plot_theme):
+    render_studio_chart(
+        bundle.chart(chart_id), mode=graph_mode, theme=plot_theme,
+    )
+
+
+_STUDIO_GRAPH_LAYOUT = (
+    ("band_impulse", "ui.e0d37186efff20"),
+    ("band_step", "ui.ceb9132f645569"),
+    ("relative_group_delay", "ui.59017b5299f697"),
+    ("system_impulse", "ui.bda762804bef52"),
+    ("system_gain_phase", "ui.7eeec0195e2788"),
+)
+
+
+def _create_studio_graph_layout():
+    """Create stable graph positions before any fragment redraw begins."""
+    chart_hosts = []
+    for chart_id, title_key in _STUDIO_GRAPH_LAYOUT:
+        st.subheader(ui_message(title_key))
+        host = st.container()
+        host.empty()
+        chart_hosts.append((chart_id, host))
+    metrics_host = st.container()
+    st.subheader(ui_message('ui.bbb9e421006621'))
+    crossover_host = st.container()
+    crossover_host.empty()
+    chart_hosts.append(("crossover_design", crossover_host))
+    return tuple(chart_hosts), metrics_host
+
+
+def _persist_graph_mode(selected_mode):
+    """Commit renderer state without invalidating DSP or projection state."""
+    selected_mode = str(selected_mode)
+    st.session_state[KEY_GRAPH_MODE] = selected_mode
+    stored = normalize_settings(st.session_state.get("settings", {}))
+    if str(stored.get("graph_mode")) == selected_mode:
+        return
+    updated = copy.deepcopy(stored)
+    updated["graph_mode"] = selected_mode
+    # Renderer-only switches are frequent and already visible in the widget.
+    # Persist the preference without growing the user-facing operation log.
+    save_settings(updated, log_change=False)
+    st.session_state["settings"] = updated
+
+
+@st.fragment
+def _render_studio_graph_fragment(
+    bundle, *, plot_theme, chart_hosts,
+):
+    """Redraw only the fixed graph slots when renderer mode changes."""
+    selected_mode = shared_selectbox(
+        ui_message('ui.5e23ec6a300dc6'),
+        visualization.GRAPH_MODE_OPTIONS,
+        key="composite_studio_graph_mode_widget",
+        help=ui_message('ui.fb8d9182596a2d'),
+    )
+    _persist_graph_mode(selected_mode)
+    for chart_id, host in chart_hosts:
+        with host:
+            _render_studio_chart(
+                bundle, chart_id, graph_mode=selected_mode,
+                plot_theme=plot_theme,
+            )
 
 
 def _studio_display_graph_bundle(
@@ -98,12 +192,13 @@ def _studio_display_graph_bundle(
     crossover_frequencies_hz,
     sample_rate_hz,
     response_points,
-    plot_theme,
+    graph_max_points,
+    dsp_revision,
     db_min,
     db_max,
     phase_gain_mask_db,
 ):
-    """Rebuild display-only Studio figures without regenerating FIR filters."""
+    """Rebuild display-only responses and one atomic chart bundle."""
     stereo = (
         str(st.session_state.get("composite_studio_output_layout", "Mono")) == "Stereo"
     )
@@ -191,54 +286,62 @@ def _studio_display_graph_bundle(
         if isinstance(cached_baffle_plan, BaffleCompensationPlan) and frequency.size
         else None
     )
+    source = {
+        "sample_rate_hz": int(sample_rate_hz),
+        "frequency_hz": frequency,
+        "responses": responses,
+        "impulses": impulses,
+        "sum_groups": sum_groups,
+        "way_sums": way_sums,
+        "phaseeq_responses": phaseeq_responses,
+        "speaker_responses": speaker_responses,
+        "baffle_response": baffle_response,
+        "baffle_label": (
+            f"Baffle compensation · {cached_baffle_plan.display_mode}"
+            if isinstance(cached_baffle_plan, BaffleCompensationPlan)
+            and cached_baffle_plan.mode != "off" else None
+        ),
+    }
+    source_revision = _studio_chart_source_revision(
+        dsp_revision, display, graph_max_points, db_min, db_max,
+        phase_gain_mask_db,
+    )
+    chart_bundle = _project_studio_charts(
+        source, source_revision=source_revision,
+        graph_max_points=graph_max_points, db_min=db_min, db_max=db_max,
+        phase_gain_mask_db=phase_gain_mask_db,
+    )
     return {
         "display": display,
         "settings": settings,
         "primary_settings": primary_settings,
         "responses": responses,
-        "fig1": plot_impulse_response(
-            impulses, fs=sample_rate_hz, overlay_sum=False,
-            theme=plot_theme, sum_groups=sum_groups,
-        ),
-        "fig2": plot_step_response_centered(
-            impulses, fs=sample_rate_hz, overlay_sum=False,
-            theme=plot_theme, sum_groups=sum_groups,
-        ),
-        "fig3": plot_group_delay_from_responses(
-            frequency, responses, fs=sample_rate_hz, theme=plot_theme,
-            gain_mask_db=phase_gain_mask_db, sum_groups=sum_groups,
-        ),
-        "fig4": plot_sum_impulse_centered(
-            impulses, fs=sample_rate_hz, theme=plot_theme, sum_groups=sum_groups,
-        ),
-        "fig5": plot_sum_freq_from_responses(
-            frequency, responses, fs=sample_rate_hz, db_min=db_min, db_max=db_max,
-            phase_gain_mask_db=phase_gain_mask_db, theme=plot_theme,
-            sum_groups=sum_groups,
-        ),
-        "fig6": plot_crossover_design_response(
-            frequency, responses, next(iter(way_sums.values())),
-            db_min=db_min, db_max=db_max, phase_gain_mask_db=phase_gain_mask_db,
-            theme=plot_theme, phaseeq_responses=phaseeq_responses,
-            speaker_responses=speaker_responses, way_sums=way_sums,
-            baffle_response=baffle_response,
-            baffle_label=(
-                f"Baffle compensation · {cached_baffle_plan.display_mode}"
-                if isinstance(cached_baffle_plan, BaffleCompensationPlan)
-                and cached_baffle_plan.mode != "off" else None
-            ),
-        ),
+        "chart_source": source,
+        "chart_bundle": chart_bundle,
     }
 
 
 def _assignment_band_fir_states(mode_key, conf, split_firs, *, auto_crop=False):
     """Resolve Assignment FIR state from the exact generated split bank."""
+    bands = MODE_BANDS[mode_key]
+    methods = tuple(conf.get("crossover_methods", ()))
+    acoustic_targets = tuple(conf.get("boundary_acoustic_targets", ()))
+    configured_taps = conf.get("crop_lens", {})
+    automatic_taps = plan_acoustic_target_taps(
+        bands,
+        methods,
+        acoustic_targets,
+        conf.get("cross_freqs", ()),
+        configured_taps,
+        sample_rate_hz=int(conf.get("fs", 96_000)),
+    )
     return resolve_band_fir_states(
-        MODE_BANDS[mode_key],
-        ["Through" if i < len(conf.get("boundary_acoustic_targets", [])) and conf["boundary_acoustic_targets"][i] else method for i, method in enumerate(conf.get("crossover_methods", ()))],
-        conf.get("crop_lens", {}),
+        bands,
+        ["Through" if i < len(acoustic_targets) and acoustic_targets[i] else method for i, method in enumerate(methods)],
+        configured_taps,
         fir_output_enabled=bool(conf.get("fir_output_enabled", False)),
         split_firs=split_firs,
+        automatic_taps=automatic_taps,
         auto_crop=auto_crop,
     )
 
@@ -937,7 +1040,8 @@ if (
     st.session_state.get("_group_delay_display_revision")
     != visualization.GROUP_DELAY_DISPLAY_REVISION
 ):
-    st.session_state.pop("fig3", None)
+    st.session_state.pop("studio_chart_bundle", None)
+    st.session_state.pop("studio_chart_source", None)
     st.session_state.pop("last_conf_signature", None)
     st.session_state["_group_delay_display_revision"] = (
         visualization.GROUP_DELAY_DISPLAY_REVISION
@@ -1909,6 +2013,9 @@ def _serialize_fir_for_download(arr: np.ndarray, output_format: str, fs=None):
         lines = "index,value\n" + "\n".join(f"{i},{v:.9f}" for i, v in enumerate(arr)) + "\n"
         return lines.encode("utf-8"), "text/csv", ".csv", "text/csv"
     if output_format == "wav_float32":
+        # WAV support is an export-only dependency.  Keep it outside the
+        # startup path used to calculate and display the first graphs.
+        import soundfile as sf
         buf = io.BytesIO()
         sf.write(buf, arr.astype(np.float32), int(fs or 48000), format="WAV", subtype="FLOAT")
         return buf.getvalue(), "audio/wav", ".wav", "WAV float32"
@@ -2313,7 +2420,7 @@ def _render_filter_downloads(
                 )
 
 
-def save_settings(settings):
+def save_settings(settings, *, log_change=True):
     """設定を差分がある時だけ保存（無駄な書き込みを抑制）"""
     try:
         settings = normalize_settings(settings)
@@ -2328,7 +2435,8 @@ def save_settings(settings):
         if new_txt != cur_txt:
             with open(SETTINGS_FILE, 'w', encoding='utf-8') as wf:
                 wf.write(new_txt)
-            append_log("設定を保存しました（差分あり）")
+            if log_change:
+                append_log("設定を保存しました（差分あり）")
     except Exception as e:
         append_log(f"設定保存に失敗: {e}")
 
@@ -2847,7 +2955,7 @@ with st.sidebar:
             on_change=clear_results
         )
 
-    def _persist_crossover_methods() -> None:
+    def _crossover_settings_snapshot():
         method_count = max(0, len(bands) - 1)
         updated = json.loads(json.dumps(st.session_state.get("settings", settings)))
         methods = [
@@ -2861,22 +2969,21 @@ with st.sidebar:
         updated_conf = updated.setdefault(mode_key, {})
         updated_conf["crossover_methods"] = methods
         updated_conf["boundary_acoustic_targets"] = [bool(st.session_state.get(f"composite_studio_{mode_key}_acoustic_target_{i}", False)) and method not in {"Kaiser FIR", "Through"} for i, method in enumerate(methods)]
-        for i, flag in enumerate(updated_conf["boundary_acoustic_targets"]):
-            if not flag or not bool(st.session_state.get(fir_output_state_key, False)):
-                continue
-            from crossover_engine.lr2_taps import automatic_lr2_taps
-            from crossover_engine.lr4_taps import automatic_lr4_taps
-            planner = automatic_lr4_taps if "4" in methods[i] else automatic_lr2_taps
-            fc = float(updated_conf.get("cross_freqs", mode_conf["cross_freqs"])[i])
-            target_taps = 2 * planner(int(fs), fc).taps + 1
-            for band in bands[i:i+2]:
-                if int(st.session_state.get(f"{band}_crop", updated_conf.get("crop_lens", {}).get(band, 0)) or 0) == 0:
-                    st.session_state[f"{band}_crop"] = target_taps
-                    updated_conf.setdefault("crop_lens", {})[band] = target_taps
+        return updated, updated_conf, methods
+
+    def _commit_crossover_settings(updated) -> None:
         updated = normalize_settings(updated)
         st.session_state["settings"] = updated
         save_settings(updated)
         clear_results()
+
+    def _persist_crossover_methods() -> None:
+        updated, _updated_conf, _methods = _crossover_settings_snapshot()
+        _commit_crossover_settings(updated)
+
+    def _persist_acoustic_targets() -> None:
+        updated, _updated_conf, _methods = _crossover_settings_snapshot()
+        _commit_crossover_settings(updated)
 
     initial_crossover_methods = tuple(mode_conf.get("crossover_methods", ()))
 
@@ -2888,6 +2995,7 @@ with st.sidebar:
                 if index < len(initial_crossover_methods) else "Kaiser FIR"
             ),
             on_method_change=_persist_crossover_methods,
+            on_acoustic_target_change=_persist_acoustic_targets,
             fir_enabled=fir_output_enabled,
         )
 
@@ -3212,6 +3320,7 @@ with st.sidebar:
         initial_methods=tuple(mode_conf.get("crossover_methods", ())),
         initial_lr2_auto_polarity=bool(mode_conf.get("iir_lr2_auto_polarity", True)),
         on_method_change=_persist_crossover_methods,
+        on_acoustic_target_change=_persist_acoustic_targets,
         render_methods=False,
     )
 
@@ -3672,12 +3781,10 @@ with preferences_host:
     graph_mode_default = str(settings.get("graph_mode", visualization.DEFAULT_GRAPH_MODE))
     if st.session_state.get(graph_mode_widget_key) not in visualization.GRAPH_MODE_OPTIONS:
         st.session_state[graph_mode_widget_key] = graph_mode_default
-    graph_mode = shared_selectbox(
-        ui_message('ui.5e23ec6a300dc6'),
-        visualization.GRAPH_MODE_OPTIONS,
-        key=graph_mode_widget_key,
-        help=ui_message('ui.fb8d9182596a2d'),
-    )
+    # The graph fragment appends the mode selector to this already populated
+    # settings expander. Mode changes therefore do not rerun DSP or the page.
+    graph_mode_host = preferences_host
+    graph_mode = str(st.session_state[graph_mode_widget_key])
     graph_points_widget_key = "composite_studio_graph_max_points_widget"
     graph_points_default = int(settings.get(
         "graph_max_points", visualization.DEFAULT_GRAPH_MAX_POINTS,
@@ -3741,12 +3848,8 @@ studio_dsp_signature = studio_dsp_input_signature(
 
 conf_signature = json.dumps({
     'group_delay_display_revision': visualization.GROUP_DELAY_DISPLAY_REVISION,
-    'plot_theme': plot_theme,
     'mode': mode_key,
     'conf': conf,
-    'db_min': int(db_min),
-    'db_max': int(db_max),
-    'phase_gain_mask_db': int(phase_gain_mask_db),
     'output_normalize': bool(current_settings.get('output_normalize', False)),
     'fir_output_enabled': bool(conf.get('fir_output_enabled', False)),
     'auto_crop': bool(current_settings.get('auto_crop', False)),
@@ -3801,7 +3904,7 @@ signature_changed = last_conf_signature != conf_signature
 theme_changed = st.session_state.get("last_plot_theme") != plot_theme
 last_render_seconds = float(st.session_state.get('last_render_seconds', 0.0) or 0.0)
 required_graph_cache_keys = (
-    "fig1", "fig2", "fig3", "fig4", "fig5", "fig6",
+    "studio_chart_bundle", "studio_chart_source",
     "final_firs", "studio_graph_settings", "studio_graph_responses",
     "result_settings", "result_mode_key", "result_fs",
 )
@@ -4043,7 +4146,11 @@ if should_generate:
         for band in bands:
             fir = split_firs[band]
             state = sidebar_fir_states[band]
-            crop_len = int(state.tap_count or 0) if state.tap_source == "manual" else 0
+            crop_len = (
+                int(state.tap_count or 0)
+                if state.tap_source in {"manual", "auto_target"}
+                else 0
+            )
             # 手動指定は従来通り、バッフル合成後とEQ合成後にクロップする。
             if baffle_fir is not None:
                 fir = combine_and_crop_fir_conv(fir, baffle_fir, crop_len)
@@ -4220,6 +4327,36 @@ if should_generate:
     st.session_state['auto_crop_rows'] = auto_crop_rows
     st.session_state['auto_crop_cross_rows'] = auto_crop_cross_rows
 
+    # Numeric projection is completed and validated before any chart is drawn.
+    # Session State receives one bundle revision atomically; renderer artifacts
+    # are transient and never become the source of truth.
+    chart_source = {
+        "sample_rate_hz": int(fs),
+        "frequency_hz": graph_frequency_hz,
+        "responses": graph_responses,
+        "impulses": realized_plot_firs,
+        "sum_groups": graph_sum_groups,
+        "way_sums": graph_way_sums,
+        "phaseeq_responses": phaseeq_graph_responses,
+        "speaker_responses": speaker_graph_responses,
+        "baffle_response": baffle_graph_response,
+        "baffle_label": (
+            f"Baffle compensation · {baffle_compensation_plan.display_mode}"
+            if baffle_graph_response is not None else None
+        ),
+    }
+    chart_revision = _studio_chart_source_revision(
+        conf_signature, displayed_graph_group, graph_max_points,
+        db_min, db_max, phase_gain_mask_db,
+    )
+    chart_bundle = _project_studio_charts(
+        chart_source, source_revision=chart_revision,
+        graph_max_points=graph_max_points, db_min=db_min, db_max=db_max,
+        phase_gain_mask_db=phase_gain_mask_db,
+    )
+    st.session_state["studio_chart_source"] = chart_source
+    st.session_state["studio_chart_bundle"] = chart_bundle
+
     tap_alignment_host = st.container()
     if st.session_state.get('auto_crop_rows'):
         with st.expander(display_text("自動クロップの明細"), expanded=False):
@@ -4233,69 +4370,13 @@ if should_generate:
         normalization_info, way_settings=graph_settings, responses=graph_responses,
     )
 
-    # プロット
-    st.subheader(ui_message('ui.e0d37186efff20'))
-    fig1 = plot_impulse_response(
-        realized_plot_firs,
-        fs=fs,
-        overlay_sum=False,
-        theme=plot_theme,
-        sum_groups=graph_sum_groups,
-    )
-    _render_cached_studio_figure(
-        fig1, mode=graph_mode, interaction="x", clear_figure=False,
-        max_points=graph_max_points,
-    )
-    st.session_state['fig1'] = fig1
-
-    st.subheader(ui_message('ui.ceb9132f645569'))
-    fig2 = plot_step_response_centered(
-        realized_plot_firs,
-        fs=fs,
-        overlay_sum=False,
-        theme=plot_theme,
-        sum_groups=graph_sum_groups,
-    )
-    _render_cached_studio_figure(
-        fig2, mode=graph_mode, interaction="x", max_points=graph_max_points,
-    )
-    st.session_state['fig2'] = fig2
-
-    st.subheader(ui_message('ui.59017b5299f697'))
-    fig3 = plot_group_delay_from_responses(
-        graph_frequency_hz,
-        graph_responses,
-        fs=fs,
-        theme=plot_theme,
-        gain_mask_db=phase_gain_mask_db,
-        sum_groups=graph_sum_groups,
-    )
-    _render_cached_studio_figure(fig3, mode=graph_mode, max_points=graph_max_points)
-    st.session_state['fig3'] = fig3
-
-    st.subheader(ui_message('ui.bda762804bef52'))
-    fig4 = plot_sum_impulse_centered(
-        realized_plot_firs, fs=fs, theme=plot_theme,
-        sum_groups=graph_sum_groups,
-    )
-    _render_cached_studio_figure(
-        fig4, mode=graph_mode, interaction="x", max_points=graph_max_points,
-    )
-    st.session_state['fig4'] = fig4
-
-    st.subheader(ui_message('ui.7eeec0195e2788'))
-    fig5 = plot_sum_freq_from_responses(
-        graph_frequency_hz,
-        graph_responses,
-        fs=fs,
-        db_min=db_min,
-        db_max=db_max,
-        phase_gain_mask_db=phase_gain_mask_db,
-        theme=plot_theme,
-        sum_groups=graph_sum_groups,
-    )
-    _render_cached_studio_figure(fig5, mode=graph_mode, max_points=graph_max_points)
-    st.session_state['fig5'] = fig5
+    # Reserve every graph position before fragment rendering. The metrics host
+    # remains between the fifth chart and crossover chart on every rerun.
+    chart_hosts, dip_metrics_host = _create_studio_graph_layout()
+    with graph_mode_host:
+        _render_studio_graph_fragment(
+            chart_bundle, plot_theme=plot_theme, chart_hosts=chart_hosts,
+        )
 
     # クロス近傍は、IIRを含む設計基準と全Channel変換適用後を比較する。
     before_metrics = {}
@@ -4341,36 +4422,18 @@ if should_generate:
             after_freqs, after_mag, crossover
         )
 
-    st.subheader(ui_message('ui.39fdd8ed24e9df'))
-    rows = _render_dip_metrics_table(before_metrics, after_metrics)
-    for row in rows:
-        row['評価'] = _dip_quality_label(row['補正後 変動量 [dB]'], row['改善量 [dB]'])
-    st.caption(ui_message('ui.11b674eba5e837'))
-    st.caption(display_text("補正前後ともFIR出力合わせの共通ゲインを除いた基準で比較します。手動Gain・極性・Delay・位相整合は比較に含みます。出力合わせ後の絶対レベルは出力ゲイン調整結果で確認してください。"))
-    st.caption(
-        ui_message('ui.a7efcdb00ce12e')
-    )
-    _render_dip_metrics_html(rows)
+    with dip_metrics_host:
+        st.subheader(ui_message('ui.39fdd8ed24e9df'))
+        rows = _render_dip_metrics_table(before_metrics, after_metrics)
+        for row in rows:
+            row['評価'] = _dip_quality_label(row['補正後 変動量 [dB]'], row['改善量 [dB]'])
+        st.caption(ui_message('ui.11b674eba5e837'))
+        st.caption(display_text("補正前後ともFIR出力合わせの共通ゲインを除いた基準で比較します。手動Gain・極性・Delay・位相整合は比較に含みます。出力合わせ後の絶対レベルは出力ゲイン調整結果で確認してください。"))
+        st.caption(
+            ui_message('ui.a7efcdb00ce12e')
+        )
+        _render_dip_metrics_html(rows)
     st.session_state['dip_rows'] = rows
-
-    st.subheader(ui_message('ui.bbb9e421006621'))
-    fig6 = plot_crossover_design_response(
-        graph_frequency_hz, graph_responses,
-        next(iter(graph_way_sums.values())),
-        db_min=db_min, theme=plot_theme,
-        db_max=db_max,
-        phase_gain_mask_db=phase_gain_mask_db,
-        phaseeq_responses=phaseeq_graph_responses,
-        speaker_responses=speaker_graph_responses,
-        way_sums=graph_way_sums,
-        baffle_response=baffle_graph_response,
-        baffle_label=(
-            f"Baffle compensation · {baffle_compensation_plan.display_mode}"
-            if baffle_graph_response is not None else None
-        ),
-    )
-    _render_cached_studio_figure(fig6, mode=graph_mode, max_points=graph_max_points)
-    st.session_state['fig6'] = fig6
     st.session_state["studio_graph_display"] = displayed_graph_group
 
     _render_filter_downloads(
@@ -4400,7 +4463,7 @@ if should_generate:
     append_log(f"FIRフィルター生成・グラフ描画・ダウンロード枠表示完了（{elapsed:.1f}秒）")
 
 
-if (not should_generate) and st.session_state.get('fig1') is not None:
+if (not should_generate) and st.session_state.get('studio_chart_bundle') is not None:
     cached_settings = st.session_state.get('result_settings', current_settings)
     cached_mode_key = st.session_state.get('result_mode_key', mode_key)
     cached_fs = int(st.session_state.get('result_fs', fs))
@@ -4431,38 +4494,57 @@ if (not should_generate) and st.session_state.get('fig1') is not None:
             == "Stereo"
         ),
     )
+    expected_chart_revision = _studio_chart_source_revision(
+        st.session_state.get("last_conf_signature", ""),
+        current_graph_display, graph_max_points,
+        db_min, db_max, phase_gain_mask_db,
+    )
     if (
         not signature_changed
         and (
             st.session_state.get("studio_graph_display") != current_graph_display
-            or any(not hasattr(st.session_state.get(key), '_studio_source_revision')
-                   for key in ('fig1', 'fig2', 'fig3', 'fig4', 'fig5', 'fig6'))
+            or st.session_state["studio_chart_bundle"].source_revision
+            != expected_chart_revision
         )
         and isinstance(cached_final_firs, dict)
         and cached_final_firs
     ):
-        bundle = _studio_display_graph_bundle(
-            cached_final_firs,
-            cached_graph_rows,
-            current_graph_display,
-            st.session_state.get("composite_studio_band_fir_states", {}),
-            mode_key=cached_mode_key,
-            crossover_frequencies_hz=tuple(
-                cached_settings[cached_mode_key]["cross_freqs"]
-            ),
-            sample_rate_hz=cached_fs,
-            response_points=response_points_for_frequency_resolution(cached_fs, 2.0),
-            plot_theme=plot_theme,
-            db_min=db_min,
-            db_max=db_max,
-            phase_gain_mask_db=phase_gain_mask_db,
-        )
-        for key in ("fig1", "fig2", "fig3", "fig4", "fig5", "fig6"):
-            st.session_state[key] = bundle[key]
-        st.session_state["studio_graph_settings"] = bundle["settings"]
-        st.session_state["studio_graph_primary_settings"] = bundle["primary_settings"]
-        st.session_state["studio_graph_responses"] = bundle["responses"]
-        st.session_state["studio_graph_display"] = bundle["display"]
+        if st.session_state.get("studio_graph_display") != current_graph_display:
+            rebuilt = _studio_display_graph_bundle(
+                cached_final_firs,
+                cached_graph_rows,
+                current_graph_display,
+                st.session_state.get("composite_studio_band_fir_states", {}),
+                mode_key=cached_mode_key,
+                crossover_frequencies_hz=tuple(
+                    cached_settings[cached_mode_key]["cross_freqs"]
+                ),
+                sample_rate_hz=cached_fs,
+                response_points=response_points_for_frequency_resolution(cached_fs, 2.0),
+                graph_max_points=graph_max_points,
+                dsp_revision=st.session_state.get("last_conf_signature", ""),
+                db_min=db_min,
+                db_max=db_max,
+                phase_gain_mask_db=phase_gain_mask_db,
+            )
+            st.session_state["studio_graph_settings"] = rebuilt["settings"]
+            st.session_state["studio_graph_primary_settings"] = rebuilt["primary_settings"]
+            st.session_state["studio_graph_responses"] = rebuilt["responses"]
+            st.session_state["studio_graph_display"] = rebuilt["display"]
+            st.session_state["studio_chart_source"] = rebuilt["chart_source"]
+            st.session_state["studio_chart_bundle"] = rebuilt["chart_bundle"]
+        else:
+            # Axis/mask/point changes reuse the full renderer-neutral source;
+            # FIR and realized response calculation are not repeated.
+            projected = _project_studio_charts(
+                st.session_state["studio_chart_source"],
+                source_revision=expected_chart_revision,
+                graph_max_points=graph_max_points,
+                db_min=db_min, db_max=db_max,
+                phase_gain_mask_db=phase_gain_mask_db,
+            )
+            st.session_state["studio_chart_bundle"] = projected
+    chart_bundle = st.session_state["studio_chart_bundle"]
     tap_alignment_host = st.container()
     if st.session_state.get('auto_crop_rows'):
         with st.expander(display_text("自動クロップの明細"), expanded=False):
@@ -4477,39 +4559,18 @@ if (not should_generate) and st.session_state.get('fig1') is not None:
         way_settings=st.session_state.get("studio_graph_settings", {}),
         responses=st.session_state.get("studio_graph_responses", {}),
     )
-    st.subheader(ui_message('ui.e0d37186efff20'))
-    _render_cached_studio_figure(
-        st.session_state['fig1'], mode=graph_mode, interaction="x",
-        clear_figure=False, max_points=graph_max_points,
-    )
-    st.subheader(ui_message('ui.ceb9132f645569'))
-    _render_cached_studio_figure(
-        st.session_state['fig2'], mode=graph_mode, interaction="x",
-        max_points=graph_max_points,
-    )
-    st.subheader(ui_message('ui.59017b5299f697'))
-    _render_cached_studio_figure(
-        st.session_state['fig3'], mode=graph_mode, max_points=graph_max_points,
-    )
-    st.subheader(ui_message('ui.bda762804bef52'))
-    _render_cached_studio_figure(
-        st.session_state['fig4'], mode=graph_mode, interaction="x",
-        max_points=graph_max_points,
-    )
-    st.subheader(ui_message('ui.7eeec0195e2788'))
-    _render_cached_studio_figure(
-        st.session_state['fig5'], mode=graph_mode, max_points=graph_max_points,
-    )
+    chart_hosts, dip_metrics_host = _create_studio_graph_layout()
+    with graph_mode_host:
+        _render_studio_graph_fragment(
+            chart_bundle, plot_theme=plot_theme, chart_hosts=chart_hosts,
+        )
     if st.session_state.get('dip_rows'):
-        st.subheader(ui_message('ui.39fdd8ed24e9df'))
-        st.caption(ui_message('ui.11b674eba5e837'))
-        st.caption(display_text("補正前後ともFIR出力合わせの共通ゲインを除いた基準で比較します。手動Gain・極性・Delay・位相整合は比較に含みます。出力合わせ後の絶対レベルは出力ゲイン調整結果で確認してください。"))
-        st.caption(ui_message('ui.475d24e3dcb7b1'))
-        _render_dip_metrics_html(st.session_state['dip_rows'])
-    st.subheader(ui_message('ui.bbb9e421006621'))
-    _render_cached_studio_figure(
-        st.session_state['fig6'], mode=graph_mode, max_points=graph_max_points,
-    )
+        with dip_metrics_host:
+            st.subheader(ui_message('ui.39fdd8ed24e9df'))
+            st.caption(ui_message('ui.11b674eba5e837'))
+            st.caption(display_text("補正前後ともFIR出力合わせの共通ゲインを除いた基準で比較します。手動Gain・極性・Delay・位相整合は比較に含みます。出力合わせ後の絶対レベルは出力ゲイン調整結果で確認してください。"))
+            st.caption(ui_message('ui.475d24e3dcb7b1'))
+            _render_dip_metrics_html(st.session_state['dip_rows'])
     if st.session_state.get('final_firs'):
         _render_filter_downloads(
             st.session_state['final_firs'],

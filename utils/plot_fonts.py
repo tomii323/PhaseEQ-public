@@ -89,7 +89,23 @@ def _font_name(path):
         return ""
 
 
-def _japanese_font_candidates(system):
+def _known_japanese_font_candidates(system):
+    """Return existing platform paths without initializing font discovery."""
+    candidates = []
+    seen = set()
+    for path in (
+        _KNOWN_JAPANESE_FONT_PATHS.get(system)
+        or _KNOWN_JAPANESE_FONT_PATHS.get("Linux", ())
+    ):
+        normalized = os.path.normcase(os.path.abspath(path))
+        if normalized not in seen and os.path.isfile(path):
+            seen.add(normalized)
+            candidates.append(path)
+    return candidates
+
+
+def _discovered_japanese_font_candidates(system, *, excluded=()):
+    """Search Matplotlib/system registries only after known paths fail."""
     preferred_names = _PREFERRED_JAPANESE_FONT_NAMES.get(
         system, _PREFERRED_JAPANESE_FONT_NAMES["Linux"]
     )
@@ -97,7 +113,9 @@ def _japanese_font_candidates(system):
         name.casefold(): index for index, name in enumerate(preferred_names)
     }
     paths = []
-    seen = set()
+    seen = {
+        os.path.normcase(os.path.abspath(path)) for path in excluded
+    }
 
     def add(path):
         normalized = os.path.normcase(os.path.abspath(path))
@@ -105,11 +123,6 @@ def _japanese_font_candidates(system):
             seen.add(normalized)
             paths.append(path)
 
-    for path in _KNOWN_JAPANESE_FONT_PATHS.get(
-        system, _KNOWN_JAPANESE_FONT_PATHS["Linux"]
-    ):
-        add(path)
-    known_count = len(paths)
     for entry in fm.fontManager.ttflist:
         name = entry.name.casefold()
         filename = os.path.basename(entry.fname).casefold()
@@ -135,15 +148,23 @@ def _japanese_font_candidates(system):
             path.casefold(),
         )
 
-    known_paths = paths[:known_count]
-    discovered_paths = paths[known_count:]
-    return known_paths + sorted(discovered_paths, key=sort_key)
+    return sorted(paths, key=sort_key)
+
+
+def _japanese_font_candidates(system):
+    """Compatibility iterator: known paths first, then discovered paths."""
+    known = _known_japanese_font_candidates(system)
+    return known + _discovered_japanese_font_candidates(system, excluded=known)
 
 
 @lru_cache(maxsize=1)
 def get_japanese_font():
     system = platform.system()
-    for path in _japanese_font_candidates(system):
+    known = _known_japanese_font_candidates(system)
+    for path in known:
+        if _font_supports_japanese(path):
+            return fm.FontProperties(fname=path)
+    for path in _discovered_japanese_font_candidates(system, excluded=known):
         if _font_supports_japanese(path):
             return fm.FontProperties(fname=path)
     return None

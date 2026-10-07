@@ -3,7 +3,15 @@ import io
 import os
 
 import numpy as np
-import soundfile as sf
+
+
+def _read_wav(source):
+    """Load the optional audio backend only for a WAV input."""
+    import soundfile as sf
+    try:
+        return sf.read(source, dtype="float32")
+    except sf.SoundFileError as exc:
+        raise ValueError(f"WAVを読み込めません: {exc}") from exc
 
 
 def _read_uploaded_bytes(uploaded_file):
@@ -73,7 +81,7 @@ def load_fir_file(uploaded_file):
         source_name = os.path.basename(uploaded_file)
         extension = os.path.splitext(uploaded_file)[1].lower()
         if extension == ".wav":
-            data, _ = sf.read(uploaded_file, dtype="float32")
+            data, _ = _read_wav(uploaded_file)
             return _validate_fir_coefficients(data, source_name)
         if extension == ".bin":
             return _validate_fir_coefficients(
@@ -91,7 +99,7 @@ def load_fir_file(uploaded_file):
         source_name = getattr(uploaded_file, "name", "uploaded_fir")
         extension = os.path.splitext(source_name)[1].lower()
         if extension == ".wav":
-            data, _ = sf.read(uploaded_file, dtype="float32")
+            data, _ = _read_wav(uploaded_file)
             return _validate_fir_coefficients(data, source_name)
 
         raw = _read_uploaded_bytes(uploaded_file)

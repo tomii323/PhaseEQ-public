@@ -22,6 +22,7 @@
     "processing/filter.py",
     "processing/fractional_centering.py",
     "processing/slope.py",
+    "utils/io.py",
     "utils/ui_index.py"
   ]
 }

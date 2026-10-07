@@ -20,48 +20,101 @@ class LR2TapPlan:
     high_hz: float
 
 
-def _response_error(coefficients, sample_rate, cutoff, side, *, refine=False, order=2, target_floor_db=TARGET_FLOOR_DB):
+def _zero_phase_evaluator(coefficients, sample_rate):
+    """Return a scalar-frequency evaluator for a centered FIR response.
+
+    Natural-length crossover FIRs are odd and symmetric.  Evaluating their
+    real zero-phase cosine series avoids scipy.freqz's general polynomial
+    path for every peak-refinement sample.  Keep the general path as a
+    fallback so this verifier remains correct for other coefficient shapes.
+    """
+    coefficients = np.asarray(coefficients)
+    delay = (len(coefficients) - 1) / 2
+    if len(coefficients) % 2 == 1 and np.array_equal(coefficients, coefficients[::-1]):
+        center = len(coefficients) // 2
+        offsets = np.arange(1, center + 1)
+        weights = 2 * coefficients[center - offsets]
+
+        def evaluate(frequency_hz):
+            angle = 2 * np.pi * float(frequency_hz) / sample_rate
+            return float(coefficients[center] + np.dot(weights, np.cos(angle * offsets)))
+
+        return evaluate
+
+    def evaluate(frequency_hz):
+        _, response = freqz(coefficients, worN=np.asarray([frequency_hz]), fs=sample_rate)
+        return response[0] * np.exp(2j * np.pi * frequency_hz * delay / sample_rate)
+
+    return evaluate
+
+
+def _response_errors(coefficients, sample_rate, specifications, *, refine=False):
+    """Evaluate multiple targets against one realized FIR spectrum."""
     # Resolve narrow truncation ripples independently of the design FFT mesh.
     size = 1 << max(17, (len(coefficients) * 32 - 1).bit_length())
     frequency = np.fft.rfftfreq(size, 1.0 / sample_rate)
     delay = (len(coefficients) - 1) / 2
     response = np.fft.rfft(coefficients, size) * np.exp(2j*np.pi*frequency*delay/sample_rate)
-    target = 1.0 / (1.0 + (frequency / cutoff)**order)
-    floor = 10.0**(target_floor_db / 20)
-    lo, hi = 5.0, sample_rate / 2
-    if side == "hp":
-        response, target = 1-response, 1-target
-        lo = max(lo, cutoff*(floor/(1-floor))**(1/order))
-    else:
-        hi = min(hi, cutoff*(1/floor-1)**(1/order))
-    if lo >= hi:
-        return 0.0
-    mask = (frequency >= lo) & (frequency <= hi)
-    grid = frequency[mask]
-    errors = np.abs(20*np.log10(np.maximum(np.abs(response[mask]), 1e-20)/target[mask]))
-
-    def error_at(value):
-        _, h = freqz(coefficients, worN=np.asarray([value]), fs=sample_rate)
-        actual = h[0]*np.exp(2j*np.pi*value*delay/sample_rate)
-        aim = 1/(1+(value/cutoff)**order)
+    zero_phase_at = _zero_phase_evaluator(coefficients, sample_rate)
+    results = []
+    for cutoff, side, order, target_floor_db in specifications:
+        target = 1.0 / (1.0 + (frequency / cutoff)**order)
+        floor = 10.0**(target_floor_db / 20)
+        lo, hi = 5.0, sample_rate / 2
         if side == "hp":
-            actual, aim = 1-actual, 1-aim
-        return float(abs(20*np.log10(max(abs(actual), 1e-20)/aim)))
+            realized, target = 1-response, 1-target
+            lo = max(lo, cutoff*(floor/(1-floor))**(1/order))
+        else:
+            realized = response
+            hi = min(hi, cutoff*(1/floor-1)**(1/order))
+        if lo >= hi:
+            results.append(0.0)
+            continue
+        mask = (frequency >= lo) & (frequency <= hi)
+        grid = frequency[mask]
+        errors = np.abs(20*np.log10(np.maximum(np.abs(realized[mask]), 1e-20)/target[mask]))
 
-    maximum = max(float(np.max(errors, initial=0)), error_at(lo), error_at(hi))
-    if refine and len(errors) > 2:
-        peaks = np.flatnonzero((errors[1:-1] >= errors[:-2]) & (errors[1:-1] >= errors[2:]))+1
-        for index in sorted(peaks, key=lambda i: errors[i], reverse=True)[:12]:
-            result = minimize_scalar(lambda f: -error_at(f),
-                                     bounds=(grid[index-1], grid[index+1]), method="bounded")
-            maximum = max(maximum, -float(result.fun))
-    return maximum
+        def error_at(value):
+            actual = zero_phase_at(value)
+            aim = 1/(1+(value/cutoff)**order)
+            if side == "hp":
+                actual, aim = 1-actual, 1-aim
+            return float(abs(20*np.log10(max(abs(actual), 1e-20)/aim)))
+
+        maximum = max(float(np.max(errors, initial=0)), error_at(lo), error_at(hi))
+        if refine and len(errors) > 2:
+            peaks = np.flatnonzero((errors[1:-1] >= errors[:-2]) & (errors[1:-1] >= errors[2:]))+1
+            for index in sorted(peaks, key=lambda i: errors[i], reverse=True)[:12]:
+                result = minimize_scalar(lambda f: -error_at(f),
+                                         bounds=(grid[index-1], grid[index+1]), method="bounded")
+                maximum = max(maximum, -float(result.fun))
+        results.append(maximum)
+    return tuple(results)
+
+
+def _response_error(coefficients, sample_rate, cutoff, side, *, refine=False, order=2, target_floor_db=TARGET_FLOOR_DB):
+    return _response_errors(
+        coefficients,
+        sample_rate,
+        ((cutoff, side, order, target_floor_db),),
+        refine=refine,
+    )[0]
 
 
 def lr2_boundary_error(sample_rate, lowpass_hz, highpass_hz, taps, *, refine=False):
     from .filters import _linear_phase_lr2_fir
     low = _linear_phase_lr2_fir(sample_rate, "lp", lowpass_hz, taps)
-    high_base = low if lowpass_hz == highpass_hz else _linear_phase_lr2_fir(sample_rate, "lp", highpass_hz, taps)
+    if lowpass_hz == highpass_hz:
+        return max(_response_errors(
+            low,
+            sample_rate,
+            (
+                (lowpass_hz, "lp", 2, TARGET_FLOOR_DB),
+                (highpass_hz, "hp", 2, TARGET_FLOOR_DB),
+            ),
+            refine=refine,
+        ))
+    high_base = _linear_phase_lr2_fir(sample_rate, "lp", highpass_hz, taps)
     return max(_response_error(low, sample_rate, lowpass_hz, "lp", refine=refine),
                _response_error(high_base, sample_rate, highpass_hz, "hp", refine=refine))
 

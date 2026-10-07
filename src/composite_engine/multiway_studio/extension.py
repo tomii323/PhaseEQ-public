@@ -20,11 +20,9 @@ from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
-from scipy.io import wavfile
 import streamlit as st
 from utils.list_menu_ui import selectbox as shared_selectbox, radio as shared_radio, segmented_control as shared_segmented_control
 
-from fir_recipe_engine import verified_fir_recipe_result
 from crossover_engine.recipe import from_studio as band_split_from_studio
 from composite_engine.multiway_studio.processing import alignment_target, alignment_structure
 
@@ -43,17 +41,8 @@ from composite_engine.adapter import (
     write_phaseeq_assignment,
     analyze_phase_alignment,
 )
-from composite_engine.export import build_multichannel_export_zip
 from utils.ui_work_cache import deferred_call, first_result
-from composite_engine.export import DSPChannelExportInput, build_dsp_resume_zip, load_dsp_resume_zip
 from composite_engine.graph import phase_gain_masked_values
-from composite_engine.dsp_export import (
-    adapter_by_id,
-    available_adapters,
-    build_dsp_export_zip,
-    package_filename,
-    canonical_from_export_inputs,
-)
 from composite_engine.core import MultichannelCompositeResult, result_from_responses
 from composite_engine.display_projection import (
     DISPLAY_LEFT,
@@ -85,6 +74,24 @@ from target_engine import (
 
 
 PHASEEQ_WORKSPACE_WINDOW_NAME = "phaseeq_assignment_workspace"
+
+
+def _build_multichannel_export_zip(*args, **kwargs):
+    """Resolve export-only dependencies when a download is requested."""
+    from composite_engine.export import build_multichannel_export_zip
+    return build_multichannel_export_zip(*args, **kwargs)
+
+
+def _build_dsp_resume_zip(*args, **kwargs):
+    """Resolve resume-package dependencies when a download is requested."""
+    from composite_engine.export import build_dsp_resume_zip
+    return build_dsp_resume_zip(*args, **kwargs)
+
+
+def _build_dsp_export_zip(*args, **kwargs):
+    """Resolve adapter packaging only after Streamlit requests the payload."""
+    from composite_engine.dsp_export import build_dsp_export_zip
+    return build_dsp_export_zip(*args, **kwargs)
 
 
 def _render_phaseeq_workspace_link(label: str, url: str) -> None:
@@ -184,7 +191,6 @@ def _phaseeq_connection_view(sessions: object) -> _PhaseEQConnectionView:
     )
 from composite_engine.multiway_studio.utils.display_rounding import format_for_display
 from composite_engine.validation import CompositeValidationError
-from composite_engine.wavelet.view import render_composite_wavelet
 from composite_engine.phase_alignment import AllPassSection, allpass_response
 from composite_engine.phase_alignment import (
     AlignmentBranch,
@@ -377,6 +383,7 @@ def render_shared_iir_crossover_ui(
     initial_methods: tuple[str, ...] = (),
     initial_lr2_auto_polarity: bool = True,
     on_method_change: Callable[[], None] | None = None,
+    on_acoustic_target_change: Callable[[], None] | None = None,
     render_methods: bool = True,
 ) -> object:
     """Render Studio-owned IIR controls beside the shared Kaiser boundaries."""
@@ -413,6 +420,7 @@ def render_shared_iir_crossover_ui(
                         if index < len(initial_methods) else "Kaiser FIR"
                     ),
                     on_method_change=on_method_change,
+                    on_acoustic_target_change=on_acoustic_target_change,
                 )
                 overlap = _boundary_overlap_from_state(str(mode_key), index)
                 lp = float(common_fc) * 2.0 ** (float(overlap) / 2.0)
@@ -433,6 +441,7 @@ def render_crossover_method_control(
     *,
     initial_method: str = "Kaiser FIR",
     on_method_change: Callable[[], None] | None = None,
+    on_acoustic_target_change: Callable[[], None] | None = None,
     fir_enabled: bool = True,
 ) -> str:
     """Render the primary method selector inside one boundary design block."""
@@ -446,7 +455,8 @@ def render_crossover_method_control(
         st.session_state[method_key] = normalized_initial
 
     def _on_change() -> None:
-        # Set the new method's default before persisting its settings and taps.
+        # A method transition may choose a target default, but it must not
+        # impersonate an explicit target-toggle action or rewrite tap settings.
         st.session_state[target_key] = st.session_state[method_key] in target_methods
         _clear_applied_phase_alignment()
         if on_method_change is not None:
@@ -469,7 +479,7 @@ def render_crossover_method_control(
     if not target_allowed:
         st.session_state[target_key] = False
     st.checkbox(ui_message('ui.6af081827d6a12', p0=f'{label}'), key=target_key, disabled=not target_allowed,
-                on_change=on_method_change,
+                on_change=on_acoustic_target_change or on_method_change,
                 help=(
                     ui_message('ui.a45fc68c20a621')
                 ))
@@ -1226,6 +1236,7 @@ def _render_system_library_save(
 def _fir_coefficients(filename: str, data: bytes, sample_rate_hz: int) -> np.ndarray:
     suffix = Path(str(filename)).suffix.casefold()
     if suffix == ".wav":
+        from scipy.io import wavfile
         source_rate, values = wavfile.read(io.BytesIO(data))
         if int(source_rate) != int(sample_rate_hz):
             raise ValueError(f"FIR sample rate mismatch: {source_rate} != {sample_rate_hz}")
@@ -1242,6 +1253,7 @@ def _fir_coefficients(filename: str, data: bytes, sample_rate_hz: int) -> np.nda
 
 
 def _fir_stage_from_upload(label: str, upload: object, sample_rate_hz: int) -> ResponseStage:
+    from scipy.io import wavfile
     values = _fir_coefficients(str(upload.name), upload.getvalue(), sample_rate_hz)
     buffer = io.BytesIO()
     wavfile.write(buffer, int(sample_rate_hz), values.astype(np.float64))
@@ -1664,6 +1676,7 @@ def render_composite_sidebar(
             resume_digest = str(hash(resume_upload.getvalue()))
             if st.session_state.get("_composite_resume_digest") != resume_digest:
                 try:
+                    from composite_engine.export import load_dsp_resume_zip
                     _resume_manifest, resume_workspace = load_dsp_resume_zip(resume_upload.getvalue())
                 except (ValueError, OSError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
                     feedback = resume_feedback if resume_feedback is not None else st
@@ -2191,6 +2204,7 @@ def render_composite_sidebar(
                             recipe_error = ""
                             if isinstance(recipe_payload, dict):
                                 try:
+                                    from fir_recipe_engine import verified_fir_recipe_result
                                     recipe_generated = verified_fir_recipe_result(
                                         recipe_payload,
                                         str(result_payload.get("fir_coefficient_hash", "")),
@@ -2207,6 +2221,7 @@ def render_composite_sidebar(
                             fir_filename = source_name
                             fir_data = exchange_package.assets[source_name]
                             if recipe_generated is not None:
+                                from scipy.io import wavfile
                                 recipe_buffer = io.BytesIO()
                                 wavfile.write(
                                     recipe_buffer, int(sample_rate_hz),
@@ -2686,6 +2701,7 @@ def _build_studio_pipelines(
         fir_enabled = bool(fir_state.get("enabled", False))
         if not bool(row.get("enabled", True)):
             continue
+        from scipy.io import wavfile
         buffer = io.BytesIO()
         wavfile.write(buffer, int(sample_rate_hz), coefficients)
         stages: list[ResponseStage] = []
@@ -4114,6 +4130,7 @@ def render_composite_results(
             ui_message('ui.63d1649e9c1ac0')
         )
     if graph_kind == "Wavelet":
+        from composite_engine.wavelet.view import render_composite_wavelet
         wavelet_columns = st.columns(len(display_projection.wavelet_sources))
         for column, source in zip(wavelet_columns, display_projection.wavelet_sources):
             with column:
@@ -4279,10 +4296,11 @@ def render_composite_results(
             ui_message('ui.5030f55faa4563')
         )
         st.download_button(
-            ui_message('ui.be36fc8da8ee9e'), deferred_call(build_multichannel_export_zip, multichannel),
+            ui_message('ui.be36fc8da8ee9e'), deferred_call(_build_multichannel_export_zip, multichannel),
             "composite_multichannel.zip", "application/zip", width="stretch",
             icon=":material/download:", key="composite_studio_download", on_click="ignore",
         )
+    from composite_engine.export import DSPChannelExportInput
     dsp_channels: list[DSPChannelExportInput] = []
     restore_output_fir_settings(st.session_state.get("settings", {}), overwrite=False)
     final_fir_panel = st.container(border=True)
@@ -4527,6 +4545,12 @@ def render_composite_results(
             st.caption(
                 ui_message('ui.0bac1b243b81ce')
             )
+            from composite_engine.dsp_export import (
+                adapter_by_id,
+                available_adapters,
+                canonical_from_export_inputs,
+                package_filename,
+            )
             adapters = available_adapters()
             adapter_labels = {adapter.adapter_id: adapter.display_name for adapter in adapters}
             selected_adapter_id = shared_selectbox(
@@ -4575,7 +4599,7 @@ def render_composite_results(
             with resume_download_host:
                 st.download_button(
                     ui_message('ui.17cb888870169b'),
-                    deferred_call(build_dsp_resume_zip, tuple(dsp_channels),
+                    deferred_call(_build_dsp_resume_zip, tuple(dsp_channels),
                                   workspace=workspace, composite=multichannel,
                                   final_fir_artifacts={c.channel_id: c.final_fir_artifact
                                                        for c in canonical_package.channels
@@ -4632,7 +4656,7 @@ def render_composite_results(
                 st.success(ui_message('ui.76f48a8304b221'))
             st.download_button(
                 ui_message('ui.0f0028b1a0ab35'),
-                data=deferred_call(first_result, build_dsp_export_zip,
+                data=deferred_call(first_result, _build_dsp_export_zip,
                                    canonical_package, selected_adapter, selected_profile),
                 file_name=package_filename(canonical_package, selected_adapter),
                 mime="application/zip", width="stretch",
