@@ -13,6 +13,10 @@ def source_signature(channel) -> str:
     ], allow_nan=False).encode())
     if channel.pre_alignment_tap_count is not None:
         digest.update(f'pre-alignment:{channel.pre_alignment_tap_count}'.encode())
+    if getattr(channel, 'final_fir_override', None) is not None:
+        override = np.asarray(channel.final_fir_override, dtype='<f8')
+        digest.update(b'final-override:')
+        digest.update(override.tobytes())
     for _, coefficients in channel.fir_stages:
         if np.iscomplexobj(coefficients):
             raise ValueError('FIR source must be real')

@@ -28,5 +28,16 @@ def output_timing_rows(
             "FIR長差Delay [samples]": round(channel.fir_alignment_delay_samples, 6),
             "手動Delay [samples]": round(channel.manual_delay_samples, 6),
             "整合Delay [samples]": round(channel.phase_alignment_delay_samples, 6),
+            "Adaptive削減 [taps]": (
+                int(
+                    channel.adaptive_crop_metadata.get("original_taps", taps)
+                    - channel.adaptive_crop_metadata.get("final_taps", taps)
+                )
+                if isinstance(channel.adaptive_crop_metadata, dict) and taps is not None else "—"
+            ),
+            "Adaptive時間補償": (
+                channel.adaptive_crop_metadata.get("timing_mode", "—")
+                if isinstance(channel.adaptive_crop_metadata, dict) else "—"
+            ),
         })
     return summary, details

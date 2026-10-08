@@ -32,6 +32,7 @@ class CanonicalDSPChannel:
     phase_alignment_delay_samples: float = 0.0
     timing_provenance: dict[str, object] | None = None
     final_fir_artifact: FinalFIRArtifact | None = field(default=None, repr=False, compare=False)
+    adaptive_crop_metadata: dict[str, object] | None = None
 
     @property
     def total_delay_samples(self) -> float:
@@ -74,6 +75,8 @@ class DSPProfile:
     max_iir_sections: int = 0
     supports_allpass: bool = True
     supports_fractional_delay: bool = True
+    supports_delay: bool = True
+    fir_time_reference: Literal["tap_center", "sample_zero"] = "tap_center"
     options: dict[str, object] = field(default_factory=dict)
 
 

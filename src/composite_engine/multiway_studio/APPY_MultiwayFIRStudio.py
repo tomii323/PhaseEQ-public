@@ -23,7 +23,6 @@ from composite_engine.multiway_studio.utils.kaiser import (
     kaiser_attenuation_usage_hint,
     kaiser_beta_to_attenuation_db,
 )
-from composite_engine.multiway_studio.utils.auto_crop import plan_auto_crop_candidates
 from composite_engine.multiway_studio.utils.display_rounding import round_for_display
 from composite_engine.multiway_studio.processing.filter import (
     generate_2way_filters, generate_3way_filters, generate_4way_filters,
@@ -57,6 +56,18 @@ from composite_engine.multiway_studio.processing.fir_state import (
     initialize_manual_taps_for_enable,
     plan_acoustic_target_taps,
     resolve_band_fir_states,
+)
+from fir_design_common.kaiser import (
+    KAISER_BETA_MAX,
+    KAISER_BETA_MIN,
+)
+from composite_engine.multiway_studio.processing.crossover_controls import (
+    acoustic_target_allowed,
+    boundary_control_snapshot,
+    seed_boundary_controls,
+)
+from composite_engine.multiway_studio.processing.render_policy import (
+    should_generate_result,
 )
 from composite_engine.multiway_studio.utils.io import load_fir_file
 import composite_engine.multiway_studio.components.visualization as visualization
@@ -352,8 +363,9 @@ def _assignment_band_linear_fir_filters(mode_key, conf):
     cycles = float(conf.get("cycles", DEFAULT_FIR_CYCLES))
     beta = float(conf.get("beta", DEFAULT_FIR_BETA))
     methods = tuple(conf.get("crossover_methods", ["Kaiser FIR"] * len(cross)))
+    acoustic_targets = tuple(conf.get("boundary_acoustic_targets", ()))
 
-    def item(mode, fc, item_cycles, item_beta, method):
+    def item(mode, fc, item_cycles, item_beta, method, boundary_index):
         return {
             "enabled": True,
             "mode": mode,
@@ -361,6 +373,10 @@ def _assignment_band_linear_fir_filters(mode_key, conf):
             "fc": float(fc),
             "cycles": float(item_cycles),
             "beta": float(item_beta),
+            "acoustic_target": bool(
+                acoustic_targets[boundary_index]
+                if boundary_index < len(acoustic_targets) else False
+            ),
         }
 
     if mode_key == "Fullrange":
@@ -368,8 +384,8 @@ def _assignment_band_linear_fir_filters(mode_key, conf):
     if mode_key == "Fullrange+SUB":
         overlaps = conf.get("boundary_overlaps_oct", [0.0])
         lp_edge, hp_edge = kaiser_overlap_edges_hz(cross[0], overlaps[0])
-        sub = item("lp", lp_edge, cycles, beta, methods[0])
-        fullrange = item("hp", hp_edge, cycles, beta, methods[0])
+        sub = item("lp", lp_edge, cycles, beta, methods[0], 0)
+        fullrange = item("hp", hp_edge, cycles, beta, methods[0], 0)
         is_fir = methods[0] in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"}
         return {
             "SUB": (sub,) if is_fir else (),
@@ -378,8 +394,8 @@ def _assignment_band_linear_fir_filters(mode_key, conf):
 
     if mode_key == "2Way":
         lp_edge, hp_edge = kaiser_overlap_edges_hz(cross[0], conf.get("kaiser_overlap_oct", 0.0))
-        low = item("lp", lp_edge, cycles, beta, methods[0])
-        high = item("hp", hp_edge, cycles, beta, methods[0])
+        low = item("lp", lp_edge, cycles, beta, methods[0], 0)
+        high = item("hp", hp_edge, cycles, beta, methods[0], 0)
         is_fir = methods[0] in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"}
         return {"Low": (low,) if is_fir else (), "High": (high,) if is_fir else ()}
     if mode_key == "3Way":
@@ -393,10 +409,10 @@ def _assignment_band_linear_fir_filters(mode_key, conf):
         )
         low_lp, low_hp = kaiser_overlap_edges_hz(low_boundary[0], conf.get("kaiser_overlap_low_mid_oct", 0.0))
         high_lp, high_hp = kaiser_overlap_edges_hz(high_boundary[0], conf.get("kaiser_overlap_mid_high_oct", 0.0))
-        low = item("lp", low_lp, *low_boundary[1:], methods[0])
-        mid_hp = item("hp", low_hp, *low_boundary[1:], methods[0])
-        mid_lp = item("lp", high_lp, *high_boundary[1:], methods[1])
-        high = item("hp", high_hp, *high_boundary[1:], methods[1])
+        low = item("lp", low_lp, *low_boundary[1:], methods[0], 0)
+        mid_hp = item("hp", low_hp, *low_boundary[1:], methods[0], 0)
+        mid_lp = item("lp", high_lp, *high_boundary[1:], methods[1], 1)
+        high = item("hp", high_hp, *high_boundary[1:], methods[1], 1)
         fir_methods = {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"}
         return {
             "Low": (low,) if methods[0] in fir_methods else (),
@@ -416,10 +432,10 @@ def _assignment_band_linear_fir_filters(mode_key, conf):
         )
         edges = [kaiser_overlap_edges_hz(boundary[0], overlap) for boundary, overlap in zip(boundaries, overlap_values, strict=True)]
         return {
-            "SUB": (item("lp", edges[0][0], *boundaries[0][1:], methods[0]),) if methods[0] in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"} else (),
-            "Low": tuple(value for value, index in ((item("hp", edges[0][1], *boundaries[0][1:], methods[0]), 0), (item("lp", edges[1][0], *boundaries[1][1:], methods[1]), 1)) if methods[index] in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"}),
-            "Mid": tuple(value for value, index in ((item("hp", edges[1][1], *boundaries[1][1:], methods[1]), 1), (item("lp", edges[2][0], *boundaries[2][1:], methods[2]), 2)) if methods[index] in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"}),
-            "High": (item("hp", edges[2][1], *boundaries[2][1:], methods[2]),) if methods[2] in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"} else (),
+            "SUB": (item("lp", edges[0][0], *boundaries[0][1:], methods[0], 0),) if methods[0] in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"} else (),
+            "Low": tuple(value for value, index in ((item("hp", edges[0][1], *boundaries[0][1:], methods[0], 0), 0), (item("lp", edges[1][0], *boundaries[1][1:], methods[1], 1), 1)) if methods[index] in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"}),
+            "Mid": tuple(value for value, index in ((item("hp", edges[1][1], *boundaries[1][1:], methods[1], 1), 1), (item("lp", edges[2][0], *boundaries[2][1:], methods[2], 2), 2)) if methods[index] in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"}),
+            "High": (item("hp", edges[2][1], *boundaries[2][1:], methods[2], 2),) if methods[2] in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"} else (),
         }
     boundary_cycles, boundary_betas, boundary_overlaps = _mode_boundary_values(mode_key, conf)
     edges = [
@@ -434,11 +450,12 @@ def _assignment_band_linear_fir_filters(mode_key, conf):
             filters.append(item(
                 "hp", edges[band_index - 1][1], boundary_cycles[band_index - 1],
                 boundary_betas[band_index - 1], methods[band_index - 1],
+                band_index - 1,
             ))
         if band_index < len(cross) and methods[band_index] in fir_methods:
             filters.append(item(
                 "lp", edges[band_index][0], boundary_cycles[band_index],
-                boundary_betas[band_index], methods[band_index],
+                boundary_betas[band_index], methods[band_index], band_index,
             ))
         result[band] = tuple(filters)
     return result
@@ -483,9 +500,6 @@ KEY_OUTPUT_NORMALIZE = "output_normalize"
 KEY_ALIGN_OUTPUT_TAPS = "align_output_taps"
 KEY_FIR_OUTPUT_PREFIX = "fir_output_enabled_"
 KEY_AUTO_CROP = "auto_crop"
-KEY_AUTO_CROP_PROFILE = "auto_crop_profile"
-KEY_AUTO_CROP_PASS_DB = "auto_crop_pass_db"
-KEY_AUTO_CROP_CROSS_DB = "auto_crop_cross_db"
 KEY_SETTINGS_UPLOAD = "settings_upload"
 KEY_SETTINGS_APPLY = "settings_apply"
 
@@ -499,24 +513,15 @@ os.makedirs(STUDIO_DATA_DIR, exist_ok=True)
 os.makedirs(EQ_SAVE_DIR, exist_ok=True)
 os.makedirs(CONFIG_EXPORT_DIR, exist_ok=True)
 
-AUTO_SKIP_RENDER_SECONDS = 4.0
 SLOW_RENDER_NOTICE_SECONDS = 2.0
 VERY_SLOW_RENDER_SECONDS = 8.0
 
-AUTO_CROP_PROFILES = {
-    "high_precision": {"label": "高精度", "pass_db": 0.05, "cross_db": 0.03},
-    "standard": {"label": "標準", "pass_db": 0.10, "cross_db": 0.05},
-    "lightweight": {"label": "軽量化・試聴", "pass_db": 0.20, "cross_db": 0.08},
-}
-DEFAULT_AUTO_CROP_PROFILE = "high_precision"
-DEFAULT_AUTO_CROP_PASS_DB = AUTO_CROP_PROFILES[DEFAULT_AUTO_CROP_PROFILE]["pass_db"]
-DEFAULT_AUTO_CROP_CROSS_DB = AUTO_CROP_PROFILES[DEFAULT_AUTO_CROP_PROFILE]["cross_db"]
 OUTPUT_MAX_BAND_GAIN_DB = -0.3
 SUPPORTED_SAMPLE_RATES = [48000, 96000, 192000]
 DEFAULT_FIR_CYCLES = 3.5
 DEFAULT_FIR_BETA = 12.0
 FIR_CYCLES_MIN, FIR_CYCLES_MAX = 2.7, 15.0
-FIR_BETA_MIN, FIR_BETA_MAX = 7.0, 14.0
+FIR_BETA_MIN, FIR_BETA_MAX = KAISER_BETA_MIN, KAISER_BETA_MAX
 
 MODE_BANDS = {
     "Fullrange": ["Fullrange"],
@@ -650,9 +655,6 @@ default_settings = {
     "shared_sub": False,
     "align_output_taps": False,
     "auto_crop": False,
-    "auto_crop_profile": DEFAULT_AUTO_CROP_PROFILE,
-    "auto_crop_pass_db": DEFAULT_AUTO_CROP_PASS_DB,
-    "auto_crop_cross_db": DEFAULT_AUTO_CROP_CROSS_DB
 }
 
 default_settings["Fullrange"] = {
@@ -1109,37 +1111,6 @@ def _checkbox_with_session_default(label, *, key, value, **kwargs):
     return st.checkbox(label, key=key, **kwargs)
 
 
-def _auto_crop_profile_from_limits(pass_db, cross_db):
-    pass_db = float(pass_db)
-    cross_db = float(cross_db)
-    return min(
-        AUTO_CROP_PROFILES,
-        key=lambda profile_key: (
-            abs(pass_db - AUTO_CROP_PROFILES[profile_key]["pass_db"])
-            + abs(cross_db - AUTO_CROP_PROFILES[profile_key]["cross_db"])
-        ),
-    )
-
-
-def _sum_response_db(firs_by_band, fs, worN=16384):
-    items = list(firs_by_band.items())
-    if not items:
-        return np.array([]), np.array([])
-    names = [name for name, _ in items]
-    aligned = center_fir_lengths([h for _, h in items])
-    w = None
-    H_sum = None
-    for _, h in zip(names, aligned):
-        w_i, H_i = freqz(h, worN=worN, fs=fs)
-        if w is None:
-            w = w_i
-            H_sum = np.array(H_i, dtype=np.complex128)
-        else:
-            H_sum += H_i
-    mag_db = 20.0 * np.log10(np.maximum(np.abs(H_sum), 1e-12))
-    return w, mag_db
-
-
 def _crossover_dip_metrics(freqs_hz, mag_db, fc_hz):
     if len(freqs_hz) == 0:
         return {"fc_hz": fc_hz, "dip_db": np.nan, "fc_level_db": np.nan, "local_max_db": np.nan, "local_min_db": np.nan}
@@ -1162,6 +1133,19 @@ def _crossover_dip_metrics(freqs_hz, mag_db, fc_hz):
         "local_max_db": local_max,
         "local_min_db": local_min,
     }
+
+
+def _adjacent_crossover_pairs(mode_key, cross_freqs):
+    """Return adjacent Way pairs for crossover display metrics only."""
+    bands = MODE_BANDS[mode_key]
+    return [
+        (
+            f"{bands[index]}/{bands[index + 1]}",
+            (bands[index], bands[index + 1]),
+            float(frequency),
+        )
+        for index, frequency in enumerate(cross_freqs)
+    ]
 
 
 def _render_dip_metrics_table(before_metrics, after_metrics):
@@ -1463,231 +1447,6 @@ def _render_output_gain_table(normalization_info, *, way_settings=None, response
     _render_styled_table(rows)
 
 
-def _auto_crop_masks(freqs, mag_db, band, mode_key, cross_freqs, fs):
-    valid = mag_db > -80.0
-    ordered_bands = MODE_BANDS[mode_key]
-    band_index = ordered_bands.index(band)
-    boundaries = tuple(map(float, cross_freqs))
-    if not boundaries:
-        return (freqs >= 20.0) & (freqs <= fs * 0.45) & valid, []
-    if band_index == 0:
-        pass_mask = (freqs >= 20.0) & (freqs <= boundaries[0] * 0.8) & valid
-        adjacent = (boundaries[0],)
-    elif band_index == len(ordered_bands) - 1:
-        pass_mask = (freqs >= boundaries[-1] * 1.2) & (freqs <= fs * 0.45) & valid
-        adjacent = (boundaries[-1],)
-    else:
-        lower, upper = boundaries[band_index - 1], boundaries[band_index]
-        pass_mask = (freqs >= lower * 1.2) & (freqs <= upper * 0.8) & valid
-        adjacent = (lower, upper)
-    cross_masks = [
-        (freqs >= fc * 0.7) & (freqs <= fc * 1.3) & valid
-        for fc in adjacent
-    ]
-    return pass_mask, cross_masks
-
-
-def _auto_crop_pass_error(reference, candidate, band, mode_key, cross_freqs, fs):
-    freqs, ref_h = freqz(reference, worN=32768, fs=fs)
-    _, candidate_h = freqz(candidate, worN=32768, fs=fs)
-    ref_db = 20.0 * np.log10(np.maximum(np.abs(ref_h), 1e-12))
-    candidate_db = 20.0 * np.log10(np.maximum(np.abs(candidate_h), 1e-12))
-    diff_db = candidate_db - ref_db
-    pass_mask, _ = _auto_crop_masks(
-        freqs, ref_db, band, mode_key, cross_freqs, fs
-    )
-    if np.any(pass_mask):
-        return float(np.max(np.abs(diff_db[pass_mask])))
-    if len(reference) == len(candidate) and np.array_equal(reference, candidate):
-        return 0.0
-    return np.inf
-
-
-def _combine_band_fir(split_fir, baffle_fir, eq_fir, crop_len):
-    fir = combine_and_crop_fir_conv(split_fir, baffle_fir, crop_len)
-    return combine_and_crop_fir_conv(fir, eq_fir, crop_len)
-
-
-def _auto_crop_cross_pairs(mode_key, cross_freqs):
-    bands = MODE_BANDS[mode_key]
-    return [
-        (
-            f"{bands[index]}/{bands[index + 1]}",
-            (bands[index], bands[index + 1]),
-            float(frequency),
-        )
-        for index, frequency in enumerate(cross_freqs)
-    ]
-
-
-def _auto_crop_sum_error(reference_firs, candidate_firs, pair_bands, fc, fs):
-    reference_pair = {band: reference_firs[band] for band in pair_bands}
-    candidate_pair = {band: candidate_firs[band] for band in pair_bands}
-    freqs, reference_db = _sum_response_db(reference_pair, fs, worN=32768)
-    _, candidate_db = _sum_response_db(candidate_pair, fs, worN=32768)
-    mask = (freqs >= fc * 0.7) & (freqs <= fc * 1.3) & (reference_db > -80.0)
-    if not np.any(mask):
-        return np.inf, np.inf, -np.inf
-    diff_db = candidate_db[mask] - reference_db[mask]
-    peak_db = max(0.0, float(np.max(diff_db)))
-    dip_db = min(0.0, float(np.min(diff_db)))
-    return float(np.max(np.abs(diff_db))), peak_db, dip_db
-
-
-def _auto_crop_all_bands(
-    split_firs,
-    baffle_fir,
-    eq_firs,
-    mode_key,
-    cross_freqs,
-    fs,
-    pass_limit_db=0.1,
-    cross_limit_db=0.05,
-    align_output_taps=False,
-):
-    bands = list(split_firs)
-    references = {
-        band: _combine_band_fir(split_firs[band], baffle_fir, eq_firs.get(band), 0)
-        for band in bands
-    }
-    minimum_taps = {band: len(split_firs[band]) for band in bands}
-    reference_lengths = {
-        band: len(references[band])
-        for band in bands
-    }
-    search_bands, candidate_taps = plan_auto_crop_candidates(
-        reference_lengths,
-        minimum_taps,
-        align_output_taps=align_output_taps,
-    )
-    steps = {}
-    for band in bands:
-        step = max(2, round(minimum_taps[band] * 0.05))
-        steps[band] = step + (step % 2)
-    candidates = {}
-    pass_errors = {}
-    cross_results = []
-
-    while True:
-        candidates = {
-            band: _combine_band_fir(
-                split_firs[band], baffle_fir, eq_firs.get(band), candidate_taps[band]
-            )
-            for band in bands
-        }
-        pass_errors = {
-            band: _auto_crop_pass_error(
-                references[band], candidates[band], band, mode_key, cross_freqs, fs
-            )
-            for band in bands
-        }
-        cross_results = []
-        cross_raw_errors = []
-        for label, pair_bands, fc in _auto_crop_cross_pairs(mode_key, cross_freqs):
-            error_db, peak_db, dip_db = _auto_crop_sum_error(
-                references, candidates, pair_bands, fc, fs
-            )
-            cross_raw_errors.append(error_db)
-            cross_results.append({
-                "クロス": label,
-                "基準周波数 [Hz]": int(round_for_display(fc, 0)),
-                "合成波 最大誤差 [dB]": round_for_display(error_db, 4),
-                "合成波 ピーク [dB]": round_for_display(peak_db, 4),
-                "合成波 ディップ [dB]": round_for_display(dip_db, 4),
-            })
-
-        grow_bands = {
-            band for band, error_db in pass_errors.items()
-            if band in search_bands and error_db > pass_limit_db
-        }
-        for error_db, (_, pair_bands, _) in zip(
-            cross_raw_errors, _auto_crop_cross_pairs(mode_key, cross_freqs)
-        ):
-            if error_db > cross_limit_db:
-                grow_bands.update(
-                    band for band in pair_bands
-                    if band in search_bands
-                )
-        if not grow_bands:
-            break
-
-        changed = False
-        for band in grow_bands:
-            current = candidate_taps[band]
-            maximum = len(references[band])
-            if current >= maximum:
-                continue
-            next_taps = min(maximum, current + steps[band])
-            if next_taps < maximum and next_taps % 2 == 0:
-                next_taps += 1
-            candidate_taps[band] = min(next_taps, maximum)
-            changed = changed or candidate_taps[band] != current
-        if not changed:
-            break
-
-    rows = []
-    for band in bands:
-        reduction = len(references[band]) - len(candidates[band])
-        adjacent_errors = [
-            row["合成波 最大誤差 [dB]"]
-            for row, (_, pair_bands, _) in zip(
-                cross_results, _auto_crop_cross_pairs(mode_key, cross_freqs)
-            )
-            if band in pair_bands
-        ]
-        adjacent_error = (
-            round_for_display(max(adjacent_errors), 4)
-            if adjacent_errors
-            else "—"
-        )
-        rows.append({
-            "帯域": band,
-            "探索": (
-                "○"
-                if band in search_bands
-                else "－"
-            ),
-            "帯域分割時 [taps]": int(minimum_taps[band]),
-            "合成後 [taps]": int(len(references[band])),
-            "自動クロップ後 [taps]": int(len(candidates[band])),
-            "削減 [taps]": int(reduction),
-            "削減率 [%]": round_for_display(reduction / len(references[band]) * 100.0, 1),
-            "探索刻み [taps]": int(steps[band]),
-            "通過帯誤差 [dB]": round_for_display(pass_errors[band], 4),
-            "隣接クロス合成波 最大誤差 [dB]": adjacent_error,
-        })
-    return candidates, rows, cross_results
-
-
-def _render_auto_crop_table(
-    rows, cross_rows=None, pass_limit_db=None, cross_limit_db=None
-):
-    if not rows:
-        return
-    st.subheader(ui_message('ui.b2d525093e0d6e'))
-    limits = ""
-    if pass_limit_db is not None and cross_limit_db is not None:
-        limits = (
-            f" 合格条件: 通過帯 {pass_limit_db:.2f}dB以下 / "
-            f"合成波クロス近傍 {cross_limit_db:.2f}dB以下。"
-        )
-    st.caption(
-        ui_message('ui.4d587393cacd05', p0=f'{limits}')
-    )
-    if any(row.get("探索", "○") == "－" for row in rows):
-        st.caption(
-            ui_message('ui.df5a3fb7e0e150')
-        )
-    if any(row.get("隣接クロス合成波 最大誤差 [dB]") == "—" for row in rows):
-        st.caption(
-            ui_message('ui.ab00bc5209c64e')
-        )
-    _render_styled_table(rows, min_width_px=1040)
-    if cross_rows:
-        st.caption(ui_message('ui.ec79335034b561'))
-        _render_styled_table(cross_rows)
-
-
 # ===== 設定管理 =====
 def _deep_merge_dict(base, override):
     merged = {}
@@ -1792,7 +1551,11 @@ def normalize_settings(raw_settings):
             for index in range(needed)
         ]
         target_flags = mode_conf.get("boundary_acoustic_targets", [])
-        mode_conf["boundary_acoustic_targets"] = [bool(target_flags[i]) and method not in {"Kaiser FIR", "Through"} if i < len(target_flags) else False for i, method in enumerate(mode_conf["crossover_methods"])]
+        mode_conf["boundary_acoustic_targets"] = [
+            bool(target_flags[i]) and acoustic_target_allowed(method)
+            if i < len(target_flags) else False
+            for i, method in enumerate(mode_conf["crossover_methods"])
+        ]
         mode_conf["iir_lr2_auto_polarity"] = bool(
             mode_conf.get("iir_lr2_auto_polarity", True)
         )
@@ -1963,25 +1726,12 @@ def normalize_settings(raw_settings):
     settings["auto_crop"] = bool(settings.get("auto_crop", False)) and bool(
         bands_requiring_split_fir(MODE_BANDS[active_mode], ["Through" if flag else method for method, flag in zip(settings[active_mode]["crossover_methods"], settings[active_mode]["boundary_acoustic_targets"])])
     )
-    legacy_pass_db = _coerce_float(
-        settings.get("auto_crop_pass_db", DEFAULT_AUTO_CROP_PASS_DB),
-        DEFAULT_AUTO_CROP_PASS_DB,
-        min_value=0.01,
-        max_value=0.50,
-    )
-    legacy_cross_db = _coerce_float(
-        settings.get("auto_crop_cross_db", DEFAULT_AUTO_CROP_CROSS_DB),
-        DEFAULT_AUTO_CROP_CROSS_DB,
-        min_value=0.01,
-        max_value=0.30,
-    )
-    profile_key = raw_settings.get("auto_crop_profile")
-    if profile_key not in AUTO_CROP_PROFILES:
-        profile_key = _auto_crop_profile_from_limits(legacy_pass_db, legacy_cross_db)
-    profile = AUTO_CROP_PROFILES[profile_key]
-    settings["auto_crop_profile"] = profile_key
-    settings["auto_crop_pass_db"] = profile["pass_db"]
-    settings["auto_crop_cross_db"] = profile["cross_db"]
+    # Retired crop tuning fields are accepted only at the persisted-input
+    # boundary.  They must not leak into the fixed high-precision Adaptive
+    # policy or back into newly saved settings.
+    settings.pop("auto_crop_profile", None)
+    settings.pop("auto_crop_pass_db", None)
+    settings.pop("auto_crop_cross_db", None)
     external_distance_config = settings.get("external_distance_timing")
     if isinstance(external_distance_config, dict):
         # Older settings stored a room-temperature value.  Delay conversion is
@@ -2125,10 +1875,7 @@ def _prepare_output_firs(firs_by_band, align_to_longest):
     return output_firs, rows
 
 
-def _build_filter_specification(
-    mode_key, settings, output_rows, generated_at,
-    auto_crop_rows=None, auto_crop_cross_rows=None
-):
+def _build_filter_specification(mode_key, settings, output_rows, generated_at):
     conf = settings[mode_key]
     fs = int(conf["fs"])
     fmt = _output_format_label(settings["output_format"])
@@ -2151,10 +1898,8 @@ def _build_filter_specification(
             else "出力ゲイン調整: OFF"
         ),
         f"周波数特性による自動クロップ: {'有効' if settings.get('auto_crop') else '無効'}",
-        f"自動クロップ設定: {AUTO_CROP_PROFILES[settings.get('auto_crop_profile', DEFAULT_AUTO_CROP_PROFILE)]['label']}"
-        f"{'' if settings.get('auto_crop') else '（無効時は未使用）'}",
-        f"自動クロップ 通過帯許容差: {float(settings.get('auto_crop_pass_db', DEFAULT_AUTO_CROP_PASS_DB)):.2f} dB",
-        f"自動クロップ 合成波クロス近傍許容差: {float(settings.get('auto_crop_cross_db', DEFAULT_AUTO_CROP_CROSS_DB)):.2f} dB",
+        "自動クロップ方式: Adaptive FIR Cropping（高精度固定）",
+        "適用段階: 最終Canonical DSP経路（この補助FIR ZIPでは未適用）",
         f"出力タップ長を最長フィルターに合わせる: {'ON' if align_output_taps else 'OFF'}",
         "",
     ]
@@ -2236,34 +1981,6 @@ def _build_filter_specification(
             f"出力中心差 {row['center_alignment_error_samples']:+g} sample"
         )
 
-    if auto_crop_rows:
-        lines.extend(["", "■ 自動クロップ結果"])
-        for row in auto_crop_rows:
-            adjacent_error = row["隣接クロス合成波 最大誤差 [dB]"]
-            adjacent_error_text = (
-                f"{adjacent_error:.4f} dB"
-                if isinstance(adjacent_error, (int, float, np.number))
-                else "対象なし"
-            )
-            lines.append(
-                f"{row['帯域']}: {row['合成後 [taps]']} -> "
-                f"{row['自動クロップ後 [taps]']} taps "
-                f"({row['削減率 [%]']:.1f}%削減), "
-                f"探索 {row.get('探索', '○')}, "
-                f"通過帯誤差 {row['通過帯誤差 [dB]']:.4f} dB, "
-                f"隣接クロス合成波 最大誤差 "
-                f"{adjacent_error_text}"
-            )
-    if auto_crop_cross_rows:
-        lines.extend(["", "■ 合成波クロス近傍誤差"])
-        for row in auto_crop_cross_rows:
-            lines.append(
-                f"{row['クロス']} ({row['基準周波数 [Hz]']} Hz): "
-                f"最大 {row['合成波 最大誤差 [dB]']:.4f} dB / "
-                f"ピーク {row['合成波 ピーク [dB]']:.4f} dB / "
-                f"ディップ {row['合成波 ディップ [dB]']:.4f} dB"
-            )
-
     lines.extend([
         "",
         "■ バッフル補正",
@@ -2297,10 +2014,7 @@ def _build_filter_specification(
     return "\n".join(lines) + "\n"
 
 
-def _build_filter_package(
-    firs_by_band, mode_key, settings, fs, generated_at,
-    auto_crop_rows=None, auto_crop_cross_rows=None
-):
+def _build_filter_package(firs_by_band, mode_key, settings, fs, generated_at):
     align = bool(settings.get("align_output_taps", False))
     output_firs, output_rows = _prepare_output_firs(firs_by_band, align)
     timestamp = datetime.datetime.fromisoformat(generated_at).strftime("%Y%m%d_%H%M%S")
@@ -2318,18 +2032,8 @@ def _build_filter_package(
         "normalization_mode": "common_independent_band_response_gain",
         "normalization_target_max_gain_db": OUTPUT_MAX_BAND_GAIN_DB,
         "align_output_taps": align,
-        "auto_crop": bool(settings.get("auto_crop", False)),
-        "auto_crop_profile": settings.get(
-            "auto_crop_profile", DEFAULT_AUTO_CROP_PROFILE
-        ),
-        "auto_crop_pass_db": float(
-            settings.get("auto_crop_pass_db", DEFAULT_AUTO_CROP_PASS_DB)
-        ),
-        "auto_crop_cross_db": float(
-            settings.get("auto_crop_cross_db", DEFAULT_AUTO_CROP_CROSS_DB)
-        ),
-        "auto_crop_results": auto_crop_rows or [],
-        "auto_crop_cross_results": auto_crop_cross_rows or [],
+        "adaptive_crop_requested": bool(settings.get("auto_crop", False)),
+        "adaptive_crop_stage": "canonical_final_fir",
         "files": [],
     }
 
@@ -2352,8 +2056,7 @@ def _build_filter_package(
             })
 
         specification = _build_filter_specification(
-            mode_key, settings, output_rows, generated_at,
-            auto_crop_rows, auto_crop_cross_rows
+            mode_key, settings, output_rows, generated_at
         )
         zf.writestr("filter_specification.txt", specification.encode("utf-8-sig"))
         zf.writestr(
@@ -2374,8 +2077,6 @@ def _render_filter_downloads(
     fs,
     generated_at,
     key_suffix,
-    auto_crop_rows=None,
-    auto_crop_cross_rows=None,
     fir_states=None,
 ):
     active_firs = {
@@ -2390,8 +2091,7 @@ def _render_filter_downloads(
             st.caption(ui_message('ui.795bf002abf122'))
             return
         zip_data, zip_name, output_firs = _build_filter_package(
-            active_firs, mode_key, settings, fs, generated_at,
-            auto_crop_rows, auto_crop_cross_rows
+            active_firs, mode_key, settings, fs, generated_at
         )
         st.caption(
             ui_message('ui.96028ebbcd7e1c', p0=f"{_output_format_label(settings['output_format'])}", p1=f"{('ON' if settings.get('align_output_taps') else 'OFF')}")
@@ -2551,11 +2251,7 @@ def _settings_summary(imported):
         "出力ゲイン調整": "ON" if imported.get("output_normalize") else "OFF",
         "最長タップへ整列": "ON" if imported.get("align_output_taps") else "OFF",
         "自動クロップ": "ON" if imported.get("auto_crop") else "OFF",
-        "自動クロップ設定": AUTO_CROP_PROFILES[
-            imported.get("auto_crop_profile", DEFAULT_AUTO_CROP_PROFILE)
-        ]["label"],
-        "通過帯許容差": f"{float(imported.get('auto_crop_pass_db', DEFAULT_AUTO_CROP_PASS_DB)):.2f} dB",
-        "合成波クロス近傍許容差": f"{float(imported.get('auto_crop_cross_db', DEFAULT_AUTO_CROP_CROSS_DB)):.2f} dB",
+        "自動クロップ方式": "Adaptive FIR Cropping（高精度固定）",
     }
 
 
@@ -2636,15 +2332,6 @@ def _apply_imported_config(imported, source_label, resume_filename=None):
     st.session_state[KEY_OUTPUT_NORMALIZE] = bool(imported.get("output_normalize", False))
     st.session_state[KEY_ALIGN_OUTPUT_TAPS] = bool(imported.get("align_output_taps", False))
     st.session_state[KEY_AUTO_CROP] = bool(imported.get("auto_crop", False))
-    st.session_state[KEY_AUTO_CROP_PROFILE] = imported.get(
-        "auto_crop_profile", DEFAULT_AUTO_CROP_PROFILE
-    )
-    st.session_state[KEY_AUTO_CROP_PASS_DB] = float(
-        imported.get("auto_crop_pass_db", DEFAULT_AUTO_CROP_PASS_DB)
-    )
-    st.session_state[KEY_AUTO_CROP_CROSS_DB] = float(
-        imported.get("auto_crop_cross_db", DEFAULT_AUTO_CROP_CROSS_DB)
-    )
     if resume_filename is not None:
         st.session_state[KEY_RESUME_SELECT] = resume_filename
 
@@ -2695,9 +2382,13 @@ def _apply_imported_config(imported, source_label, resume_filename=None):
 
     iir_prefix = f"composite_studio_{mode}"
     st.session_state[f"{iir_prefix}_lr2_auto_polarity"] = bool(mode_conf.get("iir_lr2_auto_polarity", True))
-    for index, method in enumerate(mode_conf.get("crossover_methods", [])):
-        st.session_state[f"{iir_prefix}_crossover_method_{index}"] = str(method)
-        st.session_state[f"{iir_prefix}_acoustic_target_{index}"] = bool(mode_conf.get("boundary_acoustic_targets", [False]*len(mode_conf["crossover_methods"]))[index])
+    seed_boundary_controls(
+        st.session_state,
+        mode,
+        mode_conf.get("crossover_methods", ()),
+        mode_conf.get("boundary_acoustic_targets", ()),
+        overwrite=True,
+    )
 
     save_settings(imported)
     append_log(f"設定を読み込み: {source_label}")
@@ -2831,6 +2522,13 @@ with st.sidebar:
         selected_label = st.session_state[KEY_MODE]
         selected_key = mode_key_map[selected_label]
         selected_conf = settings[selected_key]
+        seed_boundary_controls(
+            st.session_state,
+            selected_key,
+            selected_conf.get("crossover_methods", ()),
+            selected_conf.get("boundary_acoustic_targets", ()),
+            overwrite=True,
+        )
         settings["last_mode"] = selected_key
         st.session_state["filter_type"] = selected_key
         st.session_state[f"{KEY_FIR_OUTPUT_PREFIX}{selected_key}"] = bool(
@@ -2917,10 +2615,15 @@ with st.sidebar:
         updated = reset_mode_boundaries(settings, default_settings, mode_key)
         settings[mode_key] = updated[mode_key]
         conf = settings[mode_key]
+        seed_boundary_controls(
+            st.session_state,
+            mode_key,
+            conf.get("crossover_methods", ()),
+            conf.get("boundary_acoustic_targets", ()),
+            overwrite=True,
+        )
         for index, frequency_key in enumerate(boundary_frequency_keys(mode_key, len(conf["cross_freqs"]))):
             _set_indexed_widget_state("__num_", frequency_key, int(conf["cross_freqs"][index]))
-            st.session_state[f"composite_studio_{mode_key}_crossover_method_{index}"] = conf["crossover_methods"][index]
-            st.session_state[f"composite_studio_{mode_key}_acoustic_target_{index}"] = False
         st.session_state[f"composite_studio_{mode_key}_lr2_auto_polarity"] = bool(conf.get("iir_lr2_auto_polarity", True))
         _clear_applied_phase_alignment()
         on_mode_change()
@@ -2958,18 +2661,15 @@ with st.sidebar:
     def _crossover_settings_snapshot():
         method_count = max(0, len(bands) - 1)
         updated = json.loads(json.dumps(st.session_state.get("settings", settings)))
-        methods = [
-            normalize_crossover_method(
-                st.session_state.get(
-                    f"composite_studio_{mode_key}_crossover_method_{index}"
-                )
-            )
-            for index in range(method_count)
-        ]
         updated_conf = updated.setdefault(mode_key, {})
-        updated_conf["crossover_methods"] = methods
-        updated_conf["boundary_acoustic_targets"] = [bool(st.session_state.get(f"composite_studio_{mode_key}_acoustic_target_{i}", False)) and method not in {"Kaiser FIR", "Through"} for i, method in enumerate(methods)]
-        return updated, updated_conf, methods
+        controls = boundary_control_snapshot(
+            st.session_state, mode_key, method_count,
+            fallback_methods=updated_conf.get("crossover_methods", ()),
+            fallback_targets=updated_conf.get("boundary_acoustic_targets", ()),
+        )
+        updated_conf["crossover_methods"] = list(controls.methods)
+        updated_conf["boundary_acoustic_targets"] = list(controls.acoustic_targets)
+        return updated, updated_conf, controls
 
     def _commit_crossover_settings(updated) -> None:
         updated = normalize_settings(updated)
@@ -2978,11 +2678,11 @@ with st.sidebar:
         clear_results()
 
     def _persist_crossover_methods() -> None:
-        updated, _updated_conf, _methods = _crossover_settings_snapshot()
+        updated, _updated_conf, _controls = _crossover_settings_snapshot()
         _commit_crossover_settings(updated)
 
     def _persist_acoustic_targets() -> None:
-        updated, _updated_conf, _methods = _crossover_settings_snapshot()
+        updated, _updated_conf, _controls = _crossover_settings_snapshot()
         _commit_crossover_settings(updated)
 
     initial_crossover_methods = tuple(mode_conf.get("crossover_methods", ()))
@@ -3250,7 +2950,14 @@ with st.sidebar:
             "kaiser_overlap_sub_low_oct",
             "SUBとLow下側",
         )
-        if all(st.session_state.get(f"composite_studio_{mode_key}_crossover_method_{i}") == "Kaiser FIR" for i in range(3)):
+        if all(
+            method == "Kaiser FIR"
+            for method in boundary_control_snapshot(
+                st.session_state, mode_key, 3,
+                fallback_methods=mode_conf.get("crossover_methods", ()),
+                fallback_targets=mode_conf.get("boundary_acoustic_targets", ()),
+            ).methods
+        ):
             st.caption(ui_message('ui.f18c855684f002'))
         cross_freqs = [fc1, fc2, fc3]
         cycles = float(cycles_sub_low)
@@ -3363,27 +3070,29 @@ with st.sidebar:
         updated_conf = updated.setdefault(mode_key, {})
         updated_conf["fir_output_enabled"] = enabled
         if enabled:
-            methods = [
-                normalize_crossover_method(
-                    st.session_state.get(
-                        f"composite_studio_{mode_key}_crossover_method_{index}"
-                    )
-                )
-                for index in range(len(cross_freqs))
-            ]
+            controls = boundary_control_snapshot(
+                st.session_state, mode_key, len(cross_freqs),
+                fallback_methods=updated_conf.get("crossover_methods", ()),
+                fallback_targets=updated_conf.get("boundary_acoustic_targets", ()),
+            )
             current_taps = {
                 band: int(st.session_state.get(f"{band}_crop", 0) or 0)
                 for band in bands
             }
             initialized = initialize_manual_taps_for_enable(
-                bands, methods, current_taps,
+                bands, controls.methods, current_taps,
             )
             for band, taps in initialized.items():
                 st.session_state[f"{band}_crop"] = int(taps)
             updated_conf["crop_lens"] = initialized
         updated = normalize_settings(updated)
-        for index, method in enumerate(updated[mode_key]["crossover_methods"]):
-            st.session_state[f"composite_studio_{mode_key}_crossover_method_{index}"] = method
+        seed_boundary_controls(
+            st.session_state,
+            mode_key,
+            updated[mode_key].get("crossover_methods", ()),
+            updated[mode_key].get("boundary_acoustic_targets", ()),
+            overwrite=True,
+        )
         st.session_state["settings"] = updated
         save_settings(updated)
         clear_results()
@@ -3396,11 +3105,14 @@ with st.sidebar:
             ui_message('ui.f0108b5de31092')
         ),
     )
+    active_controls = boundary_control_snapshot(
+        st.session_state, mode_key, len(cross_freqs),
+        fallback_methods=mode_conf.get("crossover_methods", ()),
+        fallback_targets=mode_conf.get("boundary_acoustic_targets", ()),
+    )
     _has_fir_split = bool(bands_requiring_split_fir(bands, [
-        "Through" if st.session_state.get(f"composite_studio_{mode_key}_acoustic_target_{index}", False) else normalize_crossover_method(st.session_state.get(
-            f"composite_studio_{mode_key}_crossover_method_{index}",
-            mode_conf["crossover_methods"][index],
-        )) for index in range(len(cross_freqs))
+        "Through" if active_controls.acoustic_targets[index] else method
+        for index, method in enumerate(active_controls.methods)
     ]))
     if fir_output_enabled:
         st.success(ui_message('ui.70a9713177531b'))
@@ -3417,36 +3129,21 @@ with st.sidebar:
         key=KEY_AUTO_CROP,
         on_change=clear_results,
         disabled=not fir_output_enabled or not _has_fir_split,
-        help=ui_message('ui.02b8b70e6386ef')
+        help=ui_message('ui.c93618e7431e4d')
     )
     if _has_fir_split:
-        st.caption(ui_message('ui.341070169568d5'))
+        st.caption(ui_message('ui.068d1a34166247'))
     else:
         st.caption(ui_message('ui.d9d9113191c2a6'))
-    if KEY_AUTO_CROP_PROFILE not in st.session_state:
-        st.session_state[KEY_AUTO_CROP_PROFILE] = settings.get(
-            "auto_crop_profile", DEFAULT_AUTO_CROP_PROFILE
-        )
-    auto_crop_profile = shared_selectbox(
-        ui_message('ui.fc6074b8b4c69d'),
-        options=list(AUTO_CROP_PROFILES),
-        format_func=lambda key: AUTO_CROP_PROFILES[key]["label"],
-        key=KEY_AUTO_CROP_PROFILE,
-        on_change=clear_results,
-        disabled=not fir_output_enabled or not auto_crop,
-        help=ui_message('ui.a8628852850a69'),
-    )
-    auto_crop_pass_db = AUTO_CROP_PROFILES[auto_crop_profile]["pass_db"]
-    auto_crop_cross_db = AUTO_CROP_PROFILES[auto_crop_profile]["cross_db"]
     st.caption(
-        ui_message('ui.6e2643aa9c367d', p0=f'{auto_crop_pass_db:.2f}', p1=f'{auto_crop_cross_db:.2f}')
+        ui_message('ui.afaf23c8e91fc3')
     )
     lr2_bands = set()
-    for boundary_index in range(len(bands)-1):
-        if st.session_state.get(f"composite_studio_{mode_key}_crossover_method_{boundary_index}") == "Linear-phase LR2 FIR":
+    for boundary_index, method in enumerate(active_controls.methods):
+        if method == "Linear-phase LR2 FIR":
             lr2_bands.update(bands[boundary_index:boundary_index+2])
     if lr2_bands:
-        st.caption(ui_message('ui.b7d4d80bb3eaef'))
+        st.caption(ui_message('ui.09e51be597a938'))
     user_crop_lengths = {}
     band_tap_count_hosts = {}
     crop_lens_conf = mode_conf.get("crop_lens", {})
@@ -3483,7 +3180,7 @@ with st.sidebar:
         help=ui_message('ui.6fa299baadb738')
     )
     st.caption(
-        ui_message('ui.e45f0cbbe6748f')
+        ui_message('ui.fc418a054c1294')
     )
 
     from ui.multiway_eq_files import render_eq_files
@@ -3543,10 +3240,15 @@ with st.sidebar:
     st.caption(
         ui_message('ui.30562270dcbdb0')
     )
+    boundary_controls = boundary_control_snapshot(
+        st.session_state, mode_key, len(cross_freqs),
+        fallback_methods=mode_conf.get("crossover_methods", ()),
+        fallback_targets=mode_conf.get("boundary_acoustic_targets", ()),
+    )
     current_conf = {
         'phase_alignment_acoustic_target': bool(st.session_state.get('settings', {}).get(mode_key, {}).get('phase_alignment_acoustic_target', False)),
         'lr2_auto_taps': True,
-        'boundary_acoustic_targets': [bool(st.session_state.get(f"composite_studio_{mode_key}_acoustic_target_{i}", False)) for i in range(len(cross_freqs))],
+        'boundary_acoustic_targets': list(boundary_controls.acoustic_targets),
         'fs': int(fs),
         'cycles': float(cycles),
         'beta': float(beta),
@@ -3561,12 +3263,7 @@ with st.sidebar:
         'kaiser_overlap_low_mid_oct': float(kaiser_overlap_low_mid_oct) if mode_key in ('3Way', '3Way+SUB') else 0.0,
         'kaiser_overlap_mid_high_oct': float(kaiser_overlap_mid_high_oct) if mode_key in ('3Way', '3Way+SUB') else 0.0,
         'iir_lr2_auto_polarity': bool(st.session_state.get(f"composite_studio_{mode_key}_lr2_auto_polarity", True)),
-        'crossover_methods': [
-            normalize_crossover_method(
-                st.session_state.get(f"composite_studio_{mode_key}_crossover_method_{index}")
-            )
-            for index in range(len(cross_freqs))
-        ],
+        'crossover_methods': list(boundary_controls.methods),
     }
     if mode_key == "3Way":
         current_conf.update({
@@ -3598,9 +3295,6 @@ with st.sidebar:
     current_settings["phase_gain_mask_db"] = int(phase_gain_mask_db)
     current_settings["last_mode"] = mode_key
     current_settings["auto_crop"] = bool(auto_crop)
-    current_settings["auto_crop_profile"] = str(auto_crop_profile)
-    current_settings["auto_crop_pass_db"] = float(auto_crop_pass_db)
-    current_settings["auto_crop_cross_db"] = float(auto_crop_cross_db)
 
     with preferences_host:
         st.markdown(display_text("**FIR出力設定**"))
@@ -3830,14 +3524,7 @@ signature_channel_rows = [
     row for row in st.session_state.get("composite_studio_channels", [])
     if isinstance(row, dict)
 ]
-signature_crossover_methods = tuple(
-    normalize_crossover_method(
-        st.session_state.get(
-            f"composite_studio_{mode_key}_crossover_method_{index}"
-        )
-    )
-    for index in range(len(conf.get("cross_freqs", [])))
-)
+signature_crossover_methods = tuple(conf.get("crossover_methods", ()))
 studio_dsp_signature = studio_dsp_input_signature(
     signature_channel_rows,
     sample_rate_hz=int(fs),
@@ -3853,9 +3540,6 @@ conf_signature = json.dumps({
     'output_normalize': bool(current_settings.get('output_normalize', False)),
     'fir_output_enabled': bool(conf.get('fir_output_enabled', False)),
     'auto_crop': bool(current_settings.get('auto_crop', False)),
-    'auto_crop_profile': current_settings.get(
-        'auto_crop_profile', DEFAULT_AUTO_CROP_PROFILE
-    ),
     'align_output_taps': bool(current_settings.get('align_output_taps', False)),
     'studio_design_channels': [
         {
@@ -3872,12 +3556,6 @@ conf_signature = json.dumps({
         if isinstance(row, dict) and row.get('source') == 'generated_band'
     ],
     'studio_dsp_input_signature': studio_dsp_signature,
-    'auto_crop_pass_db': float(
-        current_settings.get('auto_crop_pass_db', DEFAULT_AUTO_CROP_PASS_DB)
-    ),
-    'auto_crop_cross_db': float(
-        current_settings.get('auto_crop_cross_db', DEFAULT_AUTO_CROP_CROSS_DB)
-    ),
 }, ensure_ascii=False, sort_keys=True)
 if mode_key == "Fullrange":
     estimated_taps = 1
@@ -3901,8 +3579,6 @@ if estimated_taps > 1800:
 
 last_conf_signature = st.session_state.get('last_conf_signature')
 signature_changed = last_conf_signature != conf_signature
-theme_changed = st.session_state.get("last_plot_theme") != plot_theme
-last_render_seconds = float(st.session_state.get('last_render_seconds', 0.0) or 0.0)
 required_graph_cache_keys = (
     "studio_chart_bundle", "studio_chart_source",
     "final_firs", "studio_graph_settings", "studio_graph_responses",
@@ -3942,27 +3618,13 @@ if not cross_order_valid:
         )
     else:
         st.error(ui_message('ui.39270e49fc04da'))
-auto_skip_due_to_render = (
-    auto_update
-    and cross_order_valid
-    and signature_changed
-    and not theme_changed
-    and not manual_refresh
-    and has_cached_result
-    and last_render_seconds >= AUTO_SKIP_RENDER_SECONDS
+should_generate = should_generate_result(
+    configuration_valid=cross_order_valid,
+    has_cached_result=has_cached_result,
+    manual_refresh=manual_refresh,
+    auto_update=auto_update,
+    signature_changed=signature_changed,
 )
-
-should_generate = cross_order_valid and (
-    not has_cached_result
-    or manual_refresh
-    or (auto_update and signature_changed and not auto_skip_due_to_render)
-)
-
-if auto_skip_due_to_render:
-    skipped_signature = st.session_state.get('last_auto_skip_signature')
-    if skipped_signature != conf_signature:
-        append_log(f"前回更新が重いため自動更新をスキップ: {last_render_seconds:.1f}秒")
-        st.session_state['last_auto_skip_signature'] = conf_signature
 
 tap_alignment_host = None
 
@@ -3970,10 +3632,7 @@ if should_generate:
     render_start_time = time.perf_counter()
     result_generated_at = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
-    crossover_methods = tuple(
-        normalize_crossover_method(st.session_state.get(f"composite_studio_{mode_key}_crossover_method_{index}"))
-        for index in range(len(conf.get("cross_freqs", [])))
-    )
+    crossover_methods = tuple(conf.get("crossover_methods", ()))
     all_kaiser = all(method == "Kaiser FIR" for method in crossover_methods)
     # フィルター生成
     if mode_key == "Fullrange":
@@ -4109,10 +3768,8 @@ if should_generate:
         enabled=bool(conf.get("fir_output_enabled", False)),
     )
 
-    # 合成＆クロップ適用
+    # Studio投影用の合成。AdaptiveクロップはCanonical最終FIRだけが所有する。
     final_firs = {}
-    auto_crop_rows = []
-    auto_crop_cross_rows = []
     baffle_fir = (
         make_baffle_step_fir(
             fs,
@@ -4124,38 +3781,22 @@ if should_generate:
         else None
     )
     st.session_state["composite_studio_baffle_fir"] = baffle_fir
-    if bool(conf.get("fir_output_enabled", False)) and current_settings.get("auto_crop", False):
-        final_firs, auto_crop_rows, auto_crop_cross_rows = _auto_crop_all_bands(
-            split_firs,
-            baffle_fir,
-            eq_firs,
-            mode_key,
-            conf["cross_freqs"],
-            fs,
-            pass_limit_db=float(
-                current_settings.get("auto_crop_pass_db", DEFAULT_AUTO_CROP_PASS_DB)
-            ),
-            cross_limit_db=float(
-                current_settings.get("auto_crop_cross_db", DEFAULT_AUTO_CROP_CROSS_DB)
-            ),
-            align_output_taps=bool(
-                current_settings.get("align_output_taps", False)
-            ),
+    for band in bands:
+        fir = split_firs[band]
+        state = sidebar_fir_states[band]
+        crop_len = (
+            int(state.tap_count or 0)
+            if state.tap_source in {"manual", "auto_target"}
+            else 0
         )
-    else:
-        for band in bands:
-            fir = split_firs[band]
-            state = sidebar_fir_states[band]
-            crop_len = (
-                int(state.tap_count or 0)
-                if state.tap_source in {"manual", "auto_target"}
-                else 0
-            )
-            # 手動指定は従来通り、バッフル合成後とEQ合成後にクロップする。
-            if baffle_fir is not None:
-                fir = combine_and_crop_fir_conv(fir, baffle_fir, crop_len)
-            fir = combine_and_crop_fir_conv(fir, eq_firs[band], crop_len)
-            final_firs[band] = fir
+        # Adaptive auto-crop owns only the final Canonical FIR.  This Studio
+        # projection remains un-cropped so it cannot crop a stage twice.
+        if current_settings.get("auto_crop", False):
+            crop_len = 0
+        if baffle_fir is not None:
+            fir = combine_and_crop_fir_conv(fir, baffle_fir, crop_len)
+        fir = combine_and_crop_fir_conv(fir, eq_firs[band], crop_len)
+        final_firs[band] = fir
 
     # クロップ後、グラフ表示と出力の前に全帯域へ同一ゲインを適用する。
     normalization_info = {
@@ -4324,9 +3965,6 @@ if should_generate:
     st.session_state["studio_graph_primary_settings"] = primary_graph_settings
     st.session_state["studio_graph_responses"] = graph_responses
 
-    st.session_state['auto_crop_rows'] = auto_crop_rows
-    st.session_state['auto_crop_cross_rows'] = auto_crop_cross_rows
-
     # Numeric projection is completed and validated before any chart is drawn.
     # Session State receives one bundle revision atomically; renderer artifacts
     # are transient and never become the source of truth.
@@ -4358,14 +3996,6 @@ if should_generate:
     st.session_state["studio_chart_bundle"] = chart_bundle
 
     tap_alignment_host = st.container()
-    if st.session_state.get('auto_crop_rows'):
-        with st.expander(display_text("自動クロップの明細"), expanded=False):
-            _render_auto_crop_table(
-                auto_crop_rows,
-                auto_crop_cross_rows,
-                float(current_settings.get("auto_crop_pass_db", DEFAULT_AUTO_CROP_PASS_DB)),
-                float(current_settings.get("auto_crop_cross_db", DEFAULT_AUTO_CROP_CROSS_DB)),
-            )
     _render_output_gain_table(
         normalization_info, way_settings=graph_settings, responses=graph_responses,
     )
@@ -4397,7 +4027,7 @@ if should_generate:
             },
         )
     )
-    for label, pair_bands, crossover in _auto_crop_cross_pairs(
+    for label, pair_bands, crossover in _adjacent_crossover_pairs(
         mode_key, conf["cross_freqs"]
     ):
         before_pair = [baseline_responses[band] for band in pair_bands if band in baseline_responses]
@@ -4443,8 +4073,6 @@ if should_generate:
         fs,
         result_generated_at,
         key_suffix=f"new_{mode_key}_{int(fs)}",
-        auto_crop_rows=auto_crop_rows,
-        auto_crop_cross_rows=auto_crop_cross_rows,
         fir_states=st.session_state.get("composite_studio_band_fir_states", {}),
     )
     st.session_state['last_conf_signature'] = conf_signature
@@ -4476,11 +4104,7 @@ if (not should_generate) and st.session_state.get('studio_chart_bundle') is not 
     download_settings["align_output_taps"] = current_settings.get(
         "align_output_taps", download_settings.get("align_output_taps", False)
     )
-    if auto_skip_due_to_render:
-        st.warning(
-            ui_message('ui.3450d8e3934d18', p0=f'{last_render_seconds:.1f}')
-        )
-    elif signature_changed:
+    if signature_changed:
         st.info(ui_message('ui.622e8562ef702c'))
     cached_final_firs = st.session_state.get("final_firs", {})
     cached_graph_rows = [
@@ -4546,14 +4170,6 @@ if (not should_generate) and st.session_state.get('studio_chart_bundle') is not 
             st.session_state["studio_chart_bundle"] = projected
     chart_bundle = st.session_state["studio_chart_bundle"]
     tap_alignment_host = st.container()
-    if st.session_state.get('auto_crop_rows'):
-        with st.expander(display_text("自動クロップの明細"), expanded=False):
-            _render_auto_crop_table(
-                st.session_state.get('auto_crop_rows', []),
-                st.session_state.get('auto_crop_cross_rows', []),
-                float(cached_settings.get("auto_crop_pass_db", DEFAULT_AUTO_CROP_PASS_DB)),
-                float(cached_settings.get("auto_crop_cross_db", DEFAULT_AUTO_CROP_CROSS_DB)),
-            )
     _render_output_gain_table(
         st.session_state.get("normalization_info", {"enabled": False}),
         way_settings=st.session_state.get("studio_graph_settings", {}),
@@ -4579,8 +4195,6 @@ if (not should_generate) and st.session_state.get('studio_chart_bundle') is not 
             cached_fs,
             cached_generated_at,
             key_suffix=f"cached_{cached_mode_key}_{cached_fs}",
-            auto_crop_rows=st.session_state.get('auto_crop_rows', []),
-            auto_crop_cross_rows=st.session_state.get('auto_crop_cross_rows', []),
             fir_states=st.session_state.get("composite_studio_band_fir_states", {}),
         )
 

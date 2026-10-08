@@ -6,11 +6,11 @@ import numpy as np
 from scipy.optimize import brentq
 from scipy.signal import kaiser_beta
 
+from fir_design_common.kaiser import clamp_kaiser_beta
 from octave_boundary_smoothing import OneSidedBoundarySpec, apply_one_sided_boundary
 
 from .config import (
     DesignConfig,
-    LINEAR_FIR_BETA_MAX,
     LINEAR_FIR_BETA_MIN,
     LINEAR_FIR_EQ_MASK_SMOOTHING_DEFAULT,
 )
@@ -200,7 +200,7 @@ def _high_boundary_hz(frequency, gain_db, threshold_db, last_valid: int) -> floa
 
 
 def kaiser_beta_to_attenuation_db(beta: float) -> float:
-    beta = min(max(float(beta), LINEAR_FIR_BETA_MIN), LINEAR_FIR_BETA_MAX)
+    beta = clamp_kaiser_beta(beta)
     if beta <= 0.0:
         return 21.0
     return float(brentq(lambda attenuation: kaiser_beta(attenuation) - beta, 21.0, 200.0))

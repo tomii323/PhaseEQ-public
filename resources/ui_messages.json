@@ -6269,16 +6269,6 @@
     "ja": "Speaker応答、PhaseEQ FIR／IIR EQ、FIR共通ゲイン、Channel Gain、帯域分割IIR／Polarity／Delay／整合適用後の実現Complex Responseを使ってピークを表示します。",
     "en": "Peaks use the realized complex response after speaker response, PhaseEQ FIR/IIR EQ, common FIR gain, channel gain, crossover IIR, polarity, delay, and alignment."
   },
-  "ui.b2d525093e0d6e": {
-    "source": "■ 自動クロップ結果",
-    "ja": "■ 自動クロップ結果",
-    "en": "■ Automatic crop results"
-  },
-  "ui.4d587393cacd05": {
-    "source": "帯域分割時のタップ数を下限に、約5%刻みで探索しています。クロス近傍は隣接帯域の合成波で判定します。{p0}",
-    "ja": "帯域分割時のタップ数を下限に、約5%刻みで探索しています。クロス近傍は隣接帯域の合成波で判定します。{p0}",
-    "en": "Searches in approximately 5% steps, with crossover tap count as the minimum. Near crossovers, the sum of adjacent bands is evaluated. {p0}"
-  },
   "ui.78dd8f858a0ebb": {
     "source": "Japanese font was not found. Graph labels may not display correctly. Install Yu Gothic, Meiryo, Noto Sans CJK, or IPAex Gothic, then restart the app.\n\nRomaji: Nihongo fonto ga mitsukarimasen. Gurafu no moji ga tadashiku hyouji sarenai baai wa, nihongo fonto o insutooru shite apuri o saikidou shite kudasai.",
     "ja": "日本語フォントが見つかりません。グラフの文字が正しく表示されない場合があります。游ゴシック、メイリオ、Noto Sans CJK、IPAexゴシックのいずれかをインストールして再起動してください。",
@@ -6354,25 +6344,10 @@
     "ja": "周波数特性を確認して自動クロップ",
     "en": "Automatically crop after checking frequency response"
   },
-  "ui.02b8b70e6386ef": {
-    "source": "帯域分割FIRがある場合のみ使用できます。帯域分割時のタップ数を下限に、約5%刻みで最短の合格タップ数を探索します。",
-    "ja": "帯域分割FIRがある場合のみ使用できます。帯域分割時のタップ数を下限に、約5%刻みで最短の合格タップ数を探索します。",
-    "en": "Available only with crossover FIR filters. Searches for the shortest passing length in approximately 5% steps, with crossover tap count as the minimum."
-  },
-  "ui.fc6074b8b4c69d": {
-    "source": "自動クロップ設定",
-    "ja": "自動クロップ設定",
-    "en": "Automatic crop settings"
-  },
-  "ui.a8628852850a69": {
-    "source": "高精度ほど元の特性を厳密に保ち、軽量化・試聴ほどタップ削減を優先します。",
-    "ja": "高精度ほど元の特性を厳密に保ち、軽量化・試聴ほどタップ削減を優先します。",
-    "en": "Higher precision preserves the original response more strictly; lighter/audition settings prioritize shorter filters."
-  },
-  "ui.6e2643aa9c367d": {
-    "source": "通過帯 {p0}dB以下 / クロス近傍の合成波 {p1}dB以下。",
-    "ja": "通過帯 {p0}dB以下 / クロス近傍の合成波 {p1}dB以下。",
-    "en": "Passband error ≤{p0} dB / Summed response near crossovers ≤{p1} dB."
+  "ui.afaf23c8e91fc3": {
+    "source": "高精度Guard：Gain 0.05 dB以下／Phase 0.5 deg以下／Complex 0.01以下／削除Energy比 1e-6以下。",
+    "ja": "高精度Guard：Gain 0.05 dB以下／Phase 0.5 deg以下／Complex 0.01以下／削除Energy比 1e-6以下。",
+    "en": "High-precision guards: Gain ≤0.05 dB, Phase ≤0.5 deg, Complex ≤0.01, and removed-energy ratio ≤1e-6."
   },
   "ui.222f6bb28785b1": {
     "source": "FIRクロスの0は、自動クロップのON／OFFにかかわらず分割FIR長×2＋1を仮割り当てします。IIR／Fullrangeでは0がFIR OFF、初回ONの基本値は{p0} tapsです。",
@@ -6434,10 +6409,10 @@
     "ja": "生成後のダウンロード出力で、短い帯域の前後へゼロを追加して最長タップ数へ揃えます。",
     "en": "For download output, pad shorter bands with zeros before and after to match the longest tap count."
   },
-  "ui.e45f0cbbe6748f": {
-    "source": "ON時に自動クロップも使う場合、未クロップ完成FIRが最長値より短い帯域は短縮効果がないため探索を省略します。",
-    "ja": "ON時に自動クロップも使う場合、未クロップ完成FIRが最長値より短い帯域は短縮効果がないため探索を省略します。",
-    "en": "When automatic cropping is also ON, skip searching bands whose completed uncropped FIR is shorter than the common maximum, since shortening gives no benefit."
+  "ui.fc418a054c1294": {
+    "source": "自動クロップ後、短い帯域の前後へzeroを追加して最長の採用タップ数へ揃えます。",
+    "ja": "自動クロップ後、短い帯域の前後へzeroを追加して最長の採用タップ数へ揃えます。",
+    "en": "After automatic cropping, pad shorter bands with zeros before and after to match the longest adopted tap count."
   },
   "ui.53ca5c1d4607c3": {
     "source": "各出力帯域の最大ゲインを -0.3 dB に調整",
@@ -6584,20 +6559,10 @@
     "ja": "出力タップ統一: ON。短い帯域は前後へゼロ追加済みのため、DSP側の追加ディレイは0です。偶数・奇数が混在すると中心差が最大0.5 sample残ります。",
     "en": "Output tap matching: ON. Shorter bands are zero-padded on both ends, so no extra DSP delay is needed. Mixed even/odd lengths may leave a center difference of up to 0.5 sample."
   },
-  "ui.df5a3fb7e0e150": {
-    "source": "最長タップへの整列がONのため、未クロップ完成FIRが最長値より短い帯域は短縮効果がなく、自動クロップを省略しています（探索: ○=対象 / －=省略）。",
-    "ja": "最長タップへの整列がONのため、未クロップ完成FIRが最長値より短い帯域は短縮効果がなく、自動クロップを省略しています（探索: ○=対象 / －=省略）。",
-    "en": "With longest-tap matching ON, bands whose completed uncropped FIR is shorter than the maximum gain no length reduction, so automatic cropping is skipped (search: ○ included / − skipped)."
-  },
   "ui.ab00bc5209c64e": {
     "source": "Fullrangeなど隣接クロスを持たない帯域は、クロス合成波誤差を「—」とし、通過帯誤差だけで判定します。",
     "ja": "Fullrangeなど隣接クロスを持たない帯域は、クロス合成波誤差を「—」とし、通過帯誤差だけで判定します。",
     "en": "Bands without adjacent crossovers, such as Fullrange, show — for crossover sum error and are evaluated by passband error only."
-  },
-  "ui.ec79335034b561": {
-    "source": "ピークは未クロップ合成波より上、ディップは未クロップ合成波より下の最大差です。",
-    "ja": "ピークは未クロップ合成波より上、ディップは未クロップ合成波より下の最大差です。",
-    "en": "Peak is the largest positive difference from the uncropped sum; dip is the largest negative difference."
   },
   "ui.96acdaf7b4f091": {
     "source": "補助出力：帯域分割FIR係数だけを保存",
@@ -6664,20 +6629,20 @@
     "ja": "FIR出力 OFF：FIR専用設定は保持し、生成経路だけを停止します。",
     "en": "FIR output OFF: FIR-specific settings are retained, but generation is stopped."
   },
-  "ui.341070169568d5": {
-    "source": "ON時はバッフル合成後とEQ合成後の2回クロップを行い、手動タップ長は使用しません。",
-    "ja": "ON時はバッフル合成後とEQ合成後の2回クロップを行い、手動タップ長は使用しません。",
-    "en": "When ON, cropping occurs after baffle composition and again after EQ composition. Manual tap lengths are not used."
+  "ui.068d1a34166247": {
+    "source": "ON時は最終FIR全段を合成後に1回だけ高精度解析し、手動タップ長は使用しません。",
+    "ja": "ON時は最終FIR全段を合成後に1回だけ高精度解析し、手動タップ長は使用しません。",
+    "en": "When ON, all final FIR stages are composed and analyzed once at high precision. Manual tap lengths are not used."
   },
   "ui.d9d9113191c2a6": {
     "source": "帯域分割FIRがないため自動クロップはOFFです。FIRを使うWayはタップ長を1以上に指定してください。0はFIR OFFです。",
     "ja": "帯域分割FIRがないため自動クロップはOFFです。FIRを使うWayはタップ長を1以上に指定してください。0はFIR OFFです。",
     "en": "Automatic cropping is OFF because there is no crossover FIR. Set a tap length of at least 1 for Ways using FIR. Zero means FIR OFF."
   },
-  "ui.b7d4d80bb3eaef": {
-    "source": "LR2のタップ長も指定できます。0は自動設定です。自動クロップのON／OFFにかかわらず、0の仮割り当ては分割FIR長×2＋1です。自動クロップの探索下限は分割FIR長です。",
-    "ja": "LR2のタップ長も指定できます。0は自動設定です。自動クロップのON／OFFにかかわらず、0の仮割り当ては分割FIR長×2＋1です。自動クロップの探索下限は分割FIR長です。",
-    "en": "LR2 tap length can also be specified. Zero selects automatic length: crossover FIR length × 2 + 1, with automatic cropping ON or OFF. The cropping search minimum is the crossover FIR length."
+  "ui.09e51be597a938": {
+    "source": "LR2のタップ長も指定できます。0は自動設定です。自動クロップのON／OFFにかかわらず、0の仮割り当ては分割FIR長×2＋1です。Adaptive方式は分割FIR長を固定下限にしません。",
+    "ja": "LR2のタップ長も指定できます。0は自動設定です。自動クロップのON／OFFにかかわらず、0の仮割り当ては分割FIR長×2＋1です。Adaptive方式は分割FIR長を固定下限にしません。",
+    "en": "LR2 tap length can also be specified. Zero selects automatic length: crossover FIR length × 2 + 1, with automatic cropping ON or OFF. Adaptive cropping does not use crossover FIR length as a fixed lower limit."
   },
   "ui.50dbb2418f20a2": {
     "source": "**{p0}帯域 EQ**",
@@ -6703,11 +6668,6 @@
     "source": "今回のグラフ更新に {p0} 秒かかりました。Auto OFFも検討してください。",
     "ja": "今回のグラフ更新に {p0} 秒かかりました。Auto OFFも検討してください。",
     "en": "This graph update took {p0} seconds. Consider turning Auto OFF."
-  },
-  "ui.3450d8e3934d18": {
-    "source": "前回のグラフ更新に {p0} 秒かかったため、自動更新を一時停止しました。 設定を確認してから「Recalculate」を押してください。",
-    "ja": "前回のグラフ更新に {p0} 秒かかったため、自動更新を一時停止しました。 設定を確認してから「Recalculate」を押してください。",
-    "en": "Automatic updates were paused because the previous graph update took {p0} seconds. Review settings and click Recalculate."
   },
   "ui.475d24e3dcb7b1": {
     "source": "補正前はIIRを含む帯域分割設計、補正後はGain／Polarity／手動Delay／適用済み位相・時間整合を含む実現応答です。",
@@ -7479,10 +7439,10 @@
     "ja": "#### 3. 実機DSP用パッケージを保存",
     "en": "#### 3. Save a hardware DSP package"
   },
-  "ui.0bac1b243b81ce": {
-    "source": "miniDSP、CamillaDSP、SigmaStudioなどへ投入する最終出力です。内部形式はDSP Export v3です。DSP選択や検証は現在の設計を変更しません。",
-    "ja": "miniDSP、CamillaDSP、SigmaStudioなどへ投入する最終出力です。内部形式はDSP Export v3です。DSP選択や検証は現在の設計を変更しません。",
-    "en": "Final output for miniDSP, CamillaDSP, SigmaStudio, and similar systems. Uses DSP Export v3 internally. DSP selection and validation do not change the current design."
+  "ui.ec56999cea9d09": {
+    "source": "miniDSP、CamillaDSP、SigmaStudioなどへ投入する最終出力です。内部形式はDSP Export v4です。DSP選択や検証は現在の設計を変更しません。",
+    "ja": "miniDSP、CamillaDSP、SigmaStudioなどへ投入する最終出力です。内部形式はDSP Export v4です。DSP選択や検証は現在の設計を変更しません。",
+    "en": "Final output for miniDSP, CamillaDSP, SigmaStudio, and similar systems. Uses DSP Export v4 internally. DSP selection and validation do not change the current design."
   },
   "ui.5928e6ccdd119b": {
     "source": "Target DSP",
@@ -16309,11 +16269,6 @@
     "ja": "補正用割り当てはPhaseEQで補正を設計する長さ、帯域分割FIRは分割フィルター単体の長さです。分割＋追加EQはPhaseEQ返却前の中間結果です。グラフ用の表示IR長はDSPへ入力しません。",
     "en": "Assigned correction taps are the frame used to design correction in PhaseEQ. Crossover FIR taps describe the crossover filter alone. Crossover + additional EQ is an intermediate result before PhaseEQ returns. Do not enter the graph display IR length into your DSP."
   },
-  "ui.4c8287a7be539d": {
-    "source": "自動クロップの明細",
-    "ja": "自動クロップの明細",
-    "en": "Automatic crop details"
-  },
   "ui.529e33bb932695": {
     "source": "現在の最終FIRタップ数：再計算待ち",
     "ja": "現在の最終FIRタップ数：再計算待ち",
@@ -16508,5 +16463,20 @@
     "source": "保存データまたは編集中のEQとリンク構成を反映します。",
     "ja": "保存データまたは編集中のEQとリンク構成を反映します。",
     "en": "Apply saved or draft EQ and link settings."
+  },
+  "ui.ffc36d0fa5ef30": {
+    "source": "Adaptive FIR Croppingの明細",
+    "ja": "Adaptive FIR Croppingの明細",
+    "en": "Adaptive FIR Cropping details"
+  },
+  "ui.c3165585bb409a": {
+    "source": "最終FIR全段の合成後に高精度判定しています。非対称クロップは短い側へのzero追加でtap-centerを保持します。",
+    "ja": "最終FIR全段の合成後に高精度判定しています。非対称クロップは短い側へのzero追加でtap-centerを保持します。",
+    "en": "High-precision evaluation runs after composing every final FIR stage. Asymmetric crops preserve the tap center by adding zeros to the shorter side."
+  },
+  "ui.c93618e7431e4d": {
+    "source": "帯域分割FIRがある場合のみ使用できます。最終FIR全段を合成後に高精度解析し、安全条件を満たす場合だけクロップします。",
+    "ja": "帯域分割FIRがある場合のみ使用できます。最終FIR全段を合成後に高精度解析し、安全条件を満たす場合だけクロップします。",
+    "en": "Available only with crossover FIR filters. Analyzes all composed final FIR stages at high precision and crops only when the safety guards pass."
   }
 }

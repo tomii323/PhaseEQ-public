@@ -51,6 +51,10 @@ def canonical_from_export_inputs(
                 dict(channel.timing_provenance)
                 if isinstance(channel.timing_provenance, dict) else None
             ),
+            adaptive_crop_metadata=(
+                dict(channel.adaptive_crop_metadata)
+                if isinstance(channel.adaptive_crop_metadata, dict) else None
+            ),
         ))
     system_payload = (
         workspace.get("multiway_system", {})

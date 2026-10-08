@@ -21,7 +21,7 @@ from composite_engine.system_specification import (
 
 
 DSP_EXPORT_FORMAT = "phaseeq-multiway-dsp-export"
-DSP_EXPORT_FORMAT_VERSION = 3
+DSP_EXPORT_FORMAT_VERSION = 4
 
 
 def _json_default(value: object) -> object:
@@ -91,6 +91,7 @@ def build_dsp_export_zip(
                 "total_ms": channel.total_delay_samples / channel.sample_rate_hz * 1000.0,
             },
             "timing_provenance": channel.timing_provenance,
+            "adaptive_crop": channel.adaptive_crop_metadata,
         }, ensure_ascii=False, indent=2).encode()
     files["documentation/README_FIRST.txt"] = (
         f"System: {package.system_name}\nTarget DSP: {adapter.display_name}\n"

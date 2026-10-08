@@ -23,6 +23,7 @@
     "processing/fractional_centering.py",
     "processing/slope.py",
     "utils/io.py",
-    "utils/ui_index.py"
+    "utils/ui_index.py",
+    "utils/auto_crop.py"
   ]
 }

@@ -25,6 +25,18 @@ from utils.list_menu_ui import selectbox as shared_selectbox, radio as shared_ra
 
 from crossover_engine.recipe import from_studio as band_split_from_studio
 from composite_engine.multiway_studio.processing import alignment_target, alignment_structure
+from composite_engine.multiway_studio.processing.adaptive_crop_state import (
+    ADAPTIVE_AUTO_CROP_ROWS_KEY,
+    adaptive_auto_crop_rows,
+)
+from composite_engine.multiway_studio.processing.crossover_controls import (
+    TARGET_METHODS,
+    acoustic_target_allowed,
+    boundary_control_snapshot,
+    method_state_key,
+    normalize_method,
+    target_state_key,
+)
 
 from composite_engine.adapter import (
     ChannelPipelineInput,
@@ -352,8 +364,7 @@ def _finite_axis_domain(values: pd.Series) -> tuple[float, float]:
 
 
 def normalize_crossover_method(value: object) -> str:
-    normalized = str(value).strip()
-    return normalized if normalized in CROSSOVER_METHODS else "Kaiser FIR"
+    return normalize_method(value)
 
 
 def _clear_applied_phase_alignment() -> None:
@@ -445,9 +456,8 @@ def render_crossover_method_control(
     fir_enabled: bool = True,
 ) -> str:
     """Render the primary method selector inside one boundary design block."""
-    method_key = f"composite_studio_{mode_key}_crossover_method_{index}"
-    target_key = f"composite_studio_{mode_key}_acoustic_target_{index}"
-    target_methods = {"Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4"}
+    method_key = method_state_key(mode_key, index)
+    target_key = target_state_key(mode_key, index)
     normalized_initial = normalize_crossover_method(initial_method)
     if method_key not in st.session_state:
         st.session_state[method_key] = normalized_initial
@@ -457,7 +467,7 @@ def render_crossover_method_control(
     def _on_change() -> None:
         # A method transition may choose a target default, but it must not
         # impersonate an explicit target-toggle action or rewrite tap settings.
-        st.session_state[target_key] = st.session_state[method_key] in target_methods
+        st.session_state[target_key] = st.session_state[method_key] in TARGET_METHODS
         _clear_applied_phase_alignment()
         if on_method_change is not None:
             on_method_change()
@@ -472,7 +482,7 @@ def render_crossover_method_control(
         format_func=localized_formatter(lambda value: CROSSOVER_METHOD_LABELS[value]),
         key=method_key, width="stretch", required=True, on_change=_on_change,
     ) or "Kaiser FIR"
-    target_allowed = method in target_methods
+    target_allowed = acoustic_target_allowed(method)
     initial_targets = st.session_state.get("settings", {}).get(mode_key, {}).get("boundary_acoustic_targets", [])
     if target_key not in st.session_state:
         st.session_state[target_key] = bool(initial_targets[index]) if index < len(initial_targets) else target_allowed
@@ -510,12 +520,17 @@ def _shared_iir_configs(
 ) -> dict[str, IIRCrossoverConfig]:
     ordered_ways = MODE_WAYS.get(str(mode_key), ())
     prefix = f"composite_studio_{mode_key}"
-    methods = tuple(
-        normalize_crossover_method(st.session_state.get(f"{prefix}_crossover_method_{index}"))
-        for index in range(len(crossover_frequencies_hz))
+    settings = st.session_state.get("settings", {})
+    mode_settings = settings.get(mode_key, {}) if isinstance(settings, dict) else {}
+    controls = boundary_control_snapshot(
+        st.session_state, mode_key, len(crossover_frequencies_hz),
+        fallback_methods=mode_settings.get("crossover_methods", ()),
+        fallback_targets=mode_settings.get("boundary_acoustic_targets", ()),
     )
-    methods = tuple("Through" if st.session_state.get(f"{prefix}_acoustic_target_{i}", False) else method
-                    for i, method in enumerate(methods))
+    methods = tuple(
+        "Through" if controls.acoustic_targets[index] else method
+        for index, method in enumerate(controls.methods)
+    )
     overlaps = tuple(
         _boundary_overlap_from_state(str(mode_key), index)
         for index in range(len(crossover_frequencies_hz))
@@ -1860,11 +1875,15 @@ def render_composite_sidebar(
         st.markdown(ui_message('ui.ff35ad6419c9cd'))
         _render_system_library_header()
         common_iir_configs = _shared_iir_configs(mode_key, crossover_frequencies_hz)
+        mode_settings = st.session_state.get("settings", {}).get(mode_key, {})
+        boundary_controls = boundary_control_snapshot(
+            st.session_state, mode_key, len(crossover_frequencies_hz),
+            fallback_methods=mode_settings.get("crossover_methods", ()),
+            fallback_targets=mode_settings.get("boundary_acoustic_targets", ()),
+        )
         structural_sections = alignment_structure.automatic_sections(
             st.session_state.get("settings", {}), MODE_WAYS[mode_key], crossover_frequencies_hz,
-            tuple(normalize_crossover_method(st.session_state.get(
-                f"composite_studio_{mode_key}_crossover_method_{index}"))
-                for index in range(len(crossover_frequencies_hz))),
+            boundary_controls.methods,
         )
         st.markdown(ui_message('ui.e5f113fdc5fdf7'))
         layout_key = "composite_studio_output_layout"
@@ -2811,13 +2830,12 @@ def _render_phase_alignment_controls(
     ways = MODE_WAYS.get(mode, ())
     mode_settings = settings.get(mode, {}) if isinstance(settings, dict) else {}
     crossovers = tuple(float(value) for value in mode_settings.get("cross_freqs", ()))
-    method_prefix = f"composite_studio_{mode}"
-    crossover_methods = tuple(
-        normalize_crossover_method(
-            st.session_state.get(f"{method_prefix}_crossover_method_{index}")
-        )
-        for index in range(len(crossovers))
+    controls = boundary_control_snapshot(
+        st.session_state, mode, len(crossovers),
+        fallback_methods=mode_settings.get("crossover_methods", ()),
+        fallback_targets=mode_settings.get("boundary_acoustic_targets", ()),
     )
+    crossover_methods = controls.methods
     rows = {
         str(row.get("way", "")): row for row in configured
         if isinstance(row, dict) and bool(row.get("enabled", True))
@@ -3383,13 +3401,12 @@ def _render_system_phase_alignment_controls(
         if len(crossovers) != len(ways) - 1:
             st.warning(ui_message('ui.dacda49e1b312d'))
             return
-        method_prefix = f"composite_studio_{mode}"
-        crossover_methods = tuple(
-            normalize_crossover_method(
-                st.session_state.get(f"{method_prefix}_crossover_method_{index}")
-            )
-            for index in range(len(crossovers))
+        controls = boundary_control_snapshot(
+            st.session_state, mode, len(crossovers),
+            fallback_methods=mode_settings.get("crossover_methods", ()),
+            fallback_targets=mode_settings.get("boundary_acoustic_targets", ()),
         )
+        crossover_methods = controls.methods
         current_signature = studio_dsp_input_signature(
             list(rows), sample_rate_hz=sample_rate,
             crossover_frequencies_hz=crossovers,
@@ -4347,6 +4364,10 @@ def render_composite_results(
         result_settings.get("align_output_taps", False)
         if isinstance(result_settings, dict) else False
     )
+    adaptive_crop_enabled = bool(
+        result_settings.get("auto_crop", False)
+        if isinstance(result_settings, dict) else False
+    )
     assigned_taps = {
         band: (
             int(band_fir_states[band].get("tap_count") or band_tap_lengths.get(band, 0))
@@ -4354,7 +4375,10 @@ def render_composite_results(
         )
         for band in generated_bands
     }
-    output_timing = resolve_output_timing(assigned_taps, align_output_taps=align_output_taps)
+    output_timing = resolve_output_timing(
+        assigned_taps,
+        align_output_taps=align_output_taps and not adaptive_crop_enabled,
+    )
     for row in configured:
         if not isinstance(row, dict) or row.get("source") != "generated_band" or not bool(row.get("enabled", True)):
             continue
@@ -4440,6 +4464,70 @@ def render_composite_results(
             timing_provenance=_timing_export_metadata(row),
             working_session_zip=working_bytes,
         ))
+    if adaptive_crop_enabled and dsp_channels:
+        from composite_engine.export import prepare_adaptive_channel_fir
+        prepared_channels = []
+        crop_rows = []
+        selected_lengths = {}
+        for channel in dsp_channels:
+            if not channel.fir_stages:
+                prepared_channels.append(channel)
+                continue
+            crop_result = prepare_adaptive_channel_fir(channel)
+            metadata = crop_result.to_dict()
+            prepared = replace(
+                channel,
+                tap_count=int(crop_result.final_taps),
+                pre_alignment_tap_count=None,
+                final_fir_override=crop_result.coefficients,
+                adaptive_crop_metadata=metadata,
+                cosine_taper_enabled=False,
+                remove_nyquist_enabled=False,
+            )
+            prepared_channels.append(prepared)
+            selected_lengths[channel.channel_id] = int(crop_result.final_taps)
+            crop_rows.append({
+                "チャンネル": channel.name,
+                "元 [taps]": crop_result.original_taps,
+                "直接クロップ後 [taps]": crop_result.direct_taps,
+                "採用 [taps]": crop_result.final_taps,
+                "左削除": crop_result.left_removed,
+                "右削除": crop_result.right_removed,
+                "左zero": crop_result.padding_left,
+                "右zero": crop_result.padding_right,
+                "時間補償": crop_result.timing_mode,
+                "Crop Delay [samples]": crop_result.crop_delay_samples,
+                "左候補": crop_result.source_left,
+                "右候補": crop_result.source_right,
+                "ゲイン誤差 [dB]": round(crop_result.metrics.gain_error_db, 6),
+                "位相誤差 [deg]": round(crop_result.metrics.phase_error_deg, 6),
+                "複素誤差": round(crop_result.metrics.complex_error, 9),
+                "削除Energy比": round(crop_result.metrics.removed_energy_ratio, 12),
+                "評価基準": crop_result.target_kind,
+                "採用": "○" if crop_result.adopted else crop_result.reason,
+            })
+        if selected_lengths:
+            adaptive_timing = resolve_output_timing(
+                selected_lengths, align_output_taps=align_output_taps,
+            )
+            prepared_channels = [
+                replace(
+                    channel,
+                    tap_count=adaptive_timing[channel.channel_id].tap_count,
+                    pre_alignment_tap_count=(
+                        selected_lengths[channel.channel_id]
+                        if align_output_taps else None
+                    ),
+                    dsp_additional_delay_samples=(
+                        float(channel.dsp_additional_delay_samples)
+                        + adaptive_timing[channel.channel_id].additional_delay_samples
+                    ),
+                )
+                if channel.channel_id in adaptive_timing else channel
+                for channel in prepared_channels
+            ]
+        dsp_channels = prepared_channels
+        st.session_state[ADAPTIVE_AUTO_CROP_ROWS_KEY] = crop_rows
     if dsp_channels:
         current_system = _current_library_system()
         current_record = _current_library_record()
@@ -4543,7 +4631,7 @@ def render_composite_results(
         with st.container(border=True):
             st.markdown(ui_message('ui.63a38ef6e96997'))
             st.caption(
-                ui_message('ui.0bac1b243b81ce')
+                ui_message('ui.ec56999cea9d09')
             )
             from composite_engine.dsp_export import (
                 adapter_by_id,
@@ -4583,6 +4671,17 @@ def render_composite_results(
                 source_signature=str(st.session_state.get("_studio_dsp_input_signature", "")),
                 workspace=export_workspace,
             )
+            adaptive_rows = adaptive_auto_crop_rows(
+                st.session_state.get(ADAPTIVE_AUTO_CROP_ROWS_KEY, [])
+            )
+            if adaptive_crop_enabled and adaptive_rows:
+                with st.expander(ui_message('ui.ffc36d0fa5ef30'), expanded=False):
+                    st.caption(ui_message('ui.c3165585bb409a'))
+                    st.dataframe(
+                        pd.DataFrame(adaptive_rows).rename(columns=display_text),
+                        hide_index=True,
+                        width="stretch",
+                    )
             if band_tap_count_hosts and st.session_state.get("_studio_graphs_current", False):
                 from composite_engine.multiway_studio.ui.output_timing import render_band_tap_counts
                 render_band_tap_counts(canonical_package, band_tap_count_hosts)

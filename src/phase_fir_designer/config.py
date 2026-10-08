@@ -6,6 +6,12 @@ from typing import Any, Literal
 import json
 import math
 
+from fir_design_common.kaiser import (
+    KAISER_BETA_MAX,
+    KAISER_BETA_MIN,
+    clamp_kaiser_beta,
+    kaiser_beta_in_range,
+)
 from .auto_iir_input_shaping import InputShapingSettings
 
 
@@ -34,8 +40,10 @@ SUPPORTED_ANALYSIS_FFT_SIZES = (2048, 4096, 8192, 16_384, 32_768, 65_536)
 SUPPORTED_FIR_FIT_WEIGHTINGS = ("flat",)
 LINEAR_FIR_CYCLES_MIN = 2.0
 LINEAR_FIR_CYCLES_MAX = 7.0
-LINEAR_FIR_BETA_MIN = 7.0
-LINEAR_FIR_BETA_MAX = 14.0
+# Compatibility names remain public, while the numerical policy is shared
+# with Multiway through fir_design_common.kaiser.
+LINEAR_FIR_BETA_MIN = KAISER_BETA_MIN
+LINEAR_FIR_BETA_MAX = KAISER_BETA_MAX
 LINEAR_FIR_EQ_MASK_SMOOTHING_OPTIONS = (1.0 / 6.0, 1.0 / 3.0, 1.0 / 2.0, 1.0, 2.0)
 LINEAR_FIR_EQ_MASK_SMOOTHING_DEFAULT = 0.5
 IIR_PEQ_Q_MAX = 5.0
@@ -528,8 +536,8 @@ class DesignConfig:
                 raise ValueError("linear FIR fc must be >= 0")
             if not LINEAR_FIR_CYCLES_MIN <= item.cycles <= LINEAR_FIR_CYCLES_MAX:
                 raise ValueError("linear FIR cycles must be in 2..7")
-            if not LINEAR_FIR_BETA_MIN <= item.beta <= LINEAR_FIR_BETA_MAX:
-                raise ValueError("linear FIR beta must be in 7..14")
+            if not kaiser_beta_in_range(item.beta):
+                raise ValueError("linear FIR beta must be in 7..16")
 
     def to_json_file(self, path: str | Path) -> None:
         Path(path).write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
@@ -804,7 +812,7 @@ def _clip_linear_fir(item: LinearFIRFilter, sample_rate: int) -> LinearFIRFilter
         acoustic_target=bool(item.acoustic_target),
         overlap_oct=item.overlap_oct,
         cycles=min(max(float(item.cycles), LINEAR_FIR_CYCLES_MIN), LINEAR_FIR_CYCLES_MAX),
-        beta=min(max(float(item.beta), LINEAR_FIR_BETA_MIN), LINEAR_FIR_BETA_MAX),
+        beta=clamp_kaiser_beta(item.beta),
         enabled=bool(item.enabled),
     )
 

@@ -10,6 +10,7 @@ import zipfile
 import numpy as np
 from fir_output_window import apply_output_window, COSINE_TAPER_ALPHA, remove_nyquist_component
 from scipy.io import wavfile
+from scipy.signal import fftconvolve
 from ..fir_artifact import FinalFIRArtifact
 from fir_design_common import generation_fft_size, generation_frequency_axis, project_centered_fir, compose_fir_stages
 
@@ -20,10 +21,10 @@ from ..phase_alignment import AllPassSection, allpass_sos
 
 
 DSP_RESUME_FORMAT = "phaseeq-multiway-dsp-package"
-DSP_RESUME_FORMAT_VERSION = 2
+DSP_RESUME_FORMAT_VERSION = 3
 DSP_RESUME_MIN_SUPPORTED_VERSION = 1
 DSP_DELIVERY_FORMAT = "phaseeq-multiway-dsp-export"
-DSP_DELIVERY_FORMAT_VERSION = 3
+DSP_DELIVERY_FORMAT_VERSION = 4
 
 
 def _workspace_json_default(value: object) -> object:
@@ -71,6 +72,8 @@ class DSPChannelExportInput:
     remove_nyquist_enabled: bool = False
     remove_nyquist_strength: float = 1.0
     pre_alignment_tap_count: int | None = None
+    final_fir_override: np.ndarray | None = None
+    adaptive_crop_metadata: dict[str, object] | None = None
 
 
 def compose_channel_fir(channel: DSPChannelExportInput) -> np.ndarray:
@@ -82,11 +85,40 @@ def compose_channel_fir(channel: DSPChannelExportInput) -> np.ndarray:
     )
     if not 0 < design_taps <= output_taps:
         raise ValueError("FIR alignment cannot shorten the assigned frame")
-    fir = postprocess_channel_fir(compose_fir_stages(
-        (values for _, values in channel.fir_stages), design_taps,
-    ), channel)
+    if channel.final_fir_override is not None:
+        fir = np.asarray(channel.final_fir_override, dtype=float).copy()
+        if fir.ndim != 1 or fir.size != design_taps or not np.isfinite(fir).all():
+            raise ValueError("adaptive final FIR does not match its design frame")
+    else:
+        fir = postprocess_channel_fir(compose_fir_stages(
+            (values for _, values in channel.fir_stages), design_taps,
+        ), channel)
     padding = output_taps - design_taps
     return np.pad(fir, (padding // 2, padding - padding // 2))
+
+
+def prepare_adaptive_channel_fir(channel: DSPChannelExportInput):
+    """Compose all FIR stages once, then crop before the configured final window."""
+    if not channel.fir_stages:
+        raise ValueError("adaptive crop requires FIR stages")
+    natural = None
+    for _name, coefficients in channel.fir_stages:
+        values = np.asarray(coefficients, dtype=float)
+        if values.ndim != 1 or not values.size or not np.isfinite(values).all():
+            raise ValueError("invalid FIR stage")
+        natural = values.copy() if natural is None else fftconvolve(natural, values, mode="full")
+    assert natural is not None
+    if channel.remove_nyquist_enabled:
+        natural, _ = remove_nyquist_component(natural, channel.remove_nyquist_strength)
+    from fir_design_common.adaptive_crop import adaptive_crop_fir
+    maximum_taps = int(channel.tap_count or natural.size)
+    result = adaptive_crop_fir(
+        natural,
+        maximum_taps=maximum_taps,
+        timing_mode="embedded_zero_padding",
+        output_window_enabled=bool(channel.cosine_taper_enabled),
+    )
+    return result
 
 
 def postprocess_channel_fir(fir: np.ndarray, channel: DSPChannelExportInput) -> np.ndarray:
@@ -218,6 +250,7 @@ def build_dsp_resume_zip(
                 if fir is not None else
                 {"enabled": False, "file": None, "tap_count": None, "center_position": None, "contains": []}
             ),
+            "adaptive_crop": channel.adaptive_crop_metadata,
             "phaseeq_iir": list(channel.phaseeq_iir),
             "baffle_iir": {
                 "enabled": bool(baffle_sos.size),
@@ -276,6 +309,7 @@ def build_dsp_resume_zip(
             "center_position": (fir.size - 1) / 2.0 if fir is not None else None,
             "fir": f"{root}/fir.wav" if fir is not None else None,
             "settings": f"{root}/dsp_config.json",
+            "adaptive_crop": channel.adaptive_crop_metadata,
         })
     if composite is not None:
         files.update(build_multichannel_export(composite, root="groups").files)

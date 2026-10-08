@@ -10,6 +10,7 @@ from ..processing.output_summary import output_timing_rows
 _TAP_COUNT_COLUMNS = (
     "最終FIRタップ数", "補正用割り当てタップ数",
     "帯域分割FIRタップ数", "分割＋追加EQタップ数",
+    "Adaptive削減 [taps]",
 )
 
 
