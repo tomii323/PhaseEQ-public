@@ -4,12 +4,12 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from composite_engine.fft import fir_complex_response
-from response_display import sample_series
+from response_display import array_content_revision, sample_series
 from response_display.cache import content_cached
 
 
-@content_cached(revision="final-fir-response-v1", max_entries=32, max_bytes=32*1024*1024)
-def final_fir_response(fir, sample_rate):
+@content_cached(revision="final-fir-response-v2", max_entries=32, max_bytes=32*1024*1024)
+def final_fir_response(fir, sample_rate, *, crop_delay_samples=0.0, original_taps=None):
     values = np.asarray(fir, dtype=float)
     if values.ndim != 1 or not values.size or not np.all(np.isfinite(values)):
         raise ValueError("FIR coefficients must be finite and nonempty")
@@ -18,13 +18,15 @@ def final_fir_response(fir, sample_rate):
     # About 1 Hz; odd length and no truncation of long exported coefficients.
     n = max(int(sample_rate), values.size) | 1
     frequency, response = fir_complex_response(values, int(sample_rate), n,
-                                               center_position=(values.size-1)/2)
+                                               center_position=((original_taps or values.size)-1)/2-float(crop_delay_samples))
     return frequency, 20*np.log10(np.maximum(np.abs(response), 1e-15)), np.angle(response, deg=True)
 
 
 def final_fir_response_figure(fir, sample_rate, *, colors, max_points=4096,
-                              phase_mask_db=-80, gain_range=(-144, 10)):
-    frequency, gain, phase = final_fir_response(fir, sample_rate)
+                              phase_mask_db=-80, gain_range=(-144, 10),
+                              crop_delay_samples=0.0, original_taps=None):
+    coefficient_revision = array_content_revision(fir)
+    frequency, gain, phase = final_fir_response(fir, sample_rate, crop_delay_samples=crop_delay_samples, original_taps=original_taps)
     visible = frequency >= 2
     frequency, gain, phase = frequency[visible], gain[visible], phase[visible].copy()
     phase[gain < phase_mask_db] = np.nan
@@ -41,6 +43,7 @@ def final_fir_response_figure(fir, sample_rate, *, colors, max_points=4096,
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                       font=dict(color=colors["text"], size=16), dragmode="zoom",
                       margin=dict(l=70,r=25,t=20,b=55),
+                      datarevision=coefficient_revision,
                       uirevision=f"final-fir-{len(fir)}-{sample_rate}-{gain_range}-{phase_mask_db}")
     fig.update_xaxes(type="log", range=[np.log10(2), np.log10(sample_rate/2)],
                      gridcolor=colors["grid"], fixedrange=False)

@@ -80,6 +80,9 @@ def validate_package(package: CanonicalDSPPackage, profile: DSPProfile) -> Compa
             issues.append(CompatibilityIssue("error", "iir_sections_exceeded", f"IIR sections {section_count} exceed {profile.max_iir_sections}", channel.channel_id, "iir"))
         if len(allpass) and not profile.supports_allpass:
             issues.append(CompatibilityIssue("error", "allpass_unsupported", "Crossover compensation All-pass is not supported", channel.channel_id, "crossover_allpass"))
+        if channel.total_delay_samples > 0 and not profile.supports_delay:
+            issues.append(CompatibilityIssue("error", "delay_unsupported",
+                "Absolute FIR time origin requires an external delay", channel.channel_id, "delay"))
         if channel.total_delay_samples < 0:
             issues.append(CompatibilityIssue("error", "negative_delay", "Total delay must not be negative", channel.channel_id, "delay"))
         if not profile.supports_fractional_delay and not np.isclose(channel.total_delay_samples, round(channel.total_delay_samples)):

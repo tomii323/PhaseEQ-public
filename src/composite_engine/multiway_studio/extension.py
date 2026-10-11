@@ -24,10 +24,15 @@ import streamlit as st
 from utils.list_menu_ui import selectbox as shared_selectbox, radio as shared_radio, segmented_control as shared_segmented_control
 
 from crossover_engine.recipe import from_studio as band_split_from_studio
+from crossover_engine.bank import MODE_BANDS as CROSSOVER_MODE_BANDS
 from composite_engine.multiway_studio.processing import alignment_target, alignment_structure
 from composite_engine.multiway_studio.processing.adaptive_crop_state import (
     ADAPTIVE_AUTO_CROP_ROWS_KEY,
     adaptive_auto_crop_rows,
+)
+from composite_engine.multiway_studio.ui.adaptive_crop import adaptive_crop_frame, taper_limit_messages
+from composite_engine.multiway_studio.processing.fir_state import (
+    bands_using_kaiser_split,
 )
 from composite_engine.multiway_studio.processing.crossover_controls import (
     TARGET_METHODS,
@@ -709,8 +714,6 @@ def _current_library_record():
 
 OUTPUT_FIR_SETTINGS = (
     ("composite_output_cosine_taper", "output_fir_cosine_taper_enabled", False, bool),
-    ("composite_output_remove_nyquist", "output_fir_remove_nyquist_enabled", False, bool),
-    ("composite_output_nyquist_strength", "output_fir_remove_nyquist_strength", 1.0, float),
 )
 
 
@@ -2683,8 +2686,260 @@ def _phaseeq_channel_fir(row, sample_rate_hz):
     )
 
 
+def _prepare_studio_output_firs(state, final_firs, sample_rate_hz, *, output_taper):
+    """Build one final coefficient snapshot for Group analysis and all outputs."""
+    from composite_engine.export import DSPChannelExportInput
+    configured = state.get("composite_studio_channels", [])
+    dsp_channels = []
+    crop_rows = []
+    kaiser_split_firs = state.get("kaiser_split_firs", {})
+    studio_additional_firs = state.get("studio_additional_firs", {})
+    band_tap_lengths = state.get("composite_studio_band_tap_lengths", {})
+    band_fir_states = state.get("composite_studio_band_fir_states", {})
+    generated_bands = {
+        str(row.get("band", ""))
+        for row in configured
+        if isinstance(row, dict)
+        and row.get("source") == "generated_band"
+        and bool(row.get("enabled", True))
+        and str(row.get("band", "")) in final_firs
+    }
+    result_settings = state.get("result_settings", {})
+    adaptive_crop_enabled = bool(
+        result_settings.get("auto_crop", False)
+        if isinstance(result_settings, dict) else False
+    )
+    assigned_taps = {
+        band: (
+            int(band_fir_states[band].get("tap_count") or band_tap_lengths.get(band, 0))
+            if band_fir_states.get(band, {}).get("enabled", False) else None
+        )
+        for band in generated_bands
+    }
+    result_mode_key = str(state.get("result_mode_key", ""))
+    # Boundary methods are stored from low to high.  Channel rows are displayed
+    # high to low and may repeat for stereo, so they must never define this
+    # topology order.
+    ordered_bands = tuple(CROSSOVER_MODE_BANDS.get(result_mode_key, ()))
+    result_mode_settings = (
+        result_settings.get(result_mode_key, {})
+        if isinstance(result_settings, dict) else {}
+    )
+    result_methods = tuple(
+        str(value)
+        for value in (
+            result_mode_settings.get("crossover_methods", ())
+            if isinstance(result_mode_settings, dict) else ()
+        )
+    )
+    kaiser_taper_bands = (
+        bands_using_kaiser_split(ordered_bands, result_methods)
+        if len(result_methods) == max(0, len(ordered_bands) - 1)
+        else frozenset()
+    )
+    taper_protection_taps = {}
+    framed_taps = assigned_taps
+    # Alignment is represented as delay; finalized FIRs are never padded.
+    output_timing = resolve_output_timing(assigned_taps, align_output_taps=False)
+    for row in configured:
+        if not isinstance(row, dict) or row.get("source") != "generated_band" or not bool(row.get("enabled", True)):
+            continue
+        band = str(row.get("band", ""))
+        if band not in final_firs or band not in kaiser_split_firs:
+            continue
+        fir_state = (
+            band_fir_states.get(band, {})
+            if isinstance(band_fir_states, dict) else {}
+        )
+        fir_enabled = bool(fir_state.get("enabled", False))
+        # Kaiser coefficients are generated once.  Any taper protection is a
+        # final real-coefficient extension and must never redesign this stage.
+        kaiser_coefficients = np.asarray(kaiser_split_firs[band], dtype=float)
+        stages: list[tuple[str, np.ndarray]] = []
+        if fir_enabled and not (
+            kaiser_coefficients.size == 1 and float(kaiser_coefficients[0]) == 1.0
+        ):
+            stages.append(("kaiser_fir_crossover", kaiser_coefficients))
+        phaseeq_fir = row.get("phaseeq_fir_response")
+        if fir_enabled and isinstance(phaseeq_fir, dict):
+            stage = (
+                "phaseeq_fir_eq",
+                _phaseeq_channel_fir(row, sample_rate_hz),
+            )
+            stages.append(stage)
+        studio_additional = studio_additional_firs.get(band)
+        if fir_enabled and studio_additional is not None and not (
+            len(studio_additional) == 1 and float(studio_additional[0]) == 1.0
+        ):
+            stage = ("additional_fir_studio", np.asarray(studio_additional, dtype=float))
+            stages.append(stage)
+        additional_fir = row.get("additional_fir")
+        if fir_enabled and additional_fir is not None:
+            stage = (
+                "additional_fir",
+                _fir_coefficients(str(additional_fir.name), additional_fir.getvalue(), int(sample_rate_hz)),
+            )
+            stages.append(stage)
+        studio_eq_files = result_mode_settings.get("eq_files", {}).get(band, ())
+        has_fir_eq = (isinstance(phaseeq_fir, dict) or additional_fir is not None
+                      or any(str(name).strip() for name in studio_eq_files))
+        if (fir_enabled and stages
+                and fir_state.get("tap_source") == "auto_split" and not has_fir_eq):
+            from fir_design_common.unity_eq import unity_fir_eq
+            stages.append(("unity_fir_eq", unity_fir_eq(int(assigned_taps[band]))))
+        normalization = state.get("normalization_info", {})
+        if fir_enabled and not stages:
+            stage = ("manual_fir_frame", np.asarray([1.0], dtype=float))
+            stages.append(stage)
+        normalization_gain_db = (
+            float(normalization.get("gain_db", 0.0))
+            if isinstance(normalization, dict) and bool(normalization.get("enabled", False))
+            else 0.0
+        )
+        working_path = row.get("phaseeq_working_session")
+        working_bytes = (
+            Path(working_path).read_bytes()
+            if working_path is not None and Path(working_path).is_file() else None
+        )
+        output_iir, output_polarity, output_allpass = alignment_target.output_settings(row)
+        dsp_channels.append(DSPChannelExportInput(
+            basic_fir_taps=int(kaiser_coefficients.size) if fir_enabled else 1,
+            channel_id=str(row.get("channel_id") or phaseeq_channel_id(
+                str(row["name"]), str(row["way"]), str(row["group"]),
+            )),
+            name=str(row["name"]), way=str(row["way"]), group=str(row["group"]),
+            sample_rate_hz=int(sample_rate_hz),
+            tap_count=output_timing[band].tap_count,
+            pre_alignment_tap_count=(
+                int(framed_taps[band])
+                if not adaptive_crop_enabled
+                and framed_taps[band] is not None
+                and output_timing[band].tap_count != framed_taps[band]
+                else None
+            ),
+            fir_stages=tuple(stages),
+            cosine_taper_enabled=bool(output_taper),
+            kaiser_band_split_active=bool(
+                band in kaiser_taper_bands and band in kaiser_split_firs
+            ),
+            cosine_taper_protected_center_taps=(
+                int(assigned_taps[band])
+                if bool(output_taper)
+                and band in taper_protection_taps
+                and assigned_taps.get(band) is not None
+                and int(taper_protection_taps[band]) > int(assigned_taps[band])
+                else None
+            ),
+            phaseeq_iir=tuple(
+                dict(item) for item in row.get("phaseeq_iir", []) if isinstance(item, dict)
+            ),
+            phaseeq_iir_sos=tuple(
+                tuple(float(value) for value in section)
+                for section in row.get("phaseeq_iir_sos", ())
+            ),
+            baffle_iir_parameters=(
+                dict(row["baffle_iir_parameters"])
+                if isinstance(row.get("baffle_iir_parameters"), dict) else None
+            ),
+            baffle_iir_sos=tuple(
+                tuple(float(value) for value in section)
+                for section in row.get("baffle_iir_sos", ())
+            ),
+            iir_crossover=output_iir,
+            gain_db=float(row["gain_db"]) + normalization_gain_db,
+            polarity=output_polarity,
+            dsp_additional_delay_samples=output_timing[band].additional_delay_samples,
+            channel_relative_delay_samples=float(row["delay_samples"]),
+            auto_alignment_delay_samples=float(row.get("auto_alignment_delay_samples", 0.0)),
+            auto_alignment_allpass=output_allpass,
+            timing_provenance=_timing_export_metadata(row),
+            working_session_zip=working_bytes,
+        ))
+    if dsp_channels:
+        from composite_engine.export import prepare_channel_fir, capture_finalized_channel
+        prepared_channels = []
+        crop_rows = []
+        final_taps_by_channel = {}
+        for channel in dsp_channels:
+            if not channel.fir_stages:
+                prepared_channels.append(channel)
+                final_taps_by_channel[channel.channel_id] = None
+                continue
+            tap_result = prepare_channel_fir(channel, adaptive=adaptive_crop_enabled)
+            crop_result = tap_result.adaptive
+            metadata = crop_result.to_dict() if crop_result is not None else {
+                "mode": "fixed", "original_taps": tap_result.input_taps,
+                "final_taps": tap_result.final_taps,
+                "crop_delay_samples": tap_result.crop_delay_samples,
+                "timing_mode": "external_delay" if tap_result.crop_delay_samples else "none",
+            }
+            adaptive_input_taps = int(tap_result.input_taps)
+            taper_frame_taps = tap_result.taper_frame_taps
+            guarded_taps = int(tap_result.final_taps)
+            guarded_coefficients = tap_result.coefficients
+            if taper_frame_taps is not None:
+                metadata["cosine_taper_reference_taps"] = int(
+                    tap_result.taper_reference_taps or tap_result.final_taps
+                )
+                metadata["cosine_taper_frame_taps"] = int(taper_frame_taps)
+                metadata["cosine_taper_source_limit_taps"] = int(
+                    tap_result.taper_source_limit_taps or adaptive_input_taps
+                )
+                metadata["cosine_taper_padding_taps"] = int(
+                    tap_result.taper_padding_taps
+                )
+            prepared = capture_finalized_channel(channel, tap_result)
+            metadata.update(prepared.adaptive_crop_metadata or {})
+            prepared = replace(prepared, adaptive_crop_metadata=metadata)
+            prepared_channels.append(prepared)
+            final_taps_by_channel[channel.channel_id] = guarded_taps
+            if taper_frame_taps is not None:
+                taper_protection_taps[channel.way] = int(taper_frame_taps)
+            if crop_result is None:
+                continue
+            crop_rows.append({
+                "チャンネル": channel.name,
+                "元 [taps]": crop_result.original_taps,
+                "直接クロップ後 [taps]": crop_result.base_candidate_taps,
+                "採用 [taps]": crop_result.final_taps,
+                "左削除": crop_result.left_removed,
+                "右削除": crop_result.right_removed,
+                "左zero": crop_result.padding_left,
+                "右zero": crop_result.padding_right,
+                "110%保護枠 [taps]": taper_frame_taps if taper_frame_taps is not None else "—",
+                "テーパー上限 [taps]": (
+                    tap_result.taper_source_limit_taps if taper_frame_taps is not None else "—"
+                ),
+                "テーパー追加実係数 [taps]": (
+                    (guarded_taps - int(tap_result.taper_reference_taps or guarded_taps))
+                    if taper_frame_taps is not None else "—"
+                ),
+                "時間補償": crop_result.timing_mode,
+                "Crop Delay [samples]": crop_result.crop_delay_samples,
+                "左候補": crop_result.source_left,
+                "右候補": crop_result.source_right,
+                "ゲイン誤差 [dB]": round(crop_result.metrics.gain_error_db, 6),
+                "位相誤差 [deg]": round(crop_result.metrics.phase_error_deg, 6),
+                "複素誤差": round(crop_result.metrics.complex_error, 9),
+                "削除Energy比": round(crop_result.metrics.removed_energy_ratio, 12),
+                "評価基準": crop_result.target_kind,
+                "採用": "○" if crop_result.adopted else crop_result.reason,
+            })
+        # Absolute crop origins are already included in each channel's DSP
+        # delay. Do not re-center Ways or pad their finalized coefficients.
+        dsp_channels = prepared_channels
+
+    return {
+        "channels": dsp_channels, "crop_rows": crop_rows,
+        "assigned_taps": assigned_taps, "taper_protection_taps": taper_protection_taps,
+        "kaiser_split_firs": kaiser_split_firs, "band_fir_states": band_fir_states,
+        "adaptive_crop_enabled": adaptive_crop_enabled,
+    }
+
+
 def _build_studio_pipelines(
     final_firs: dict[str, object], sample_rate_hz: int,
+    *, final_channels=None,
 ) -> MultichannelCompositeResult:
     configured = st.session_state.get("composite_studio_channels", [])
     band_fir_states = st.session_state.get("composite_studio_band_fir_states", {})
@@ -2692,6 +2947,7 @@ def _build_studio_pipelines(
                if isinstance(row, dict) and row.get("enabled", True) and row.get("phaseeq_link_pending")]
     if pending:
         raise ValueError(ui_message("ui.1379b62f3433eb") + ", ".join(pending))
+    finals = {(channel.group, channel.name): channel for channel in (final_channels or ())}
     inputs: list[ChannelPipelineInput] = []
     generated_rows = [
         row for row in configured
@@ -2712,7 +2968,9 @@ def _build_studio_pipelines(
     )
     for row in generated_rows:
         band = str(row["band"])
-        coefficients = final_firs[band]
+        confirmed = finals.get((str(row["group"]), str(row["name"])))
+        coefficients = (confirmed.final_fir_override if confirmed is not None
+                        and confirmed.final_fir_override is not None else final_firs[band])
         fir_state = (
             band_fir_states.get(band, {})
             if isinstance(band_fir_states, dict) else {}
@@ -2738,7 +2996,7 @@ def _build_studio_pipelines(
                 speaker.label, speaker.filename, speaker.data,
             ))
         phaseeq_fir = row.get("phaseeq_fir_response")
-        if fir_enabled and isinstance(phaseeq_fir, dict):
+        if confirmed is None and fir_enabled and isinstance(phaseeq_fir, dict):
             normalized_buffer = io.BytesIO()
             wavfile.write(normalized_buffer, int(sample_rate_hz), _phaseeq_channel_fir(row, sample_rate_hz))
             stages.append(ResponseStage(
@@ -2747,9 +3005,12 @@ def _build_studio_pipelines(
                 normalized_buffer.getvalue(),
             ))
         if fir_enabled:
-            stages.append(ResponseStage("Band FIR", f"studio_{band}.wav", buffer.getvalue()))
+            original_taps = (confirmed.adaptive_crop_metadata or {}).get("original_taps", len(coefficients)) if confirmed else len(coefficients)
+            stages.append(ResponseStage("Final FIR" if confirmed else "Band FIR",
+                f"studio_{band}.wav", buffer.getvalue(),
+                reference_center_samples=(int(original_taps)-1)/2.0 if confirmed else None))
         additional_fir = row.get("additional_fir")
-        if fir_enabled and additional_fir is not None:
+        if confirmed is None and fir_enabled and additional_fir is not None:
             stages.append(_fir_stage_from_upload("Additional FIR", additional_fir, sample_rate_hz))
         speaker_relative_timing_samples = (
             speaker_timing_samples_for_row(timing_projection, row)
@@ -2762,10 +3023,11 @@ def _build_studio_pipelines(
             speaker_relative_timing_samples=float(
                 speaker_relative_timing_samples
             ),
-            gain_db=float(row["gain_db"]), polarity=output_polarity,
+            gain_db=confirmed.gain_db if confirmed else float(row["gain_db"]), polarity=output_polarity,
             delay_samples=float(row["delay_samples"]),
             iir_crossover=output_iir,
-            dsp_additional_delay_samples=float(row.get("dsp_additional_delay_samples", 0.0)),
+            dsp_additional_delay_samples=(confirmed.dsp_additional_delay_samples if confirmed
+                                          else float(row.get("dsp_additional_delay_samples", 0.0))),
             auto_alignment_delay_samples=float(row.get("auto_alignment_delay_samples", 0.0)),
             auto_alignment_allpass=output_allpass,
             iir_sos=(
@@ -3865,7 +4127,7 @@ def _sync_displayed_channel_widget(*, stereo: bool) -> None:
 
 def render_composite_results(
     *, alignment_host: object | None = None, output_timing_host: object | None = None,
-    band_tap_count_hosts: dict | None = None,
+    band_tap_count_hosts: dict | None = None, align_output_taps: bool,
 ) -> None:
     """Build Composite Groups only from the Studio's realized final FIRs."""
     if st.session_state.get("_history_pending_phaseeq") or st.session_state.get("_history_awaiting_return"):
@@ -3901,8 +4163,13 @@ def render_composite_results(
     st.caption(
         ui_message('ui.9090da477e73c4')
     )
+    restore_output_fir_settings(st.session_state.get("settings", {}), overwrite=False)
     try:
-        multichannel = _build_studio_pipelines(final_firs, int(sample_rate_hz))
+        final_snapshot = _prepare_studio_output_firs(st.session_state, final_firs, int(sample_rate_hz),
+            output_taper=bool(st.session_state.get("composite_output_cosine_taper", False)))
+        st.session_state[ADAPTIVE_AUTO_CROP_ROWS_KEY] = final_snapshot["crop_rows"]
+        multichannel = _build_studio_pipelines(final_firs, int(sample_rate_hz),
+                                              final_channels=final_snapshot["channels"])
     except (CompositeValidationError, ValueError, OSError) as exc:
         st.error(ui_message('ui.572d7b3cffb4c9', p0=f'{exc}'))
         return
@@ -4324,210 +4591,26 @@ def render_composite_results(
     with final_fir_panel:
         st.markdown(ui_message('ui.f302de343537a0'))
         st.caption(ui_message('ui.ac662edb6c68df'))
-        output_remove_nyquist = st.checkbox(
-            ui_message('ui.13ec7c644f445c'), key="composite_output_remove_nyquist",
-            on_change=_commit_output_taper,
-            help=ui_message('ui.4af9483c20a26d'),
-        )
-        output_nyquist_strength = st.slider(
-            ui_message('ui.9004bca80c9432'), min_value=0.0, max_value=1.0, step=0.05,
-            key="composite_output_nyquist_strength", on_change=_commit_output_taper,
-            disabled=not output_remove_nyquist,
-            help=ui_message('ui.1f204c955f24b0'),
-        )
         output_taper = st.checkbox(
             ui_message('ui.78c3bbd1fa1439'),
             key="composite_output_cosine_taper",
             on_change=_commit_output_taper,
-            help=ui_message('ui.06fa323b93f168'),
+            help=ui_message('ui.50afae67eec81c'),
         )
+        for message in taper_limit_messages(final_snapshot["channels"]):
+            st.caption(message)
         with st.expander(display_text("最終FIRグラフ"), expanded=False):
             show_final_response = st.checkbox(ui_message('ui.1e3e6c4ad3bd1e'), value=True,
                                               key="composite_show_final_fir_response")
             show_final_coefficients = st.checkbox(ui_message('ui.d6af320bcc686e'), key="composite_show_fir_cofs")
             final_fir_graphs = st.container()
     _commit_output_taper()
-    kaiser_split_firs = st.session_state.get("kaiser_split_firs", {})
-    studio_additional_firs = st.session_state.get("studio_additional_firs", {})
-    band_tap_lengths = st.session_state.get("composite_studio_band_tap_lengths", {})
-    band_fir_states = st.session_state.get("composite_studio_band_fir_states", {})
-    generated_bands = {
-        str(row.get("band", ""))
-        for row in configured
-        if isinstance(row, dict)
-        and row.get("source") == "generated_band"
-        and bool(row.get("enabled", True))
-        and str(row.get("band", "")) in final_firs
-    }
-    result_settings = st.session_state.get("result_settings", {})
-    align_output_taps = bool(
-        result_settings.get("align_output_taps", False)
-        if isinstance(result_settings, dict) else False
-    )
-    adaptive_crop_enabled = bool(
-        result_settings.get("auto_crop", False)
-        if isinstance(result_settings, dict) else False
-    )
-    assigned_taps = {
-        band: (
-            int(band_fir_states[band].get("tap_count") or band_tap_lengths.get(band, 0))
-            if band_fir_states.get(band, {}).get("enabled", False) else None
-        )
-        for band in generated_bands
-    }
-    output_timing = resolve_output_timing(
-        assigned_taps,
-        align_output_taps=align_output_taps and not adaptive_crop_enabled,
-    )
-    for row in configured:
-        if not isinstance(row, dict) or row.get("source") != "generated_band" or not bool(row.get("enabled", True)):
-            continue
-        band = str(row.get("band", ""))
-        if band not in final_firs or band not in kaiser_split_firs:
-            continue
-        fir_state = (
-            band_fir_states.get(band, {})
-            if isinstance(band_fir_states, dict) else {}
-        )
-        fir_enabled = bool(fir_state.get("enabled", False))
-        kaiser_coefficients = np.asarray(kaiser_split_firs[band], dtype=float)
-        stages: list[tuple[str, np.ndarray]] = []
-        if fir_enabled and not (
-            kaiser_coefficients.size == 1 and float(kaiser_coefficients[0]) == 1.0
-        ):
-            stages.append(("kaiser_fir_crossover", kaiser_coefficients))
-        phaseeq_fir = row.get("phaseeq_fir_response")
-        if fir_enabled and isinstance(phaseeq_fir, dict):
-            stages.append((
-                "phaseeq_fir_eq",
-                _phaseeq_channel_fir(row, sample_rate_hz),
-            ))
-        studio_additional = studio_additional_firs.get(band)
-        if fir_enabled and studio_additional is not None and not (
-            len(studio_additional) == 1 and float(studio_additional[0]) == 1.0
-        ):
-            stages.append(("additional_fir_studio", np.asarray(studio_additional, dtype=float)))
-        additional_fir = row.get("additional_fir")
-        if fir_enabled and additional_fir is not None:
-            stages.append((
-                "additional_fir",
-                _fir_coefficients(str(additional_fir.name), additional_fir.getvalue(), int(sample_rate_hz)),
-            ))
-        normalization = st.session_state.get("normalization_info", {})
-        if fir_enabled and not stages:
-            stages.append(("manual_fir_frame", np.asarray([1.0], dtype=float)))
-        normalization_gain_db = (
-            float(normalization.get("gain_db", 0.0))
-            if isinstance(normalization, dict) and bool(normalization.get("enabled", False))
-            else 0.0
-        )
-        working_path = row.get("phaseeq_working_session")
-        working_bytes = (
-            Path(working_path).read_bytes()
-            if working_path is not None and Path(working_path).is_file() else None
-        )
-        output_iir, output_polarity, output_allpass = alignment_target.output_settings(row)
-        dsp_channels.append(DSPChannelExportInput(
-            channel_id=str(row.get("channel_id") or phaseeq_channel_id(
-                str(row["name"]), str(row["way"]), str(row["group"]),
-            )),
-            name=str(row["name"]), way=str(row["way"]), group=str(row["group"]),
-            sample_rate_hz=int(sample_rate_hz),
-            tap_count=output_timing[band].tap_count,
-            pre_alignment_tap_count=assigned_taps[band] if align_output_taps else None,
-            fir_stages=tuple(stages),
-            cosine_taper_enabled=bool(output_taper),
-            remove_nyquist_enabled=bool(output_remove_nyquist),
-            remove_nyquist_strength=float(output_nyquist_strength),
-            phaseeq_iir=tuple(
-                dict(item) for item in row.get("phaseeq_iir", []) if isinstance(item, dict)
-            ),
-            phaseeq_iir_sos=tuple(
-                tuple(float(value) for value in section)
-                for section in row.get("phaseeq_iir_sos", ())
-            ),
-            baffle_iir_parameters=(
-                dict(row["baffle_iir_parameters"])
-                if isinstance(row.get("baffle_iir_parameters"), dict) else None
-            ),
-            baffle_iir_sos=tuple(
-                tuple(float(value) for value in section)
-                for section in row.get("baffle_iir_sos", ())
-            ),
-            iir_crossover=output_iir,
-            gain_db=float(row["gain_db"]) + normalization_gain_db,
-            polarity=output_polarity,
-            dsp_additional_delay_samples=output_timing[band].additional_delay_samples,
-            channel_relative_delay_samples=float(row["delay_samples"]),
-            auto_alignment_delay_samples=float(row.get("auto_alignment_delay_samples", 0.0)),
-            auto_alignment_allpass=output_allpass,
-            timing_provenance=_timing_export_metadata(row),
-            working_session_zip=working_bytes,
-        ))
-    if adaptive_crop_enabled and dsp_channels:
-        from composite_engine.export import prepare_adaptive_channel_fir
-        prepared_channels = []
-        crop_rows = []
-        selected_lengths = {}
-        for channel in dsp_channels:
-            if not channel.fir_stages:
-                prepared_channels.append(channel)
-                continue
-            crop_result = prepare_adaptive_channel_fir(channel)
-            metadata = crop_result.to_dict()
-            prepared = replace(
-                channel,
-                tap_count=int(crop_result.final_taps),
-                pre_alignment_tap_count=None,
-                final_fir_override=crop_result.coefficients,
-                adaptive_crop_metadata=metadata,
-                cosine_taper_enabled=False,
-                remove_nyquist_enabled=False,
-            )
-            prepared_channels.append(prepared)
-            selected_lengths[channel.channel_id] = int(crop_result.final_taps)
-            crop_rows.append({
-                "チャンネル": channel.name,
-                "元 [taps]": crop_result.original_taps,
-                "直接クロップ後 [taps]": crop_result.direct_taps,
-                "採用 [taps]": crop_result.final_taps,
-                "左削除": crop_result.left_removed,
-                "右削除": crop_result.right_removed,
-                "左zero": crop_result.padding_left,
-                "右zero": crop_result.padding_right,
-                "時間補償": crop_result.timing_mode,
-                "Crop Delay [samples]": crop_result.crop_delay_samples,
-                "左候補": crop_result.source_left,
-                "右候補": crop_result.source_right,
-                "ゲイン誤差 [dB]": round(crop_result.metrics.gain_error_db, 6),
-                "位相誤差 [deg]": round(crop_result.metrics.phase_error_deg, 6),
-                "複素誤差": round(crop_result.metrics.complex_error, 9),
-                "削除Energy比": round(crop_result.metrics.removed_energy_ratio, 12),
-                "評価基準": crop_result.target_kind,
-                "採用": "○" if crop_result.adopted else crop_result.reason,
-            })
-        if selected_lengths:
-            adaptive_timing = resolve_output_timing(
-                selected_lengths, align_output_taps=align_output_taps,
-            )
-            prepared_channels = [
-                replace(
-                    channel,
-                    tap_count=adaptive_timing[channel.channel_id].tap_count,
-                    pre_alignment_tap_count=(
-                        selected_lengths[channel.channel_id]
-                        if align_output_taps else None
-                    ),
-                    dsp_additional_delay_samples=(
-                        float(channel.dsp_additional_delay_samples)
-                        + adaptive_timing[channel.channel_id].additional_delay_samples
-                    ),
-                )
-                if channel.channel_id in adaptive_timing else channel
-                for channel in prepared_channels
-            ]
-        dsp_channels = prepared_channels
-        st.session_state[ADAPTIVE_AUTO_CROP_ROWS_KEY] = crop_rows
+    dsp_channels = final_snapshot["channels"]
+    assigned_taps = final_snapshot["assigned_taps"]
+    taper_protection_taps = final_snapshot["taper_protection_taps"]
+    kaiser_split_firs = final_snapshot["kaiser_split_firs"]
+    band_fir_states = final_snapshot["band_fir_states"]
+    adaptive_crop_enabled = final_snapshot["adaptive_crop_enabled"]
     if dsp_channels:
         current_system = _current_library_system()
         current_record = _current_library_record()
@@ -4676,9 +4759,9 @@ def render_composite_results(
             )
             if adaptive_crop_enabled and adaptive_rows:
                 with st.expander(ui_message('ui.ffc36d0fa5ef30'), expanded=False):
-                    st.caption(ui_message('ui.c3165585bb409a'))
+                    st.caption(ui_message('ui.86730e8c2449e1'))
                     st.dataframe(
-                        pd.DataFrame(adaptive_rows).rename(columns=display_text),
+                        adaptive_crop_frame(adaptive_rows),
                         hide_index=True,
                         width="stretch",
                     )
@@ -4693,6 +4776,8 @@ def render_composite_results(
                         split_lengths={band: len(values) for band, values in kaiser_split_firs.items()
                                        if band_fir_states.get(band, {}).get("split_fir_required", False)},
                         intermediate_lengths={band: len(values) for band, values in final_firs.items()},
+                        align_output_taps=align_output_taps,
+                        taper_protection_taps=taper_protection_taps,
                     )
             compatibility = selected_adapter.validate(canonical_package, selected_profile)
             with resume_download_host:
@@ -4726,11 +4811,13 @@ def render_composite_results(
                         if channel.final_fir is None:
                             st.caption(ui_message('ui.a7f2612885ea5b', p0=f'{channel.group}', p1=f'{channel.name}'))
                             continue
-                        st.caption(ui_message('ui.acecce7bb9d51c', p0=f'{channel.group}', p1=f'{channel.name}', p2=f'{len(channel.final_fir):,}', p3=f"{('ON' if output_remove_nyquist else 'OFF')}", p4=f"{('ON' if output_taper else 'OFF')}"))
+                        st.caption(ui_message('ui.174cdb10f8e281', p0=f'{channel.group}', p1=f'{channel.name}', p2=f'{len(channel.final_fir):,}', p3=f"{('ON' if output_taper else 'OFF')}"))
                         if show_final_response:
                             from response_display.fir_response import final_fir_response_figure
                             st.plotly_chart(final_fir_response_figure(
                                 channel.final_fir, channel.sample_rate_hz, colors=chart_theme,
+                                crop_delay_samples=(channel.adaptive_crop_metadata or {}).get("crop_delay_samples",0),
+                                original_taps=(channel.adaptive_crop_metadata or {}).get("original_taps"),
                                 max_points=int(st.session_state.get("graph_max_points", DEFAULT_GRAPH_MAX_POINTS)),
                                 phase_mask_db=float(st.session_state.get("phase_gain_mask_db", -80)),
                                 gain_range=(float(st.session_state.get("gain_y_min_db", DEFAULT_GAIN_Y_MIN_DB)),
@@ -4738,7 +4825,8 @@ def render_composite_results(
                             ), key=f"composite_final_fir_response_{channel.channel_id}",
                                 theme=None, width="stretch", config=PLOTLY_CONFIG)
                         if show_final_coefficients:
-                            st.plotly_chart(coefficient_figure(channel.final_fir, window_enabled=output_taper, colors=coefficient_colors),
+                            st.plotly_chart(coefficient_figure(channel.final_fir, window_enabled=output_taper, colors=coefficient_colors,
+                                                               protected_center_taps=(channel.adaptive_crop_metadata or {}).get("cosine_taper_reference_taps")),
                                             key=f"composite_fir_cofs_{channel.channel_id}",
                                             theme=None, width="stretch", config=PLOTLY_CONFIG)
             st.dataframe(pd.DataFrame(compatibility.channel_rows), hide_index=True, width="stretch")

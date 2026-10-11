@@ -7,13 +7,19 @@ import numpy as np
 
 def source_signature(channel) -> str:
     digest = hashlib.sha256(json.dumps([
-        'final-fir-a-v1', int(channel.sample_rate_hz), int(channel.tap_count or 0),
-        bool(channel.remove_nyquist_enabled), float(channel.remove_nyquist_strength),
+        'final-fir-a-v4', int(channel.sample_rate_hz), int(channel.tap_count or 0),
         bool(channel.cosine_taper_enabled),
+        bool(getattr(channel, "final_window_applied", False)),
+        bool(getattr(channel, 'kaiser_band_split_active', False)),
+        getattr(channel, 'cosine_taper_protected_center_taps', None),
+        (channel.adaptive_crop_metadata or {}).get("crop_delay_samples", 0.0),
+        (channel.adaptive_crop_metadata or {}).get("original_taps", 0),
     ], allow_nan=False).encode())
     if channel.pre_alignment_tap_count is not None:
         digest.update(f'pre-alignment:{channel.pre_alignment_tap_count}'.encode())
     if getattr(channel, 'final_fir_override', None) is not None:
+        if np.iscomplexobj(channel.final_fir_override):
+            raise ValueError("final FIR coefficients must be real")
         override = np.asarray(channel.final_fir_override, dtype='<f8')
         digest.update(b'final-override:')
         digest.update(override.tobytes())
@@ -33,20 +39,26 @@ class FinalFIRArtifact:
     source_revision: str
     coefficients: np.ndarray
     coefficient_revision: str
+    resolved_taps: int = 0
+    crop_delay_samples: float = 0.0
+    input_taps: int = 0
 
     @classmethod
-    def capture(cls, channel, coefficients):
+    def capture(cls, channel, coefficients, *, allow_resolved_frame=False, crop_delay_samples=0.0, input_taps=0):
+        if np.iscomplexobj(coefficients):
+            raise ValueError("final FIR coefficients must be real")
         values = np.asarray(coefficients, dtype='<f8')
-        if values.ndim != 1 or values.size != channel.tap_count or not np.isfinite(values).all():
+        if values.ndim != 1 or (values.size != channel.tap_count and not allow_resolved_frame) or not np.isfinite(values).all():
             raise ValueError('invalid final FIR artifact')
         payload = values.tobytes()
         return cls(source_signature(channel), np.frombuffer(payload, dtype='<f8'),
-                   hashlib.sha256(payload).hexdigest())
+                   hashlib.sha256(payload).hexdigest(), int(values.size),
+                   float(crop_delay_samples), int(input_taps))
 
     def validated_coefficients(self, channel):
         values = np.asarray(self.coefficients, dtype='<f8')
         if (self.source_revision != source_signature(channel)
-                or values.ndim != 1 or values.size != channel.tap_count
+                or values.ndim != 1 or values.size != (self.resolved_taps or channel.tap_count)
                 or not np.isfinite(values).all()
                 or hashlib.sha256(values.tobytes()).hexdigest() != self.coefficient_revision):
             raise ValueError('final FIR artifact does not match current inputs')

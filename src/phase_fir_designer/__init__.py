@@ -79,6 +79,15 @@ from .export_pipeline import (
     output_fir_for_export_report,
     realized_filter_complex_response,
     result_for_export_fir_stage,
+    result_for_standalone_output_taps,
+)
+from .output_tap_policy import (
+    StandaloneOutputTapResult,
+    apply_standalone_output_tap_policy,
+    resolve_standalone_fir_state,
+    standalone_acoustic_target_taps,
+    standalone_design_input_taps,
+    standalone_split_fir_required,
 )
 from .fir_auto_gain import (
     FFT_OVERSAMPLING,
@@ -91,7 +100,6 @@ from .fir_auto_gain import (
     calculate_fixed_fir_auto_gain_db,
     measure_fir_peak_db,
 )
-from .fir_postprocess import remove_nyquist_component
 from .linear_fir import (
     FIR_BAND_SPLIT_METHODS,
     IIR_BAND_SPLIT_METHODS,
@@ -227,6 +235,13 @@ __all__ = [
     "output_fir_for_export_report",
     "realized_filter_complex_response",
     "result_for_export_fir_stage",
+    "result_for_standalone_output_taps",
+    "StandaloneOutputTapResult",
+    "apply_standalone_output_tap_policy",
+    "resolve_standalone_fir_state",
+    "standalone_acoustic_target_taps",
+    "standalone_design_input_taps",
+    "standalone_split_fir_required",
     "FFT_OVERSAMPLING",
     "TARGET_FIR_PEAK_DB",
     "FIRAutoGainResult",
@@ -236,7 +251,6 @@ __all__ = [
     "calculate_fir_auto_gain_fft_size",
     "calculate_fixed_fir_auto_gain_db",
     "measure_fir_peak_db",
-    "remove_nyquist_component",
     "apply_linear_fir_filters",
     "band_split_iir_filters",
     "FIR_BAND_SPLIT_METHODS",

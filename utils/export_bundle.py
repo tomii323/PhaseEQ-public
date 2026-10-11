@@ -257,8 +257,6 @@ def build_project_zip(
     target_output_format_options: set[str],
     iir_filters: list[IIRFilter] | None = None,
     output_fir_polarity_invert: bool = False,
-    output_fir_remove_nyquist_enabled: bool = False,
-    output_fir_remove_nyquist_strength: float = 1.0,
     output_fir_cosine_taper_enabled: bool = False,
     fir_auto_gain_enabled: bool = True,
     generated_at: datetime | None = None,
@@ -279,9 +277,11 @@ def build_project_zip(
     output_report = output_fir_for_export_report(
         result.fir,
         output_fir_polarity_invert=output_fir_polarity_invert,
-        output_fir_remove_nyquist_enabled=output_fir_remove_nyquist_enabled,
-        output_fir_remove_nyquist_strength=output_fir_remove_nyquist_strength,
-        output_fir_cosine_taper_enabled=output_fir_cosine_taper_enabled,
+        output_fir_cosine_taper_enabled=(output_fir_cosine_taper_enabled
+                                          and not getattr(result, "output_window_applied", False)),
+        output_fir_cosine_taper_protected_center_taps=(
+            getattr(result, "output_window_protected_center_taps", None)
+        ),
         fir_auto_gain_enabled=fir_auto_gain_enabled,
     )
     output_fir = output_report.fir
@@ -297,9 +297,6 @@ def build_project_zip(
         "output_fir_polarity_invert": output_fir_polarity_invert,
         "output_fir_cosine_taper_enabled": output_fir_cosine_taper_enabled,
         "output_fir_cosine_taper_alpha": 0.10,
-        "output_fir_remove_nyquist_enabled": output_fir_remove_nyquist_enabled,
-        "output_fir_remove_nyquist_strength": output_fir_remove_nyquist_strength,
-        "output_fir_removed_nyquist_amplitude": output_report.removed_nyquist_amplitude,
         "fir_auto_gain": {
             "enabled": output_report.auto_gain_enabled,
             "target_peak_db": auto_gain.target_peak_db,
@@ -395,6 +392,7 @@ def build_project_zip(
                 "sample_rate_hz": int(sample_rate),
                 "fir_tap_count": int(len(result.fir)),
                 "fir_intrinsic_center_delay_samples": (int(len(result.fir)) - 1) / 2.0,
+                "crop_delay_samples": float(getattr(result, "crop_delay_samples", 0.0)),
             },
             "generated_at": generated_at.isoformat(),
         }

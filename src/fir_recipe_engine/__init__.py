@@ -27,8 +27,6 @@ FIR_RECIPE_ALGORITHM_VERSION = "weighted-complex-ls-v4"
 
 @dataclass(frozen=True)
 class FIRRecipePostprocess:
-    remove_nyquist_enabled: bool = False
-    remove_nyquist_strength: float = 0.0
     polarity_invert: bool = False
     auto_gain_enabled: bool = False
 
@@ -82,14 +80,27 @@ class FIRRecipe:
         postprocess = payload.get("postprocess", {})
         if not isinstance(config, dict) or not isinstance(postprocess, dict):
             raise ValueError("invalid FIR recipe payload")
+        retired_postprocess = dict(postprocess)
+        retired_postprocess.pop("remove_nyquist_enabled", None)
+        retired_postprocess.pop("remove_nyquist_strength", None)
         recipe = cls(
             config=dict(config), bypass=bool(payload.get("bypass", False)),
-            postprocess=FIRRecipePostprocess(**postprocess),
+            postprocess=FIRRecipePostprocess(**retired_postprocess),
             algorithm_version=str(payload["algorithm_version"]),
         )
         expected_hash = str(payload.get("content_hash", "")).strip()
         if expected_hash and expected_hash != recipe.content_hash:
-            raise ValueError("FIR recipe content hash mismatch")
+            legacy_payload = {
+                "format": recipe.format,
+                "format_version": recipe.format_version,
+                "algorithm_id": recipe.algorithm_id,
+                "algorithm_version": recipe.algorithm_version,
+                "bypass": recipe.bypass,
+                "config": recipe.config,
+                "postprocess": postprocess,
+            }
+            if expected_hash != hashlib.sha256(_canonical_json(legacy_payload)).hexdigest():
+                raise ValueError("FIR recipe content hash mismatch")
         return recipe
 
 
@@ -200,8 +211,6 @@ def _generate_fir_recipe(normalized: FIRRecipe, *, legacy_acoustic_boundary: boo
         coefficients = output_fir_for_export_report(
             coefficients,
             output_fir_polarity_invert=post.polarity_invert,
-            output_fir_remove_nyquist_enabled=post.remove_nyquist_enabled,
-            output_fir_remove_nyquist_strength=post.remove_nyquist_strength,
             fir_auto_gain_enabled=post.auto_gain_enabled,
         ).fir
     values = np.ascontiguousarray(coefficients, dtype="<f8")

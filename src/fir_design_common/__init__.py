@@ -5,38 +5,66 @@ import numpy as np
 from scipy.signal import fftconvolve
 
 from .adaptive_crop import AdaptiveCropResult, adaptive_crop_fir
+from .fir_state import (
+    DEFAULT_MANUAL_FIR_TAPS,
+    FIRFrameState,
+    FIROutputStatus,
+    acoustic_target_frame_taps,
+    automatic_lr_natural_taps,
+    boundary_requires_direct_fir,
+    direct_fir_split_family,
+    fir_output_available_for_tap_setting,
+    initialize_taps_for_fir_enable,
+    plan_acoustic_target_taps,
+    resolve_fir_frame_state,
+    resolve_fir_output_status,
+)
 from .kaiser import (
     KAISER_BETA_MAX,
     KAISER_BETA_MIN,
+    KAISER_CYCLES_MAX,
+    KAISER_CYCLES_MIN,
     clamp_kaiser_beta,
+    clamp_kaiser_cycles,
     kaiser_beta_in_range,
+    kaiser_cycles_in_range,
+)
+from .output_tap_policy import (
+    FinalOutputTapResult,
+    apply_final_output_tap_policy,
 )
 
 
-def compose_fir_stages(stages, taps: int) -> np.ndarray:
-    """Full linear convolution followed by one central crop/pad, without a window.
+from .unity_eq import unity_fir_eq
 
-    An odd unmatched sample stays on the right, matching PhaseEQ. Different
-    support parity quantizes the geometric center by half a sample.
-    """
-    taps = int(taps)
-    if taps < 1:
-        raise ValueError("tap count must be positive")
+
+def compose_fir_stages_full(stages) -> np.ndarray:
+    """Convolve real stages once, preserving an EQ-free stage bit for bit."""
     result = None
+    from .validation import validate_basic_fir
     for stage in stages:
         if np.iscomplexobj(stage):
             raise ValueError("FIR coefficients must be real")
         values = np.asarray(stage, dtype=float)
-        if values.ndim != 1 or not values.size or not np.all(np.isfinite(values)):
+        if values.ndim != 1 or not values.size or not np.isfinite(values).all():
             raise ValueError("FIR stages must be nonempty finite vectors")
-        result = values.copy() if result is None else fftconvolve(result, values, mode="full")
-    if result is None:
-        raise ValueError("at least one FIR stage is required")
-    if result.size < taps:
-        left = (taps - result.size) // 2
-        return np.pad(result, (left, taps - result.size - left))
-    start = (result.size - taps) // 2
-    return result[start:start + taps].copy()
+        validate_basic_fir(values)
+        if result is None:
+            result = values.copy()
+        else:
+            nonzero = np.flatnonzero(values)
+            if nonzero.size == 1 and values[nonzero[0]] == 1.0:
+                # Exact full convolution with a delayed identity. Avoid FFT
+                # roundoff in both the basic coefficients and known zero tails.
+                composed = np.zeros(result.size + values.size - 1, dtype=float)
+                start = int(nonzero[0])
+                composed[start:start + result.size] = result
+                result = composed
+            else:
+                result = fftconvolve(result, values, mode="full")
+    if result is None or not np.isfinite(result).all():
+        raise ValueError("at least one finite FIR stage is required")
+    return result
 
 
 def generation_fft_size(sample_rate: int, *tap_counts: int) -> int:

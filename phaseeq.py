@@ -18,7 +18,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 from urllib.parse import urlencode
 
 OUTPUT_GENERATED_AT = datetime.now()
@@ -80,9 +80,17 @@ from fir_recipe_engine import generate_fir_recipe, recipe_from_config
 
 import numpy as np
 import response_analysis as display_analysis
-from ui.export_response import add_export_output_series, export_iir_sos
+from response_display import DISPLAY_GRAPH_POINTS, display_fft_length
+from ui.export_response import FIRPreviewPolicy, add_export_output_series, export_iir_sos
+from ui.composite_context import active_assignment_crossover
 import pandas as pd
 import streamlit as st
+from utils.ui_visibility import start_visibility_diagnostics
+_ui_visibility_snapshot = start_visibility_diagnostics(APP_ROOT, "phaseeq")
+if _ui_visibility_snapshot is not None:
+    st.session_state["_ui_visibility_snapshot"] = _ui_visibility_snapshot
+else:
+    st.session_state.pop("_ui_visibility_snapshot", None)
 from list_menu_state import list_policy
 from utils.list_menu_ui import selectbox as shared_selectbox, choice_widget, single_row_table_selector as shared_single_row_table_selector, candidate_page, database_candidates
 import altair as alt
@@ -148,6 +156,25 @@ from phase_fir_designer.export_pipeline import (
     output_fir_for_export_report,
     realized_filter_complex_response,
     result_for_export_fir_stage,
+    result_for_standalone_output_taps,
+)
+from phase_fir_designer.output_tap_policy import (
+    resolve_standalone_fir_state,
+    standalone_acoustic_target_required_for,
+    standalone_automatic_frame_available_for,
+    standalone_design_input_taps,
+    standalone_split_fir_required,
+    standalone_split_fir_required_for,
+)
+from ui.standalone_output_taps import (
+    final_tap_caption,
+    output_tap_setting_label,
+    standalone_output_tap_view,
+    tap_setting_caption,
+)
+from fir_design_common.fir_state import (
+    DEFAULT_MANUAL_FIR_TAPS,
+    resolve_fir_output_status,
 )
 import phase_fir_designer.iir as _iir_runtime
 
@@ -278,13 +305,11 @@ from timing_provenance import timing_provenance_after_phase_centering
 from utils.settings_io import (
     MIN_SUPPORTED_SETTINGS_FILE_REVISION,
     CURRENT_SETTINGS_FILE_REVISION,
-    UnsupportedSettingsSchema,
-    UnsupportedSettingsFileRevision,
     build_config_payload,
     build_target_settings_payload,
     config_from_payload,
+    load_startup_settings,
     processing_manifest,
-    quarantine_unsupported_settings_file,
     speaker_response_from_payload,
     speaker_response_payload,
     validate_settings_file_revision,
@@ -417,7 +442,7 @@ from utils.ui_schema import (
 APP_NAME = "PhaseEQ"
 APP_SLUG = "phaseeq"
 APP_AUTHOR = "Tomii323"
-LIVE_RESULT_CACHE_ALGORITHM_VERSION = "2026-09-27-shared-response-completion-v5"
+LIVE_RESULT_CACHE_ALGORITHM_VERSION = "2026-10-10-common-final-fir-v6"
 ADVISOR_WAVELET_CACHE_ALGORITHM_VERSION = "2026-07-22-advisor-wavelet-v1"
 
 
@@ -460,8 +485,8 @@ TARGET_PRESETS_USER_FILE = STORAGE_PATHS["user_presets"] / "target_response_pres
 LINEAR_FIR_PRESETS_BUILTIN_FILE = STORAGE_PATHS["bundled_presets"] / "linear_fir_presets.json"
 LINEAR_FIR_PRESETS_USER_FILE = STORAGE_PATHS["user_presets"] / "linear_fir_presets.json"
 ANALYSIS_FFT_SIZE_OPTIONS = [2048, 4096, 8192, 16_384, 32_768, 65_536]
-GRAPH_MAX_POINTS_OPTIONS = [1024, 2048, 4096]
-DEFAULT_GRAPH_MAX_POINTS = 1024
+GRAPH_MAX_POINTS_OPTIONS = [DISPLAY_GRAPH_POINTS]
+DEFAULT_GRAPH_MAX_POINTS = DISPLAY_GRAPH_POINTS
 GRAPH_MODE_OPTIONS = ["Light", "Interactive"]
 DEFAULT_GRAPH_MODE = "Light"
 GAIN_Y_MIN_OPTIONS = [-144, -40, -30, -20, -10]
@@ -486,15 +511,9 @@ TARGET_OUTPUT_FORMAT_LABELS = {
 
 
 def _normalize_graph_max_points(value: Any) -> int:
-    try:
-        selected = int(value)
-    except (TypeError, ValueError):
-        return DEFAULT_GRAPH_MAX_POINTS
-    if selected <= min(GRAPH_MAX_POINTS_OPTIONS):
-        return min(GRAPH_MAX_POINTS_OPTIONS)
-    if selected >= max(GRAPH_MAX_POINTS_OPTIONS):
-        return max(GRAPH_MAX_POINTS_OPTIONS)
-    return min(GRAPH_MAX_POINTS_OPTIONS, key=lambda option: abs(option - selected))
+    # Retain the persisted field for old settings compatibility, but converge
+    # every legacy 1024/4096 value to the fixed shared display contract.
+    return DEFAULT_GRAPH_MAX_POINTS
 
 
 def _normalize_gain_y_min(value: Any) -> int:
@@ -621,6 +640,7 @@ DEFAULT_FIR_TAPS_BY_SAMPLE_RATE = {
     96_000: 8_193,
     192_000: 16_385,
 }
+STANDALONE_SAMPLE_RATE_OPTIONS = (48_000, 96_000, 192_000)
 
 
 @dataclass(frozen=True)
@@ -3075,6 +3095,29 @@ def _standalone_iir_only() -> bool:
             and st.session_state.get("band_split_recipe") is None)
 
 
+def _standalone_band_split_uses_fir(
+    linear_filters: Sequence[LinearFIRFilter] | None = None,
+) -> bool:
+    """Return whether the Standalone output owns at least one FIR boundary."""
+    filters: Sequence[Any] = (
+        linear_filters if linear_filters is not None else _items_for("linear_fir_items")
+    )
+    return standalone_split_fir_required_for(
+        filters,
+        band_split_recipe=st.session_state.get("band_split_recipe"),
+    )
+
+
+def _standalone_acoustic_target_uses_fir(
+    linear_filters: Sequence[LinearFIRFilter] | None = None,
+) -> bool:
+    """Return whether zero taps can resolve to shared target headroom."""
+    filters: Sequence[Any] = (
+        linear_filters if linear_filters is not None else _items_for("linear_fir_items")
+    )
+    return standalone_acoustic_target_required_for(filters)
+
+
 def _output_band_split_method_options():
     from utils.band_split_capability import IIR_METHODS
     return IIR_METHODS if _standalone_iir_only() else OUTPUT_BAND_SPLIT_METHODS
@@ -3357,7 +3400,7 @@ def _linear_fir_raw_items_from_profile(profile: str) -> list[dict[str, Any]]:
         overlap = float(st.session_state.get(f"linear_fir_{mode}_overlap_oct", old.get("overlap_oct", 0.0)))
         saved_boundary = _linear_fir_profile_memory().get(profile, {}).get(mode, {})
         raw["acoustic_target"] = bool(st.session_state.get(f"linear_fir_{mode}_acoustic_target", old.get("acoustic_target", False))) and raw["response"] not in {"kaiser", "through"}
-        raw["lr2_auto_taps"] = bool(old.get("lr2_auto_taps", saved_boundary.get("lr2_auto_taps", False)))
+        raw["lr2_auto_taps"] = raw["response"] == "linear_phase_lr2"
         is_new = not any(item.get("mode") == mode for item in existing) and not saved_boundary
         if old.get("base_crossover_hz") is not None or overlap != 0.0 or is_new or saved_boundary.get("uses_base_crossover", False):
             from crossover_engine.filters import kaiser_overlap_edges_hz
@@ -3408,6 +3451,23 @@ def _sync_linear_fir_registry_from_profile(profile: str) -> None:
     next_items = _linear_fir_raw_items_from_profile(profile)
     if _linear_fir_items_semantic(_items_for("linear_fir_items")) != _linear_fir_items_semantic(next_items):
         _set_registry_items("linear_fir_items", next_items)
+
+
+def _commit_linear_fir_boundary_edit() -> None:
+    """Commit a boundary edit before preview/output state is collected.
+
+    The boundary page is rendered after the global design snapshot. Updating
+    the registry only at the end of that page therefore made the graph and FIR
+    capability lag one interaction behind the visible control. The widget
+    helper commits its scalar value first; this callback then atomically
+    updates the domain registry used by both preview and export.
+    """
+    profile = _normalize_linear_fir_profile(
+        st.session_state.get("linear_fir_profile", "None")
+    )
+    _sync_linear_fir_registry_from_profile(profile)
+    _store_linear_fir_profile_state(profile)
+    st.session_state["_pending_live_result_refresh"] = True
 
 
 def _reset_linear_fir_profile() -> None:
@@ -3792,6 +3852,13 @@ def _config_payload(
     deferred: bool = False,
 ) -> dict[str, Any] | Callable[[], dict[str, Any]]:
     ui_state_for_save = _sync_scalar_ui_state_for_save()
+    # Runtime design uses a positive pre-crop length when the standalone final
+    # output setting is Adaptive (0).  Persist the user-facing final-output
+    # setting, not that internal design length.
+    persisted_config = replace(
+        config,
+        taps=_normalize_taps_value(ui_state_for_save.get("taps", config.taps)),
+    )
     ui_payload = {
             "display_fft_multiplier": display_analysis.multiplier(st.session_state.get("display_fft_multiplier", 1)),
             "active_page": ui_state_for_save.get("active_page", "Input"),
@@ -3892,9 +3959,8 @@ def _config_payload(
             "output_fir_polarity_invert": ui_state_for_save.get("output_fir_polarity_invert", False),
             "output_fir_cosine_taper_enabled": ui_state_for_save.get("output_fir_cosine_taper_enabled", False),
             "fir_auto_gain_enabled": ui_state_for_save.get("fir_auto_gain_enabled", True),
-            "output_fir_remove_nyquist_enabled": ui_state_for_save.get("output_fir_remove_nyquist_enabled", False),
-            "output_fir_remove_nyquist_strength": ui_state_for_save.get("output_fir_remove_nyquist_strength", 1.0),
             "standalone_fir_enabled": bool(st.session_state.get("standalone_fir_enabled", True)),
+            "standalone_auto_crop": bool(ui_state_for_save.get("standalone_auto_crop", False)),
             "fir_output_formats": ui_state_for_save.get("fir_output_formats", FIR_OUTPUT_FORMAT_OPTIONS),
             "target_output_formats": ui_state_for_save.get("target_output_formats", TARGET_OUTPUT_FORMAT_OPTIONS),
     }
@@ -3925,7 +3991,7 @@ def _config_payload(
         app_author=APP_AUTHOR,
         schema_version=SETTINGS_SCHEMA_VERSION,
         snapshot_name=snapshot_name,
-        config=config,
+        config=persisted_config,
         ui_payload=ui_payload,
         ui_profile=ui_profile,
         raw_speaker_response=raw_speaker_response,
@@ -3945,7 +4011,8 @@ def _config_payload(
     arguments.update(stereo_saved_fields(st.session_state, STORAGE_PATHS["composite_exchange"]))
     arguments["processing"] = {
         **(arguments["processing"] or {}),
-        "band_split_iir_crossover": st.session_state.get("_composite_iir_crossover"),
+        "band_split_iir_crossover": active_assignment_crossover(st.session_state),
+        "detached_channel_band_split": deepcopy(st.session_state.get("_detached_channel_band_split")),
     }
     extra_io = {"speaker_calibration_state": st.session_state.get("_speaker_calibration_state", "raw")}
     timing_provenance = st.session_state.get("_current_speaker_timing_provenance")
@@ -4308,11 +4375,8 @@ def _apply_ui_payload_to_state(payload: dict[str, Any]) -> None:
         st.session_state["fir_auto_gain_enabled"] = bool(ui["fir_auto_gain_enabled"])
     if "output_fir_cosine_taper_enabled" in ui:
         st.session_state["output_fir_cosine_taper_enabled"] = bool(ui["output_fir_cosine_taper_enabled"])
-    if "output_fir_remove_nyquist_enabled" in ui:
-        st.session_state["output_fir_remove_nyquist_enabled"] = bool(ui["output_fir_remove_nyquist_enabled"])
-    if "output_fir_remove_nyquist_strength" in ui:
-        st.session_state["output_fir_remove_nyquist_strength"] = float(ui["output_fir_remove_nyquist_strength"])
     st.session_state["standalone_fir_enabled"] = bool(ui.get("standalone_fir_enabled", True))
+    st.session_state["standalone_auto_crop"] = bool(ui.get("standalone_auto_crop", False))
     if "fir_output_formats" in ui and isinstance(ui["fir_output_formats"], list):
         st.session_state["fir_output_formats"] = [
             item for item in ui["fir_output_formats"] if item in FIR_OUTPUT_FORMAT_OPTIONS
@@ -4457,6 +4521,12 @@ def _apply_config_payload_to_state(
     if preserve_common_analysis_fft:
         from utils.common_analysis_state import preserve_common_analysis
         payload = preserve_common_analysis(payload, st.session_state)
+    saved_output_taps = int(payload["config"].get("taps", DEFAULT_CONFIG.taps))
+    config_payload = payload
+    if assignment is None and saved_output_taps == 0:
+        config_payload = deepcopy(payload)
+        saved_sample_rate = int(config_payload["config"].get("sample_rate", DEFAULT_CONFIG.sample_rate))
+        config_payload["config"]["taps"] = _standalone_design_taps(0, saved_sample_rate)
     overrides = {}
     if assignment is not None:
         _sync_composite_iir_assignment(assignment, apply=False)
@@ -4477,27 +4547,29 @@ def _apply_config_payload_to_state(
             band_split_recipe=assignment.band_split_recipe,
             linear_fir_filters=filters,
         )
-    config = config_from_payload(payload, overrides=overrides)
+    config = config_from_payload(config_payload, overrides=overrides)
     config, overlap_warning = _normalize_loaded_auto_eq_overlaps(config)
     config = config.normalized()
     config.validate()
     saved_iir = payload["processing"].get("band_split_iir_crossover")
-    if assignment is None and saved_iir is not None:
-        from types import SimpleNamespace
-        _sync_composite_iir_assignment(SimpleNamespace(
-            sample_rate_hz=config.sample_rate, iir_crossover=saved_iir,
-            band_split_recipe=config.band_split_recipe,
-            way=(config.band_split_recipe or {}).get("way", ""),
-            tap_count=config.taps if (config.band_split_recipe or {}).get("fir_enabled", True) else 0,
-        ), apply=False)
     previous = dict(st.session_state)
     try:
-        _clear_project_profile_widget_state()
+        _clear_project_profile_widget_state(payload)
         _reset_transient_ui_state_for_config_load()
         _apply_ui_payload_to_state(payload)
         _apply_config_to_state(config)
+        if assignment is None and saved_output_taps == 0:
+            _set_design_condition_state(taps=0)
         _apply_response_payload_to_state(payload, config)
+        from utils.ui_state_commit import sync_output_postprocess_state
+        sync_output_postprocess_state(st.session_state, inherited=assignment is not None)
+        # A read-only selection belongs to the old editor, not the retained page.
+        _clear_selection_preview(suppress_current=True)
         st.session_state.pop("_composite_iir_crossover", None)
+        st.session_state.pop("_detached_channel_band_split", None)
+        saved_detached = payload["processing"].get("detached_channel_band_split")
+        if isinstance(saved_detached, dict):
+            st.session_state["_detached_channel_band_split"] = deepcopy(saved_detached)
         if assignment is not None:
             _sync_composite_iir_assignment(assignment)
             st.session_state["driver_band_enabled"] = True
@@ -4508,7 +4580,13 @@ def _apply_config_payload_to_state(
                 for mode, key in (("hp", "driver_band_hpf_hz"), ("lp", "driver_band_lpf_hz")):
                     st.session_state[key] = next((item.fc for item in config.linear_fir_filters if item.mode == mode), 0.0)
         elif saved_iir is not None:
-            st.session_state["_composite_iir_crossover"] = dict(saved_iir)
+            # Old saves may contain Studio SOS without an Assignment. Keep it
+            # recoverable, but never validate/apply it as Standalone output.
+            st.session_state["_detached_channel_band_split"] = {
+                "recipe": deepcopy(config.band_split_recipe),
+                "filters": [asdict(item) for item in config.linear_fir_filters],
+                "iir": deepcopy(saved_iir),
+            }
         if overlap_warning:
             st.session_state["_auto_eq_load_overlap_warning"] = overlap_warning
         history_id = payload.get("ui", {}).get("design_history_id")
@@ -4595,6 +4673,7 @@ def _apply_pending_config_payload() -> bool:
             " / ".join(message for message in (overlap_warning, asset_warning) if message)
             or (f"設定を読み込みました: {source_label}。チャンネルの入力データは保持しました。" if assignment is not None else f"設定を読み込みました: {source_label}")
         )
+        st.session_state.pop("_settings_autosave_blocked", None)
         _mark_registry_profile_clean()
         return True
     except Exception as exc:
@@ -4603,18 +4682,20 @@ def _apply_pending_config_payload() -> bool:
         return False
 
 
-def _clear_project_profile_widget_state() -> None:
+def _clear_project_profile_widget_state(payload: dict[str, Any] | None = None) -> None:
     st.session_state["_numeric_registry_epoch"] = int(st.session_state.get("_numeric_registry_epoch", 0)) + 1
     profile_keys = set(profile_state_keys(st.session_state))
-    widget_suffix_keys = {f"{key}_widget" for key in profile_keys}
-    safe_widget_keys = {
-        safe_widget_key(widget_prefix, key)
-        for key in profile_keys
-        for widget_prefix in _INDEXED_WIDGET_PREFIXES
-    }
+    # Defaults cover fields absent in older saves; payload keys cover additions
+    # without relying solely on a hand-maintained profile list.
+    profile_keys.update(asdict(DEFAULT_CONFIG))
+    if payload is not None:
+        profile_keys.update(payload.get("ui", {}))
+        profile_keys.update(payload.get("ui_profile", {}).get("state", {}))
+    from utils.ui_state_commit import clear_restored_setting_widgets
+    clear_restored_setting_widgets(st.session_state, profile_keys)
     for key in list(st.session_state.keys()):
         text_key = str(key)
-        if text_key in widget_suffix_keys or text_key in safe_widget_keys or text_key.startswith("__reg_"):
+        if text_key.startswith("__reg_"):
             st.session_state.pop(key, None)
 
 
@@ -4671,10 +4752,9 @@ def _reset_project_state_to_defaults() -> None:
     st.session_state["output_fir_polarity_invert"] = False
     st.session_state["fir_auto_gain_enabled"] = True
     st.session_state["output_fir_cosine_taper_enabled"] = False
-    st.session_state["output_fir_remove_nyquist_enabled"] = False
-    st.session_state["output_fir_remove_nyquist_strength"] = 1.0
     st.session_state["dc_gain_normalize"] = True
     st.session_state["standalone_fir_enabled"] = True
+    st.session_state["standalone_auto_crop"] = False
     st.session_state["fir_output_formats"] = FIR_OUTPUT_FORMAT_OPTIONS
     st.session_state["target_output_formats"] = TARGET_OUTPUT_FORMAT_OPTIONS
     st.session_state["result_detail_view"] = "Error"
@@ -4713,6 +4793,7 @@ def _reset_project_state_to_defaults() -> None:
     ):
         st.session_state.pop(key, None)
     _invalidate_live_result_cache()
+    st.session_state.pop("_settings_autosave_blocked", None)
     _mark_registry_profile_clean()
 
 
@@ -4797,6 +4878,9 @@ def _save_current_settings(
     raw_target_response: SpeakerResponse | None,
     mic_cal_response: SpeakerResponse | None,
 ) -> None:
+    if st.session_state.get("_settings_autosave_blocked", False):
+        # Never replace an unreadable startup file with temporary defaults.
+        return
     try:
         response_refs = _response_asset_refs_for_autosave(
             raw_speaker_response,
@@ -5316,15 +5400,27 @@ def _current_design_condition_values() -> tuple[int, int, int, int]:
         ),
         DEFAULT_CONFIG.analysis_fft_size,
     )
-    effective_fft_value = _effective_analysis_fft_size(int(analysis_fft_value), int(taps_value))
+    design_taps_value = _standalone_design_taps(int(taps_value), int(sample_rate_value))
+    effective_fft_value = _effective_analysis_fft_size(
+        int(analysis_fft_value), design_taps_value,
+    )
     return sample_rate_value, taps_value, int(analysis_fft_value), int(effective_fft_value)
 
 
 def _design_condition_summary_text() -> str:
     analysis_fft_value = int(_current_design_condition_values()[2])
     sample_rate, taps, _selected_fft, effective_fft = _current_design_condition_values()
+    taps_text = (
+        "0（FIR帯域分割から自動割当）"
+        if taps == 0 and _standalone_band_split_uses_fir()
+        else "0（音響ターゲットから自動割当）"
+        if taps == 0 and _standalone_acoustic_target_uses_fir()
+        else "0（FIR OFF）"
+        if taps == 0
+        else f"{taps} taps"
+    )
     return (
-        f"PhaseEQ {sample_rate / 1000:g} kHz / {taps} taps / "
+        f"PhaseEQ {sample_rate / 1000:g} kHz / {taps_text} / "
         f"Analysis FFT {analysis_fft_value if effective_fft == analysis_fft_value else f'{analysis_fft_value} -> {effective_fft}'}"
     )
 
@@ -5379,9 +5475,18 @@ def _current_speaker_model_summary_label() -> str:
 
 def _design_condition_table() -> pd.DataFrame:
     sample_rate, taps, analysis_fft_value, _effective_fft = _current_design_condition_values()
+    taps_label = (
+        "0 (auto from FIR crossover)"
+        if taps == 0 and _standalone_band_split_uses_fir()
+        else "0 (auto from acoustic target)"
+        if taps == 0 and _standalone_acoustic_target_uses_fir()
+        else "0 (FIR OFF)"
+        if taps == 0
+        else f"{taps} taps"
+    )
     rows: list[dict[str, str]] = [{
         "Item": "PhaseEQ FIR",
-        "Value": f"{sample_rate / 1000:g} kHz / {taps} taps",
+        "Value": f"{sample_rate / 1000:g} kHz / {taps_label}",
         "Edit": "Preferences",
     }, {
         "Item": "PhaseEQ Analysis FFT",
@@ -5872,8 +5977,6 @@ def _apply_config_to_state(config: DesignConfig) -> None:
     st.session_state.setdefault("iir_filter_count", 0)
     st.session_state.setdefault("output_fir_polarity_invert", False)
     st.session_state.setdefault("output_fir_cosine_taper_enabled", False)
-    st.session_state.setdefault("output_fir_remove_nyquist_enabled", False)
-    st.session_state.setdefault("output_fir_remove_nyquist_strength", 1.0)
     st.session_state.setdefault("fir_output_formats", FIR_OUTPUT_FORMAT_OPTIONS)
     st.session_state.setdefault("target_output_formats", TARGET_OUTPUT_FORMAT_OPTIONS)
     st.session_state.setdefault("result_detail_view", "Error")
@@ -5961,38 +6064,39 @@ def _ensure_initial_state() -> None:
         for key, default in SHAPING_UI_DEFAULTS.items():
             st.session_state[key] = default
     if "settings_initialized" not in st.session_state:
-        if SETTINGS_FILE.exists():
+        loaded = load_startup_settings(
+            SETTINGS_FILE,
+            expected_schema_version=SETTINGS_SCHEMA_VERSION,
+        )
+        if loaded.payload is not None:
             try:
-                payload = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-                _apply_config_payload_to_state(payload)
+                _apply_config_payload_to_state(loaded.payload)
                 overlap_warning = st.session_state.pop("_auto_eq_load_overlap_warning", "")
                 asset_warning = st.session_state.pop("_settings_asset_warning", "")
                 st.session_state["_settings_notice"] = (
                     " / ".join(message for message in (overlap_warning, asset_warning) if message)
                     or f"前回の設定を復元しました: {SETTINGS_FILE}"
                 )
-            except (UnsupportedSettingsFileRevision, UnsupportedSettingsSchema) as exc:
-                _apply_config_to_state(DEFAULT_CONFIG)
-                if exc.reason == "too_old":
-                    try:
-                        quarantined = quarantine_unsupported_settings_file(
-                            SETTINGS_FILE,
-                            revision=exc.revision,
-                        )
-                        st.session_state["_settings_notice"] = (
-                            f"古い設定ファイルは読み込まず、"
-                            f"初期設定へクリアしました。退避先: {quarantined}"
-                        )
-                    except OSError as quarantine_exc:
-                        st.session_state["_settings_notice"] = (
-                            f"古い設定ファイルを読み込めませんでした。"
-                            f"安全な退避にも失敗したため、元ファイルは変更していません: {quarantine_exc}"
-                        )
-                else:
-                    st.session_state["_settings_notice"] = str(exc)
             except Exception as exc:
                 _apply_config_to_state(DEFAULT_CONFIG)
-                st.session_state["_settings_notice"] = f"前回の設定を復元できませんでした: {exc}"
+                st.session_state["_settings_autosave_blocked"] = True
+                st.session_state["_settings_notice"] = (
+                    "前回の設定を復元できませんでした。元ファイルを保持し、"
+                    f"自動保存を停止しました: {exc}"
+                )
+        elif loaded.status == "quarantined_old":
+            _apply_config_to_state(DEFAULT_CONFIG)
+            st.session_state["_settings_notice"] = (
+                "古い設定ファイルは読み込まず、初期設定で開始しました。"
+                f"退避先: {loaded.recovery_path}"
+            )
+        elif loaded.status == "unreadable_preserved":
+            _apply_config_to_state(DEFAULT_CONFIG)
+            st.session_state["_settings_autosave_blocked"] = True
+            st.session_state["_settings_notice"] = (
+                "前回の設定を読み込めませんでした。元ファイルを保持し、"
+                f"自動保存を停止しました: {loaded.error}"
+            )
         else:
             _apply_config_to_state(DEFAULT_CONFIG)
         st.session_state["_settings_file_revision"] = file_revision(SETTINGS_FILE)
@@ -6037,6 +6141,7 @@ def _cache_coordinator() -> CacheCoordinator:
 
 def _invalidate_live_result_cache(event: CacheEvent = CacheEvent.DESIGN_CHANGED) -> None:
     _cache_coordinator().notify(event)
+    st.session_state.pop("_standalone_final_fir_taps", None)
 
 
 def _indexed_group_spec(prefix: str) -> tuple[str, dict[str, Any]] | tuple[None, None]:
@@ -8252,11 +8357,6 @@ def _render_linear_fir_preset_manager() -> None:
                 ) if _linear_fir_preset_filter(item, "lp") else "-",
                 "Cycles": _linear_fir_preset_parameter_text(item, "cycles"),
                 "Beta": _linear_fir_preset_parameter_text(item, "beta"),
-                "EQ mask smoothing": _format_linear_fir_eq_mask_smoothing(
-                    _nearest_linear_fir_eq_mask_smoothing_option(
-                        float(item.get("eq_mask_smoothing_oct", LINEAR_FIR_EQ_MASK_SMOOTHING_DEFAULT))
-                    )
-                ),
                 "Overlap Hz": f"{float(item.get('overlap_hz', 0.0)):.0f}",
                 "Source": item.get("source", "User"),
             }
@@ -8290,9 +8390,6 @@ def _render_linear_fir_preset_manager() -> None:
             "lp_method": _normalize_output_band_split_method((selected_lp or {}).get("response", "kaiser")),
             "hp_overlap_oct": float((selected_hp or {}).get("overlap_oct", 0.0)),
             "lp_overlap_oct": float((selected_lp or {}).get("overlap_oct", 0.0)),
-            "eq_mask_smoothing_oct": _nearest_linear_fir_eq_mask_smoothing_option(
-                float((selected or {}).get("eq_mask_smoothing_oct", LINEAR_FIR_EQ_MASK_SMOOTHING_DEFAULT))
-            ),
         },
     )
     _enforce_standalone_fir_capability()
@@ -8309,7 +8406,10 @@ def _render_linear_fir_preset_manager() -> None:
                 cycles=float(item.get("cycles", LINEAR_FIR_DEFAULT_CYCLES)),
                 beta=float(item.get("beta", LINEAR_FIR_DEFAULT_BETA)),
                 base_crossover_hz=item.get("base_crossover_hz"),
-                lr2_auto_taps=bool(item.get("lr2_auto_taps", False)),
+                lr2_auto_taps=(
+                    _normalize_output_band_split_method(item.get("response", "kaiser"))
+                    == "linear_phase_lr2"
+                ),
                 acoustic_target=bool(item.get("acoustic_target", False)),
                 overlap_oct=float(item.get("overlap_oct", 0.0)),
             )
@@ -8324,13 +8424,6 @@ def _render_linear_fir_preset_manager() -> None:
         if globals().get("active_composite_assignment") is None:
             st.session_state["band_split_recipe"] = None
             st.session_state.pop("_composite_iir_crossover", None)
-        smoothing = _nearest_linear_fir_eq_mask_smoothing_option(
-            float(selected.get("eq_mask_smoothing_oct", LINEAR_FIR_EQ_MASK_SMOOTHING_DEFAULT))
-        )
-        # The Apply branch reruns before the smoothing widget below is
-        # rendered. Carry the value across that Streamlit cleanup boundary and
-        # seed both the setting and widget on the next full render.
-        st.session_state["_pending_linear_fir_preset_smoothing_oct"] = smoothing
         _invalidate_live_result_cache()
         # Apply reruns before the editor widgets below are rendered. Force the
         # next run to reseed them from the selected preset instead of letting
@@ -8364,7 +8457,7 @@ def _render_linear_fir_preset_manager() -> None:
         format_func=localized_formatter(lambda value: OUTPUT_BAND_SPLIT_METHOD_LABELS[str(value)]),
         key="linear_fir_preset_lp_method",
     )
-    parameter_cols = st.columns(5, gap="small")
+    parameter_cols = st.columns(4, gap="small")
     hp_cycles = parameter_cols[0].number_input(
         ui_message('ui.e8647f7ca1fb3d'),
         min_value=float(LINEAR_FIR_CYCLES_MIN),
@@ -8401,13 +8494,6 @@ def _render_linear_fir_preset_manager() -> None:
         key="linear_fir_preset_lp_beta",
         help=ui_message('ui.96ccaa0c2abd8e'),
     )
-    eq_mask_smoothing_oct = parameter_cols[4].selectbox(
-        ui_message('ui.a54b8bd81c2ae2'),
-        LINEAR_FIR_EQ_MASK_SMOOTHING_OPTIONS,
-        format_func=localized_formatter(_format_linear_fir_eq_mask_smoothing),
-        key="linear_fir_preset_eq_mask_smoothing_oct",
-    )
-
     def current_record(record_id: str) -> dict[str, Any]:
         frequencies = _parse_split_frequencies(
             frequencies_text,
@@ -8437,7 +8523,6 @@ def _render_linear_fir_preset_manager() -> None:
             "layout": profile,
             "split_frequencies_hz": frequencies,
             "overlap_hz": float(overlap_hz),
-            "eq_mask_smoothing_oct": float(eq_mask_smoothing_oct),
             "filters": filters,
         }
 
@@ -9686,7 +9771,6 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                 st.session_state.pop("_composite_iir_crossover", None)
                 _invalidate_live_result_cache()
                 st.rerun()
-        _render_linear_fir_eq_mask_summary(nyquist)
         return
     existing = _items_for("linear_fir_items")
     if not composite_locked and any(item.get("base_crossover_hz") is None for item in existing):
@@ -9695,7 +9779,10 @@ def _render_linear_fir_filters(nyquist: float) -> None:
             _sync_linear_fir_registry([
                 LinearFIRFilter(mode=item["mode"], response=item.get("response", "kaiser"),
                     fc=item["fc"], base_crossover_hz=item.get("base_crossover_hz") or item["fc"],
-                    lr2_auto_taps=bool(item.get("lr2_auto_taps", False)),
+                    lr2_auto_taps=(
+                        _normalize_output_band_split_method(item.get("response", "kaiser"))
+                        == "linear_phase_lr2"
+                    ),
                     acoustic_target=bool(item.get("acoustic_target", False)),
                     overlap_oct=item.get("overlap_oct", 0.0), cycles=item["cycles"], beta=item["beta"],
                     enabled=item.get("enabled", True)) for item in existing])
@@ -9740,7 +9827,6 @@ def _render_linear_fir_filters(nyquist: float) -> None:
     else:
         if composite_locked:
             st.info(ui_message('ui.227f1e157ee686'))
-        _linear_fir_eq_mask_smoothing_selectbox(disabled=composite_locked)
         if profile == "Pass":
             st.caption(ui_message('ui.bda3e3886b1f5b'))
 
@@ -9756,6 +9842,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     default="kaiser",
                     labels=[OUTPUT_BAND_SPLIT_METHOD_LABELS[item] for item in _output_band_split_method_options()],
                     disabled=composite_locked,
+                    on_change=_commit_linear_fir_boundary_edit,
                 )
             with cols[1]:
                 hp_fc_value = number_input_stateful_safe(
@@ -9767,6 +9854,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     step=1.0,
                     format="%.0f",
                     disabled=composite_locked,
+                    on_change=_commit_linear_fir_boundary_edit,
                 )
             with cols[2]:
                 hp_cycles_value = number_input_stateful_safe(
@@ -9778,6 +9866,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     step=0.25,
                     format="%.2f",
                     disabled=composite_locked or hp_response not in ("kaiser", "linear_phase_lr2", "linear_phase_lr4"),
+                    on_change=_commit_linear_fir_boundary_edit,
                 )
             with cols[3]:
                 number_input_stateful_safe(
@@ -9789,6 +9878,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     step=0.1,
                     format="%.1f",
                     disabled=composite_locked or hp_response != "kaiser",
+                    on_change=_commit_linear_fir_boundary_edit,
                 )
             acoustic_key = "linear_fir_hp_acoustic_target"
             st.session_state.setdefault(acoustic_key, bool(hp_item.get("acoustic_target", False)))
@@ -9798,7 +9888,8 @@ def _render_linear_fir_filters(nyquist: float) -> None:
             _set_setting_and_widget(acoustic_key, st.session_state[acoustic_key], "__chk_val_")
             checkbox_stateful(ui_message('ui.651305db13550c'), settings_key=acoustic_key,
                         disabled=not acoustic_target_editable(hp_response, inherited=composite_locked),
-                        help=ui_message('ui.a11bebb9ea97e2'))
+                        help=ui_message('ui.a11bebb9ea97e2'),
+                        on_change=_commit_linear_fir_boundary_edit)
             if hp_response in ("kaiser", "linear_phase_lr2", "linear_phase_lr4"):
                 from phase_fir_designer.linear_fir import multiway_kaiser_taps
                 current_taps = (
@@ -9811,7 +9902,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     method=hp_response, sample_rate=nyquist * 2, crossover_hz=hp_fc_value,
                     cycles=hp_cycles_value, beta=float(st.session_state["linear_fir_hp_beta"]),
                     overlap_oct=overlap, current_taps=current_taps,
-                    current_auto_taps=hp_response == "linear_phase_lr4" or bool(hp_item.get("lr2_auto_taps", False)),
+                    current_auto_taps=hp_response in {"linear_phase_lr2", "linear_phase_lr4"},
                 )
             else:
                 st.caption(ui_message('ui.547824808b2248', p0=f'{OUTPUT_BAND_SPLIT_METHOD_LABELS[hp_response]}'))
@@ -9828,6 +9919,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     default="kaiser",
                     labels=[OUTPUT_BAND_SPLIT_METHOD_LABELS[item] for item in _output_band_split_method_options()],
                     disabled=composite_locked,
+                    on_change=_commit_linear_fir_boundary_edit,
                 )
             with cols[1]:
                 lp_fc_value = number_input_stateful_safe(
@@ -9839,6 +9931,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     step=1.0,
                     format="%.0f",
                     disabled=composite_locked,
+                    on_change=_commit_linear_fir_boundary_edit,
                 )
             with cols[2]:
                 lp_cycles_value = number_input_stateful_safe(
@@ -9850,6 +9943,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     step=0.25,
                     format="%.2f",
                     disabled=composite_locked or lp_response not in ("kaiser", "linear_phase_lr2", "linear_phase_lr4"),
+                    on_change=_commit_linear_fir_boundary_edit,
                 )
             with cols[3]:
                 number_input_stateful_safe(
@@ -9861,6 +9955,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     step=0.1,
                     format="%.1f",
                     disabled=composite_locked or lp_response != "kaiser",
+                    on_change=_commit_linear_fir_boundary_edit,
                 )
             acoustic_key = "linear_fir_lp_acoustic_target"
             st.session_state.setdefault(acoustic_key, bool(lp_item.get("acoustic_target", False)))
@@ -9870,7 +9965,8 @@ def _render_linear_fir_filters(nyquist: float) -> None:
             _set_setting_and_widget(acoustic_key, st.session_state[acoustic_key], "__chk_val_")
             checkbox_stateful(ui_message('ui.651305db13550c'), settings_key=acoustic_key,
                         disabled=not acoustic_target_editable(lp_response, inherited=composite_locked),
-                        help=ui_message('ui.a11bebb9ea97e2'))
+                        help=ui_message('ui.a11bebb9ea97e2'),
+                        on_change=_commit_linear_fir_boundary_edit)
             if lp_response in ("kaiser", "linear_phase_lr2", "linear_phase_lr4"):
                 from phase_fir_designer.linear_fir import multiway_kaiser_taps
                 current_taps = (
@@ -9883,7 +9979,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     method=lp_response, sample_rate=nyquist * 2, crossover_hz=lp_fc_value,
                     cycles=lp_cycles_value, beta=float(st.session_state["linear_fir_lp_beta"]),
                     overlap_oct=overlap, current_taps=current_taps,
-                    current_auto_taps=lp_response == "linear_phase_lr4" or bool(lp_item.get("lr2_auto_taps", False)),
+                    current_auto_taps=lp_response in {"linear_phase_lr2", "linear_phase_lr4"},
                 )
             else:
                 st.caption(ui_message('ui.2b1618ad90e929', p0=f'{OUTPUT_BAND_SPLIT_METHOD_LABELS[lp_response]}'))
@@ -9909,6 +10005,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                 ui_message('ui.dcad21dbff2c59', p0=f'{mode.upper()}'),
                 settings_key=f"linear_fir_{mode}_overlap_oct",
                 min_value=-1.0, max_value=1.0, default=0.0, step=0.01, format="%.3f",
+                on_change=_commit_linear_fir_boundary_edit,
             )
             from crossover_engine.filters import kaiser_overlap_edges_hz
             base = float(st.session_state[f"linear_fir_{mode}_fc"])
@@ -9916,7 +10013,6 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                 edge = kaiser_overlap_edges_hz(base, overlap)[1 if mode == "hp" else 0]
                 st.caption(ui_message('ui.8669a7c3d652ab', p0=f'{mode.upper()}', p1=f'{base:,.3f}', p2=f'{edge:,.3f}'))
         _sync_linear_fir_registry_from_profile(str(profile))
-    _render_linear_fir_eq_mask_summary(nyquist)
 
 
 def _render_linear_fir_eq_mask_summary(nyquist: float) -> None:
@@ -9924,7 +10020,8 @@ def _render_linear_fir_eq_mask_summary(nyquist: float) -> None:
     if not linear_filters and st.session_state.get("band_split_recipe") is None:
         return
     sample_rate_value = int(st.session_state.get("sample_rate", int(float(nyquist) * 2.0)))
-    preview_taps = int(st.session_state.get("taps", 4097))
+    configured_preview_taps = int(st.session_state.get("taps", 4097))
+    preview_taps = _standalone_design_taps(configured_preview_taps, sample_rate_value)
     selected_fft_size = int(st.session_state.get("analysis_fft_size", 8_192))
     preview_fft_size = next(
         (
@@ -10740,13 +10837,23 @@ def _sync_plain_option_widget(
     *,
     widget_key: str | None = None,
     normalize: Any | None = None,
+    canonical_wins: bool = False,
 ) -> Any:
     widget_key = widget_key or f"{key}_widget"
     option_list = list(options)
     fallback = default if default in option_list else (option_list[0] if option_list else default)
-    value = st.session_state.get(widget_key, st.session_state.get(key, fallback))
+    # Stable mode controls let canonical state win because a reconnecting
+    # browser can carry an older widget value after the control was absent.
+    # Other controls retain their established widget-first synchronization.
+    canonical_value = st.session_state.get(key, fallback)
+    widget_value = st.session_state.get(widget_key)
+    value = (
+        canonical_value
+        if canonical_wins or widget_value is None
+        else widget_value
+    )
     if value is None:
-        value = st.session_state.get(key, fallback)
+        value = fallback
     if normalize is not None:
         value = normalize(value)
     if value not in option_list:
@@ -10793,7 +10900,10 @@ def _sync_live_result_controls_state() -> dict[str, Any]:
     )
     return {
         "auto_update": _sync_plain_bool_widget("auto_update", True),
-        "graph_mode": str(_sync_plain_option_widget("graph_mode", GRAPH_MODE_OPTIONS, DEFAULT_GRAPH_MODE)),
+        "graph_mode": str(_sync_plain_option_widget(
+            "graph_mode", GRAPH_MODE_OPTIONS, DEFAULT_GRAPH_MODE,
+            canonical_wins=True,
+        )),
         "graph_max_points": int(graph_max_points),
         "gain_y_min_db": int(gain_y_min),
         "gain_y_max_db": int(gain_y_max),
@@ -10882,8 +10992,11 @@ def _selectbox_setting_widget(
     default: Any,
     format_func: Any | None = None,
     help: str | None = None,
+    canonical_wins: bool = False,
 ) -> Any:
-    current = _sync_plain_option_widget(key, options, default)
+    current = _sync_plain_option_widget(
+        key, options, default, canonical_wins=canonical_wins,
+    )
     widget_key = f"{key}_widget"
     if st.session_state.get(widget_key) not in options:
         st.session_state[widget_key] = current
@@ -11226,7 +11339,10 @@ def _collect_linear_fir_state(nyquist: float) -> list[LinearFIRFilter]:
                 cycles=max(float(item.get("cycles", LINEAR_FIR_DEFAULT_CYCLES)), 0.01),
                 beta=max(float(item.get("beta", LINEAR_FIR_DEFAULT_BETA)), 0.0),
                 base_crossover_hz=item.get("base_crossover_hz"),
-                lr2_auto_taps=bool(item.get("lr2_auto_taps", False)),
+                lr2_auto_taps=(
+                    _normalize_output_band_split_method(item.get("response", "kaiser"))
+                    == "linear_phase_lr2"
+                ),
                 acoustic_target=bool(item.get("acoustic_target", False)),
                 overlap_oct=float(item.get("overlap_oct", 0.0)),
                 enabled=True,
@@ -11947,15 +12063,9 @@ def _read_scalar_ui_state() -> dict[str, Any]:
         "output_fir_polarity_invert": _current_checkbox_setting("output_fir_polarity_invert", False),
         "fir_auto_gain_enabled": _current_checkbox_setting("fir_auto_gain_enabled", True),
         "output_fir_cosine_taper_enabled": _current_checkbox_setting("output_fir_cosine_taper_enabled", False),
-        "output_fir_remove_nyquist_enabled": _current_checkbox_setting("output_fir_remove_nyquist_enabled", False),
-        "output_fir_remove_nyquist_strength": float(
-            st.session_state.get(
-                safe_widget_key("__slider_val_", "output_fir_remove_nyquist_strength"),
-                st.session_state.get("output_fir_remove_nyquist_strength", 1.0),
-            )
-        ),
         "dc_gain_normalize": _current_checkbox_setting("dc_gain_normalize", True),
         "standalone_fir_enabled": bool(st.session_state.get("standalone_fir_enabled", True)),
+        "standalone_auto_crop": bool(st.session_state.get("standalone_auto_crop", False)),
         "fir_output_formats": _current_multiselect_setting("fir_output_formats", FIR_OUTPUT_FORMAT_OPTIONS),
         "target_output_formats": _current_multiselect_setting("target_output_formats", TARGET_OUTPUT_FORMAT_OPTIONS),
     }
@@ -12116,10 +12226,32 @@ _UTILITY_PAGES: tuple[str, ...] = ()
 _DSP_FIR_EDITOR_PAGES = frozenset({"FIR EQ", "Linear FIR"})
 
 
-def _dsp_fir_editor_available() -> bool:
+def _current_fir_output_status(
+    linear_filters: Sequence[LinearFIRFilter] | None = None,
+):
+    """Collect authoritative inputs once; shared policy owns the decision."""
     assignment = st.session_state.get("_active_context_assignment")
-    return (bool(st.session_state.get("standalone_fir_enabled", True)) if assignment is None
-            else int(getattr(assignment, "tap_count", 0)) > 0)
+    return resolve_fir_output_status(
+        int(st.session_state.get("taps", 1)),
+        requested_enabled=bool(st.session_state.get("standalone_fir_enabled", True)),
+        automatic_frame_available=standalone_automatic_frame_available_for(
+            linear_filters if linear_filters is not None else _items_for("linear_fir_items"),
+            band_split_recipe=st.session_state.get("band_split_recipe"),
+        ),
+        assignment_taps=(int(getattr(assignment, "tap_count", 0))
+                         if assignment is not None else None),
+    )
+
+
+def _standalone_fir_output_available(
+    linear_filters: Sequence[LinearFIRFilter] | None = None,
+) -> bool:
+    return _current_fir_output_status(linear_filters).available
+
+
+def _dsp_fir_editor_available() -> bool:
+    """Return effective FIR availability after applying the saved ON/OFF choice."""
+    return _current_fir_output_status().effective_enabled
 
 
 def _apply_workspace_navigation() -> None:
@@ -12365,7 +12497,7 @@ def _recommended_fir_taps(sample_rate: int) -> int:
 
 
 def _normalize_taps_value(value: int) -> int:
-    return max(int(value), 1)
+    return max(int(value), 0)
 
 
 TAPS_INPUT_MESSAGE_KEY = "_taps_input_message"
@@ -12376,7 +12508,7 @@ def _normalize_taps_value_for_ui(value: int) -> int:
     normalized_taps = _normalize_taps_value(raw_taps)
     if raw_taps != normalized_taps:
         st.session_state[TAPS_INPUT_MESSAGE_KEY] = (
-            "PhaseEQの出力FIRは1 tap以上です。"
+            "PhaseEQの出力FIRタップ数は0以上です。"
             f"{raw_taps} tapsを{normalized_taps} tapsへ補正しました。"
         )
     return normalized_taps
@@ -12387,8 +12519,24 @@ def _effective_analysis_fft_size(selected_fft_size: int, taps: int) -> int:
     return next_fast_len(fft_size, real=True)
 
 
+def _standalone_design_taps(configured_taps: int, sample_rate: int) -> int:
+    return standalone_design_input_taps(
+        configured_taps,
+        recommended_taps=DEFAULT_MANUAL_FIR_TAPS,
+    )
+
+
 def _sync_taps_value() -> None:
     _set_design_condition_state(taps=_normalize_taps_value(st.session_state.get("taps", 1)))
+
+
+def _commit_standalone_sample_rate_edit(widget_key: str) -> None:
+    """Commit the Export selector only for the Standalone owner."""
+    if st.session_state.get("_active_context_assignment") is not None:
+        return
+    sample_rate = _coerce_sample_rate_state_value(st.session_state.get(widget_key))
+    _set_design_condition_state(sample_rate=sample_rate)
+    _invalidate_live_result_cache()
 
 
 def _sync_composite_iir_assignment(assignment: Any, *, apply: bool = True) -> bool:
@@ -12541,13 +12689,16 @@ def _enforce_standalone_target_scope() -> None:
     """Do not restore Channel crossover targets in a standalone editor."""
     if st.session_state.get("_active_context_assignment") is not None:
         return
+    from ui.composite_context import detach_standalone_crossover
+    if detach_standalone_crossover(st.session_state):
+        _invalidate_live_result_cache()
     recipe = st.session_state.get("band_split_recipe")
     inherited = recipe is not None or st.session_state.get("_composite_linear_fir_assignment_id")
     items = _items_for("linear_fir_items")
     if inherited:
         st.session_state["_detached_channel_band_split"] = deepcopy({
             "recipe": recipe, "filters": items,
-            "iir": st.session_state.get("_composite_iir_crossover"),
+            "iir": deepcopy(st.session_state.get("_detached_channel_band_split", {}).get("iir")),
         })
         st.session_state["band_split_recipe"] = None
         st.session_state.pop("_composite_linear_fir_assignment_id", None)
@@ -12860,11 +13011,27 @@ _enforce_standalone_fir_capability()
 from ui import stereo_link as stereo_link
 
 def _stereo_apply_projection(payload):
-    _clear_project_profile_widget_state()
+    _clear_project_profile_widget_state(payload)
     _apply_ui_payload_to_state(payload)
-    projected_config = config_from_payload(payload)
+    projected_payload = payload
+    projected_output_taps = int(payload.get("config", {}).get("taps", DEFAULT_CONFIG.taps))
+    if projected_output_taps == 0:
+        projected_payload = deepcopy(payload)
+        projected_sample_rate = int(
+            projected_payload["config"].get("sample_rate", DEFAULT_CONFIG.sample_rate)
+        )
+        projected_payload["config"]["taps"] = _standalone_design_taps(
+            0, projected_sample_rate,
+        )
+    projected_config = config_from_payload(projected_payload)
     _apply_config_to_state(projected_config)
+    if projected_output_taps == 0:
+        _set_design_condition_state(taps=0)
     _apply_response_payload_to_state(payload, projected_config)
+    from utils.ui_state_commit import sync_output_postprocess_state
+    sync_output_postprocess_state(
+        st.session_state, inherited=st.session_state.get("_active_context_assignment") is not None,
+    )
     _invalidate_live_result_cache()
 
 _stereo_assignment = st.session_state.get("_active_context_assignment")
@@ -13804,10 +13971,17 @@ def _cached_stage_design_result(
     *,
     stage: str,
     apply_linear_fir_overlay: bool,
+    standalone_output_taps: int | None = None,
+    standalone_auto_crop: bool = False,
+    output_window_enabled: bool = False,
 ) -> Any:
+    reserve_missing_fir_eq = bool(
+        apply_linear_fir_overlay and standalone_output_taps is not None
+        and int(st.session_state.get("taps", config.taps)) == 0
+    )
     composite_iir_signature = ""
     if apply_linear_fir_overlay:
-        composite_iir = st.session_state.get("_composite_iir_crossover")
+        composite_iir = active_assignment_crossover(st.session_state)
         if isinstance(composite_iir, dict):
             composite_iir_signature = content_digest(
                 json.dumps(composite_iir, sort_keys=True, separators=(",", ":")),
@@ -13817,6 +13991,10 @@ def _cached_stage_design_result(
         _cache_coordinator().revision(CacheDomain.DESIGN_RESULT),
         stage,
         int(apply_linear_fir_overlay),
+        "none" if standalone_output_taps is None else int(standalone_output_taps),
+        int(standalone_auto_crop),
+        int(output_window_enabled),
+        int(reserve_missing_fir_eq),
         composite_iir_signature,
         _config_signature(config, None, None),
     )
@@ -13831,8 +14009,21 @@ def _cached_stage_design_result(
         config,
         compute_group_delay=False,
         apply_linear_fir_overlay=apply_linear_fir_overlay,
+        reserve_missing_fir_eq=reserve_missing_fir_eq,
     )
     if apply_linear_fir_overlay:
+        if standalone_output_taps is not None:
+            result, _tap_result = result_for_standalone_output_taps(
+                result,
+                int(config.sample_rate),
+                int(standalone_output_taps),
+                auto_crop=bool(standalone_auto_crop),
+                output_window_enabled=bool(output_window_enabled),
+                kaiser_band_split_active=any(
+                    item.enabled and item.response == "kaiser"
+                    for item in config.linear_fir_filters
+                ),
+            )
         result = _apply_output_band_split_iir(result, config)
         result = _apply_composite_iir_after_kaiser(result, int(config.sample_rate))
     cache[cache_key] = result
@@ -13846,7 +14037,7 @@ def _apply_composite_iir_after_kaiser(result: Any, sample_rate: int) -> Any:
     """Project the Studio-owned SOS after Kaiser without modifying FIR coefficients."""
     if st.session_state.get("band_split_recipe") is not None:
         return result  # The shared recipe stage already applied this boundary.
-    payload = st.session_state.get("_composite_iir_crossover")
+    payload = active_assignment_crossover(st.session_state)
     if not isinstance(payload, dict) or not bool(payload.get("enabled", False)):
         return result
     if int(payload.get("coefficient_sample_rate_hz", 0)) != int(sample_rate):
@@ -13931,7 +14122,7 @@ def _add_composite_iir_chart_series(
     """Expose the Studio-owned crossover separately from the PhaseEQ FIR."""
     if preview_stage not in ("Linear FIR", "Export FIR"):
         return chart_data
-    payload = st.session_state.get("_composite_iir_crossover")
+    payload = active_assignment_crossover(st.session_state)
     if not isinstance(payload, dict) or not bool(payload.get("enabled", False)):
         return chart_data
     if int(payload.get("coefficient_sample_rate_hz", 0)) != int(sample_rate):
@@ -13969,6 +14160,9 @@ def _previous_stage_result_for_delta(
     preview_stage: str,
     previous_stage: str | None,
     frequency: np.ndarray,
+    standalone_output_taps: int | None = None,
+    standalone_auto_crop: bool = False,
+    output_window_enabled: bool = False,
 ) -> Any | None:
     if previous_stage is None:
         return None
@@ -13984,6 +14178,9 @@ def _previous_stage_result_for_delta(
         previous_config,
         stage=previous_stage,
         apply_linear_fir_overlay=_stage_applies_linear_fir_overlay(previous_stage),
+        standalone_output_taps=standalone_output_taps,
+        standalone_auto_crop=standalone_auto_crop,
+        output_window_enabled=output_window_enabled,
     )
     if preview_stage == "Export FIR":
         # Export compares FIR postprocessing only; the previous preview also
@@ -13992,8 +14189,6 @@ def _previous_stage_result_for_delta(
             previous_result,
             int(config.sample_rate),
             output_fir_polarity_invert=False,
-            output_fir_remove_nyquist_enabled=False,
-            output_fir_remove_nyquist_strength=0.0,
             fir_auto_gain_enabled=False,
         )
     return previous_result
@@ -15285,10 +15480,16 @@ def _time_analysis_fft_size(sample_rate: int, taps: int) -> int:
 
 
 def _display_response_bundles(result, speaker, target, sample_rate, iir_filters=None,
-                              *, config=None, stage=None, fir_enabled=True):
+                              *, config=None, stage=None, fir_enabled=True,
+                              fft_size=None):
     """Application adapter: inputs are already at the selected page's stage."""
     cache = _display_analysis_cache()
-    n = _time_analysis_fft_size(sample_rate, len(result.fir))
+    n = (
+        _time_analysis_fft_size(sample_rate, len(result.fir))
+        if fft_size is None else int(fft_size)
+    )
+    if n < len(result.fir) or n < 3 or n % 2 != 1:
+        raise ValueError("表示解析長がFIR係数長を満たす有効な奇数ではありません。")
     sources = {}
     for name, response in (("Speaker/Input", speaker), ("Target Response", target)):
         if response is None or response.phase_deg is None:
@@ -15303,7 +15504,16 @@ def _display_response_bundles(result, speaker, target, sample_rate, iir_filters=
             continue
     if stage in {"Speaker/Input", "Target Response"}:
         return sources
-    if iir_filters is None:
+    if not fir_enabled and iir_filters is None:
+        # Resolve the active IIR chain directly; do not expose the internal FIR
+        # preview or an identity FIR as a selectable time-response series.
+        sos = (export_iir_sos(config, active_assignment_crossover(st.session_state))
+               if config is not None and stage in {"Linear FIR", "Export FIR"}
+               else cascade_iir_sos(config.iir_filters if config is not None else [], sample_rate))
+        correction = display_analysis.sos_response(cache, sos, sample_rate, n)
+        sources["IIR Output"] = correction
+        after = "Speaker + Realized"
+    elif iir_filters is None:
         correction = display_analysis.fir_response(
             cache, result.fir if fir_enabled else np.ones(1), sample_rate, n)
         if config is not None and stage == "Linear FIR":
@@ -15323,7 +15533,7 @@ def _display_response_bundles(result, speaker, target, sample_rate, iir_filters=
                 if filters:
                     correction = display_analysis.multiply(cache, correction,
                         display_analysis.sos_response(cache, cascade_iir_sos(filters, sample_rate), sample_rate, n))
-                payload = st.session_state.get("_composite_iir_crossover")
+                payload = active_assignment_crossover(st.session_state)
                 if isinstance(payload, dict) and payload.get("enabled"):
                     if int(payload.get("coefficient_sample_rate_hz", 0)) != sample_rate:
                         raise ValueError("Composite IIR SOSのサンプルレートが一致しません。")
@@ -15338,7 +15548,7 @@ def _display_response_bundles(result, speaker, target, sample_rate, iir_filters=
         if stage == "Export FIR" and config is not None:
             sources["FIR Output"] = correction
             extra = display_analysis.sos_response(cache, export_iir_sos(
-                config, st.session_state.get("_composite_iir_crossover")), sample_rate, n)
+                config, active_assignment_crossover(st.session_state)), sample_rate, n)
             sources["IIR Output"] = extra
             correction = display_analysis.multiply(cache, correction, extra)
             sources["FIR + IIR Output"] = correction
@@ -15374,6 +15584,82 @@ def _display_time_series(sources, taps, requested):
             selected = values[response.n//2 + indices]
             (steps if view == "step" else impulses)[name] = selected
     return impulses, steps, delays
+
+
+def _project_chart_data_to_shared_display_grid(
+    chart_data: ResponseChartData,
+    result: Any,
+    speaker: SpeakerResponse | None,
+    target: SpeakerResponse | None,
+    sample_rate: int,
+    *,
+    config: DesignConfig,
+    stage: str,
+    fir_enabled: bool,
+) -> ResponseChartData:
+    """Project one completed chart model to the shared 2 Hz display grid.
+
+    Existing display-only series are interpolated after all page-specific
+    transforms.  Series backed by actual FIR/SOS/Speaker artifacts are then
+    replaced by a fresh complex evaluation on that same grid.  Generation and
+    exported coefficients remain untouched.
+    """
+    n = display_fft_length(sample_rate, minimum_length=len(result.fir))
+    frequency = np.fft.rfftfreq(n, 1.0 / int(sample_rate))
+    source_frequency = np.asarray(chart_data.frequency, dtype=float)
+
+    def projected(values: np.ndarray) -> np.ndarray:
+        return _interp_like(frequency, source_frequency, np.asarray(values, dtype=float))
+
+    gain_series = {
+        name: frequency if name == "frequency" else projected(values)
+        for name, values in chart_data.gain_series.items()
+    }
+    phase_series = {
+        name: frequency if name == "frequency" else projected(values)
+        for name, values in chart_data.phase_series.items()
+    }
+    projected_data = replace(
+        chart_data,
+        frequency=frequency,
+        speaker_gain=projected(chart_data.speaker_gain),
+        speaker_phase_unwrapped=projected(chart_data.speaker_phase_unwrapped),
+        target_gain=projected(chart_data.target_gain),
+        target_phase_wrapped=_phase_chart_display_series(projected(chart_data.target_phase_wrapped)),
+        mic_cal_gain=projected(chart_data.mic_cal_gain),
+        gain_series=gain_series,
+        phase_series=phase_series,
+    )
+
+    iir_filters = list(config.iir_filters) if stage == "IIR EQ" else None
+    try:
+        bundles = _display_response_bundles(
+            result,
+            speaker,
+            target,
+            sample_rate,
+            iir_filters,
+            config=config,
+            stage=stage,
+            fir_enabled=fir_enabled,
+            fft_size=n,
+        )
+    except ValueError:
+        # Invalid optional measurement phase must not suppress otherwise valid
+        # Gain/Phase chart series; their projected values remain available.
+        bundles = {}
+
+    cache = _display_analysis_cache()
+    gain_series = dict(projected_data.gain_series)
+    phase_series = dict(projected_data.phase_series)
+    for name, response in bundles.items():
+        if name in gain_series:
+            gain_series[name] = display_analysis.derive(cache, response, "gain")
+        if name in phase_series:
+            phase_series[name] = np.rad2deg(
+                display_analysis.derive(cache, response, "phase")
+            )
+    return replace(projected_data, gain_series=gain_series, phase_series=phase_series)
 
 
 def _group_delay_from_phase_ms(frequency: np.ndarray, phase_deg: np.ndarray) -> np.ndarray:
@@ -16797,7 +17083,10 @@ project_name = ui_state["project_name"]
 sample_rate = ui_state["sample_rate"]
 taps = ui_state["taps"]
 analysis_fft_size = ui_state["analysis_fft_size"]
-effective_analysis_fft_size = _effective_analysis_fft_size(int(analysis_fft_size), int(taps))
+standalone_design_taps = _standalone_design_taps(int(taps), int(sample_rate))
+effective_analysis_fft_size = _effective_analysis_fft_size(
+    int(analysis_fft_size), standalone_design_taps,
+)
 window = ui_state["window"]
 kaiser_beta = ui_state["kaiser_beta"]
 chebyshev_attenuation_db = ui_state["chebyshev_attenuation_db"]
@@ -16852,8 +17141,6 @@ target_source_content_mode = ui_state["target_source_content_mode"]
 output_fir_polarity_invert = ui_state["output_fir_polarity_invert"]
 fir_auto_gain_enabled = ui_state["fir_auto_gain_enabled"]
 output_fir_cosine_taper_enabled = ui_state["output_fir_cosine_taper_enabled"]
-output_fir_remove_nyquist_enabled = ui_state["output_fir_remove_nyquist_enabled"]
-output_fir_remove_nyquist_strength = ui_state["output_fir_remove_nyquist_strength"]
 dc_gain_normalize = ui_state["dc_gain_normalize"]
 fir_output_formats = ui_state["fir_output_formats"]
 target_output_formats = ui_state["target_output_formats"]
@@ -16953,20 +17240,11 @@ if active_composite_assignment is not None:
     # Composite return post-processing is owned by Multiway.  Force the UI,
     # preview calculation and Recipe input to the same explicit bypass state,
     # even when an older Working Session saved different standalone values.
-    for settings_key in (
-        "dc_gain_normalize",
-        "output_fir_polarity_invert",
-        "output_fir_cosine_taper_enabled",
-        "output_fir_remove_nyquist_enabled",
-        "fir_auto_gain_enabled",
-    ):
-        _set_setting_and_widget(settings_key, False, "__chk_val_")
-    _set_setting_and_widget("output_fir_remove_nyquist_strength", 0.0, "__slider_val_")
+    from utils.ui_state_commit import sync_output_postprocess_state
+    sync_output_postprocess_state(st.session_state, inherited=True)
     dc_gain_normalize = False
     output_fir_polarity_invert = False
     output_fir_cosine_taper_enabled = False
-    output_fir_remove_nyquist_enabled = False
-    output_fir_remove_nyquist_strength = 0.0
     fir_auto_gain_enabled = False
 
 browser_presence(STORAGE_PATHS["composite_exchange"], "phaseeq")
@@ -17117,13 +17395,10 @@ if active_page == "Common Settings":
             _selectbox_setting_widget(
                 ui_message('ui.5e23ec6a300dc6'), GRAPH_MODE_OPTIONS, "graph_mode",
                 default=DEFAULT_GRAPH_MODE, help=ui_message('ui.19d2181974cb26'),
+                canonical_wins=True,
             )
-            _selectbox_setting_widget(
-                ui_message('ui.77deabe238de2f'), GRAPH_MAX_POINTS_OPTIONS, "graph_max_points",
-                default=DEFAULT_GRAPH_MAX_POINTS,
-                format_func=lambda value: f"{value} points / series",
-                help=ui_message('ui.65b4ce17527fdc'),
-            )
+            st.session_state["graph_max_points"] = DEFAULT_GRAPH_MAX_POINTS
+            st.caption(display_text("表示点数：2,048 points / series（Light／Interactive共通・固定）"))
             st.caption(ui_message('ui.8d94e1ed885bdc'))
             _segmented_setting_widget(
                 ui_message('ui.ad575edd00887d'), (1, 2, 4),
@@ -17167,7 +17442,7 @@ if active_page == "Common Settings":
                 format_func=localized_formatter(lambda value: f'{int(value):,} points'),
             ))
             effective_fft = AnalysisPolicy(draft_fft).effective_fft_size(
-                required_length=int(taps),
+                required_length=_standalone_design_taps(int(taps), int(sample_rate)),
             )
             st.caption(
                 ui_message('ui.8ee64340bc6217', p0=f'{draft_fft:,}', p1=f'{applied_fft:,}', p2=f'{effective_fft:,}')
@@ -19474,12 +19749,6 @@ if active_page == "Linear FIR":
     if composite_band_split_locked:
         _set_plain_setting_and_widget("linear_fir_mode", "FIR Filter")
     linear_fir_output_id = None
-    pending_preset_smoothing = st.session_state.pop("_pending_linear_fir_preset_smoothing_oct", None)
-    if pending_preset_smoothing is not None:
-        _set_plain_setting_and_widget(
-            "linear_fir_eq_mask_smoothing_oct",
-            _nearest_linear_fir_eq_mask_smoothing_option(float(pending_preset_smoothing)),
-        )
     current_linear_items = _items_for("linear_fir_items")
     linear_profile = _linear_fir_profile_from_items(current_linear_items)
     if linear_profile == "None":
@@ -19495,9 +19764,6 @@ if active_page == "Linear FIR":
         default_fc = LINEAR_FIR_DEFAULT_HIGH_FC_HZ if mode == "hp" else LINEAR_FIR_DEFAULT_LOW_FC_HZ
         fc = _current_number_setting(f"{prefix}_fc", float(default_fc))
         cutoff_labels.append(f"{'HP' if mode == 'hp' else 'LP'} {_format_plain_hz(fc)}")
-    smoothing_value = _nearest_linear_fir_eq_mask_smoothing_option(
-        float(st.session_state.get("linear_fir_eq_mask_smoothing_oct", LINEAR_FIR_EQ_MASK_SMOOTHING_DEFAULT))
-    )
     with st.container(border=True):
         st.markdown(ui_message('ui.5551e46859f918'))
         st.caption(
@@ -19506,9 +19772,8 @@ if active_page == "Linear FIR":
             ui_message('ui.bc005a648788c1', p0=f'{LINEAR_FIR_PROFILE_LABELS.get(linear_profile, linear_profile)}')
             + (ui_message('ui.eec3e13813c12a', p0=f"{' / '.join(cutoff_labels)}") if cutoff_labels else "")
         )
-        st.caption(ui_message('ui.277e38ef6a65e8', p0=f'{_format_linear_fir_eq_mask_smoothing(smoothing_value)}'))
         st.caption(ui_message('ui.b4d955e2bc9cc3'))
-    composite_iir = st.session_state.get("_composite_iir_crossover")
+    composite_iir = active_assignment_crossover(st.session_state)
     if isinstance(composite_iir, dict) and st.session_state.get("band_split_recipe") is None:
         with st.container(border=True):
             st.markdown(ui_message('ui.567b03f46b48c4'))
@@ -19539,6 +19804,8 @@ if active_page == "Linear FIR":
             _render_linear_fir_preset_manager()
     linear_fir_filters = _collect_linear_fir_state(nyquist)
 
+standalone_final_tap_count_slot = None
+standalone_tap_setting_slot = None
 if active_page == "Export":
   with editor_window:
     composite_export_locked = active_composite_assignment is not None
@@ -19559,33 +19826,77 @@ if active_page == "Export":
             )
         else:
             st.caption(
-                ui_message('ui.230b91e2d911be')
+                ui_message('ui.63b78a555d678a')
             )
+        assignment = st.session_state.get("_active_context_assignment")
+        inherited_sample_rate = int(
+            getattr(assignment, "sample_rate_hz", sample_rate)
+        )
+        sample_rate_owner = (
+            f"assignment_{getattr(assignment, 'assignment_id', 'channel')}"
+            if assignment is not None else "standalone"
+        )
+        sample_rate_widget_key = f"export_sample_rate_{sample_rate_owner}"
+        if st.session_state.get(sample_rate_widget_key) != inherited_sample_rate:
+            st.session_state[sample_rate_widget_key] = inherited_sample_rate
+        st.selectbox(
+            ui_message('ui.218e0d43275e43'),
+            STANDALONE_SAMPLE_RATE_OPTIONS,
+            key=sample_rate_widget_key,
+            format_func=lambda value: f"{int(value) / 1000:g} kHz",
+            disabled=assignment is not None,
+            on_change=_commit_standalone_sample_rate_edit,
+            args=(sample_rate_widget_key,),
+            help=(
+                "各WayではComposite Assignmentのサンプリング周波数を使用するため変更できません。"
+                if assignment is not None else
+                "Standaloneの設計・解析・FIR出力に使用するサンプリング周波数です。"
+            ),
+        )
+        if assignment is not None:
+            st.caption(
+                f"Composite Assignmentから継承：{inherited_sample_rate / 1000:g} kHz"
+            )
+        standalone_output_available = _standalone_fir_output_available(linear_fir_filters)
         taps_column, fir_column = st.columns([0.7, 0.3], vertical_alignment="bottom")
         with fir_column:
             from ui.fir_navigation import render_fir_output_toggle
             def change_fir_enabled():
                 _enforce_standalone_fir_capability()
                 _invalidate_live_result_cache()
-            render_fir_output_toggle(_dsp_fir_editor_available(),
-                                     inherited=composite_taps_locked, on_change=change_fir_enabled)
+            render_fir_output_toggle(
+                (
+                    _dsp_fir_editor_available()
+                    if composite_taps_locked
+                    else bool(st.session_state.get("standalone_fir_enabled", True))
+                ),
+                inherited=composite_taps_locked,
+                unavailable=not standalone_output_available,
+                on_change=change_fir_enabled,
+            )
         with taps_column:
             draft_taps = int(st.number_input(
-                ui_message('ui.159b8d470b2161'),
-                min_value=1,
+                ui_message('ui.48ecf773577d95'),
+                min_value=0,
                 max_value=262_143,
                 step=1,
                 key=taps_draft_key,
                 disabled=composite_taps_locked,
                 help=(
-                    ui_message('ui.72b6437595e11a')
+                    ui_message('ui.1cbe21dbfa60f3')
                 ),
             ))
         if not composite_taps_locked:
             st.caption(ui_message('ui.a33032e073642d'))
-        st.caption(
-            ui_message('ui.1ed5bef4078c89', p0=f'{draft_taps:,}', p1=f'{applied_taps:,}', p2=f'{draft_taps / int(sample_rate) * 1000:.2f}')
+        standalone_tap_setting_slot = st.empty()
+        known_final_taps = int(st.session_state.get("_standalone_final_fir_taps", 0) or 0)
+        tap_view = standalone_output_tap_view(
+            draft_taps,
+            applied_taps,
+            known_final_taps,
+            int(sample_rate),
         )
+        standalone_tap_setting_slot.caption(tap_setting_caption(tap_view))
         if st.button(
             ui_message('ui.e84cebec570ddf'),
             type="primary",
@@ -19596,13 +19907,31 @@ if active_page == "Export":
             _set_design_condition_state(taps=draft_taps)
             _invalidate_live_result_cache()
             st.session_state["_export_taps_notice"] = (
-                f"Standalone PhaseEQのFIRタップ数を{draft_taps:,} tapsへ適用しました。"
+                f"Standalone PhaseEQの最終出力タップ設定を{draft_taps:,} tapsへ適用しました。"
             )
             st.session_state["_pending_page_navigation"] = {
                 "page": "Export",
                 "state_updates": {},
             }
             st.rerun()
+        auto_crop_widget_key = "standalone_auto_crop_widget"
+        st.session_state[auto_crop_widget_key] = bool(
+            st.session_state.get("standalone_auto_crop", False)
+        )
+        def change_standalone_auto_crop():
+            st.session_state["standalone_auto_crop"] = bool(
+                st.session_state.get(auto_crop_widget_key, False)
+            )
+            _invalidate_live_result_cache()
+        st.checkbox(
+            ui_message('ui.2af8931ca87631'),
+            key=auto_crop_widget_key,
+            disabled=composite_taps_locked or not _dsp_fir_editor_available(),
+            help=ui_message('ui.cdbf94aad9f9d7'),
+            on_change=change_standalone_auto_crop,
+        )
+        standalone_final_tap_count_slot = st.empty()
+        standalone_final_tap_count_slot.caption(final_tap_caption(tap_view))
     taps_notice = str(st.session_state.pop("_export_taps_notice", "")).strip()
     if taps_notice:
         st.success(taps_notice)
@@ -19618,7 +19947,6 @@ if active_page == "Export":
     final_fir_summary = (
         f"DC {'Normalize' if _current_checkbox_setting('dc_gain_normalize', True) else 'Raw'} / "
         f"Out {'Invert' if _current_checkbox_setting('output_fir_polarity_invert', False) else 'Normal'} / "
-        f"Nyquist {'Remove' if _current_checkbox_setting('output_fir_remove_nyquist_enabled', False) else 'Keep'} / "
         f"Auto Gain {'ON -0.3 dB' if _current_checkbox_setting('fir_auto_gain_enabled', True) else 'OFF'}"
     )
     export_formats_summary = ", ".join(_current_multiselect_setting("fir_output_formats", FIR_OUTPUT_FORMAT_OPTIONS))
@@ -19690,12 +20018,6 @@ if active_page == "Export":
                 disabled=composite_export_locked,
                 help=ui_message('ui.382ac85c81b616'),
             )
-            output_fir_remove_nyquist_enabled = checkbox_stateful(
-                ui_message('ui.13ec7c644f445c'),
-                settings_key="output_fir_remove_nyquist_enabled",
-                disabled=composite_export_locked,
-                help=ui_message('ui.9533ad6486be20'),
-            )
             fir_auto_gain_enabled = checkbox_stateful(
                 ui_message('ui.0f78934e5485dd'),
                 settings_key="fir_auto_gain_enabled",
@@ -19704,17 +20026,6 @@ if active_page == "Export":
                 help=(
                     ui_message('ui.6c27d355c507fa')
                 ),
-            )
-            output_fir_remove_nyquist_strength = slider_stateful_safe(
-                ui_message('ui.9004bca80c9432'),
-                settings_key="output_fir_remove_nyquist_strength",
-                min_value=0.0,
-                max_value=1.0,
-                default=1.0,
-                step=0.05,
-                format="%.2f",
-                disabled=composite_export_locked or not output_fir_remove_nyquist_enabled,
-                help=ui_message('ui.42c6bff99efe8a'),
             )
             if composite_export_locked:
                 st.info(
@@ -19779,7 +20090,10 @@ project_name = ui_state["project_name"]
 sample_rate = ui_state["sample_rate"]
 taps = ui_state["taps"]
 analysis_fft_size = ui_state["analysis_fft_size"]
-effective_analysis_fft_size = _effective_analysis_fft_size(int(analysis_fft_size), int(taps))
+standalone_design_taps = _standalone_design_taps(int(taps), int(sample_rate))
+effective_analysis_fft_size = _effective_analysis_fft_size(
+    int(analysis_fft_size), standalone_design_taps,
+)
 nyquist = sample_rate / 2
 window = ui_state["window"]
 kaiser_beta = ui_state["kaiser_beta"]
@@ -19818,8 +20132,6 @@ target_phase_enabled = bool(ui_state["target_phase_enabled"])
 output_fir_polarity_invert = ui_state["output_fir_polarity_invert"]
 fir_auto_gain_enabled = ui_state["fir_auto_gain_enabled"]
 output_fir_cosine_taper_enabled = ui_state["output_fir_cosine_taper_enabled"]
-output_fir_remove_nyquist_enabled = ui_state["output_fir_remove_nyquist_enabled"]
-output_fir_remove_nyquist_strength = ui_state["output_fir_remove_nyquist_strength"]
 dc_gain_normalize = ui_state["dc_gain_normalize"]
 fir_output_formats = ui_state["fir_output_formats"]
 target_output_formats = ui_state["target_output_formats"]
@@ -20197,7 +20509,7 @@ if target_locked and isinstance(active_composite_assignment.target_definition, d
 base_target_response = target_pipeline_result.effective_response
 from phase_fir_designer.acoustic_target import effective_target as acoustic_effective_target, enabled as acoustic_target_enabled
 target_response = acoustic_effective_target(DesignConfig(
-    sample_rate=sample_rate, taps=int(taps), target_response=base_target_response,
+    sample_rate=sample_rate, taps=standalone_design_taps, target_response=base_target_response,
     linear_fir_filters=linear_fir_filters, band_split_recipe=st.session_state.get("band_split_recipe")))
 if speaker_gain_shift_mode == TARGET_LEVEL_MODE:
     _reference_range = None
@@ -20344,7 +20656,7 @@ config = DesignConfig(
     # Targets guide explicit EQ in both standalone and Multiway editors.
     # Preserve this policy in the shared config used by preview and export.
     acoustic_correction_enabled=False,
-    taps=int(taps),
+    taps=standalone_design_taps,
     analysis_fft_size=int(analysis_fft_size),
     peq_filters=peq_filters,
     shelf_filters=shelf_filters,
@@ -20396,6 +20708,29 @@ config = DesignConfig(
     fir_fit_weighting="flat",
     speaker_response=speaker_response,
     target_response=base_target_response,
+)
+
+# Resolve enablement and the provisional output frame only after the output-band
+# split FIR exists.  This keeps zero-tap semantics independent from Adaptive
+# cropping and shares the same policy used by Multiway.
+standalone_fir_state = (
+    None
+    if active_composite_assignment is not None
+    else resolve_standalone_fir_state(
+        config,
+        int(taps),
+        fir_output_enabled=bool(st.session_state.get("standalone_fir_enabled", True)),
+    )
+)
+standalone_resolved_output_taps = (
+    None
+    if standalone_fir_state is None or not standalone_fir_state.enabled
+    else standalone_fir_state.tap_count
+)
+fir_output_status = _current_fir_output_status(linear_fir_filters)
+st.session_state["_fir_status_snapshot"] = fir_output_status.snapshot(standalone_fir_state)
+st.session_state["_fir_status_snapshot"]["saved_request"] = bool(
+    st.session_state.get("standalone_fir_enabled", True)
 )
 
 try:
@@ -20995,6 +21330,9 @@ with live_result_window:
     graph_max_points = int(live_controls_state["graph_max_points"])
 
 live_config = config_for_preview_stage(config, preview_stage)
+preview_fir_enabled = fir_output_status.effective_enabled and (
+    config.band_split_recipe is None or config.band_split_recipe.get("fir_enabled", True)
+)
 if (_standalone_iir_only()
         and preview_stage not in {"Speaker/Input", "Target Response", "IIR EQ"}):
     live_config = config_for_preview_stage(config, "IIR EQ")
@@ -21034,6 +21372,11 @@ with live_result_body_window:
                 live_config,
                 stage=preview_stage,
                 apply_linear_fir_overlay=live_apply_linear_fir_overlay,
+                standalone_output_taps=(
+                    standalone_resolved_output_taps
+                ),
+                standalone_auto_crop=bool(ui_state.get("standalone_auto_crop", False)),
+                output_window_enabled=bool(output_fir_cosine_taper_enabled),
             )
             previous_stage_for_delta = previous_stage_for_edit_delta(preview_stage)
             previous_base_result_for_delta = _previous_stage_result_for_delta(
@@ -21041,6 +21384,11 @@ with live_result_body_window:
                 preview_stage=preview_stage,
                 previous_stage=previous_stage_for_delta,
                 frequency=result.frequency,
+                standalone_output_taps=(
+                    standalone_resolved_output_taps
+                ),
+                standalone_auto_crop=bool(ui_state.get("standalone_auto_crop", False)),
+                output_window_enabled=bool(output_fir_cosine_taper_enabled),
             )
         except ValueError as exc:
             st.error(str(exc))
@@ -21088,27 +21436,59 @@ with live_result_body_window:
     mic_cal_source_name = active_context.get("mic_cal_source_name", "")
     preview_stage = active_context.get("preview_stage", preview_stage)
     live_config = active_context.get("live_config", live_config)
+    fir_preview = FIRPreviewPolicy(preview_stage, preview_fir_enabled)
+    st.session_state["_fir_status_snapshot"]["preview"] = {
+        "stage": fir_preview.stage,
+        "fir_enabled": fir_preview.fir_enabled,
+        "iir_only_output": fir_preview.iir_only_output,
+    }
     if _stage_applies_iir(preview_stage):
         speaker_response = apply_iir_to_speaker_response(
             speaker_response_before_iir,
             live_config.iir_filters,
             int(live_config.sample_rate),
         )
-    if preview_stage == "Export FIR":
+    if preview_stage == "Export FIR" and fir_preview.fir_enabled:
         result = result_for_export_fir_stage(
             base_result,
             int(live_config.sample_rate),
             bool(output_fir_polarity_invert),
-            bool(output_fir_remove_nyquist_enabled),
-            float(output_fir_remove_nyquist_strength),
             bool(fir_auto_gain_enabled),
             output_fir_cosine_taper_enabled=bool(output_fir_cosine_taper_enabled),
         )
         st.caption(
-            ui_message('ui.ad20c54265744a', p0=f'{result.fir.size:,}', p1=f'{result.fir.size / int(live_config.sample_rate) * 1000:.2f}', p2=f'{int(live_config.taps):,}')
+            ui_message(
+                'ui.96036f0600de68',
+                p0=f'{result.fir.size:,}',
+                p1=f'{result.fir.size / int(live_config.sample_rate) * 1000:.2f}',
+                p2=output_tap_setting_label(
+                    applied_taps=int(taps),
+                    resolved_taps=int(standalone_resolved_output_taps or result.fir.size),
+                    adaptive=bool(ui_state.get("standalone_auto_crop", False)),
+                ),
+            )
         )
+        if base_result.crop_delay_samples:
+            st.caption(ui_message('ui.d41fd600a2ef4e',
+                p0=f'{base_result.crop_delay_samples:g}',
+                p1=f'{base_result.crop_delay_samples * 1000.0 / sample_rate:.6f}'))
     else:
         result = base_result
+    visible_final_taps = int(result.fir.size) if fir_preview.fir_enabled else 0
+    st.session_state["_fir_status_snapshot"]["preview"]["output_taps"] = visible_final_taps
+    if standalone_final_tap_count_slot is not None:
+        st.session_state["_standalone_final_fir_taps"] = visible_final_taps
+        tap_view = standalone_output_tap_view(
+            int(st.session_state.get("standalone_fir_taps_draft", taps)),
+            int(taps),
+            visible_final_taps,
+            int(live_config.sample_rate),
+        )
+        standalone_final_tap_count_slot.caption(
+            final_tap_caption(tap_view) if fir_preview.fir_enabled else ui_message('ui.67fbdba542c286')
+        )
+        if standalone_tap_setting_slot is not None:
+            standalone_tap_setting_slot.caption(tap_setting_caption(tap_view))
     previous_result_for_edit_delta = None
     previous_base_result_for_edit_delta = active_context.get("previous_result_for_edit_delta")
     if previous_base_result_for_edit_delta is not None:
@@ -21133,7 +21513,7 @@ with live_result_body_window:
 
     raw_chart_data = _build_response_chart_data(
         result,
-        speaker_response_before_iir if preview_stage == "Export FIR" else speaker_response,
+        speaker_response_before_iir if fir_preview.chart_uses_input_before_iir else speaker_response,
         target_response,
         mic_cal_response,
         preview_stage,
@@ -21180,21 +21560,29 @@ with live_result_body_window:
         preview_stage,
     )
     raw_chart_data = _suppress_correction_series_for_reference_stage(raw_chart_data, preview_stage)
-    export_fir_enabled = _dsp_fir_editor_available() and (
-        live_config.band_split_recipe is None or live_config.band_split_recipe.get("fir_enabled", True))
-    if preview_stage == "Export FIR":
-        output_sos = export_iir_sos(live_config, st.session_state.get("_composite_iir_crossover"))
+    if fir_preview.output_series_required:
+        output_sos = export_iir_sos(live_config, active_assignment_crossover(st.session_state))
         output_iir_response = (signal.sosfreqz(output_sos, worN=result.frequency,
                               fs=int(live_config.sample_rate))[1] if output_sos.size
                               else np.ones_like(result.frequency, dtype=complex))
         raw_chart_data = add_export_output_series(
-            raw_chart_data, result, output_iir_response, fir_enabled=export_fir_enabled)
+            raw_chart_data, result, output_iir_response, fir_enabled=fir_preview.fir_enabled)
     else:
         raw_chart_data = _add_composite_iir_chart_series(
             raw_chart_data,
             preview_stage=preview_stage,
             sample_rate=int(live_config.sample_rate),
         )
+    raw_chart_data = _project_chart_data_to_shared_display_grid(
+        raw_chart_data,
+        result,
+        speaker_response_before_iir if fir_preview.analysis_uses_input_before_iir else speaker_response,
+        target_response,
+        int(live_config.sample_rate),
+        config=live_config,
+        stage=preview_stage,
+        fir_enabled=fir_preview.fir_enabled,
+    )
     phase_gain_threshold_db = _phase_gain_mask_threshold_db(ui_state.get("phase_gain_mask", DEFAULT_PHASE_GAIN_MASK))
     for chart_warning in _chart_data_warnings(raw_chart_data):
         st.warning(chart_warning)
@@ -21277,10 +21665,6 @@ with live_result_body_window:
             if preview_stage == "Export FIR" and bool(output_fir_polarity_invert):
                 st.caption(
                     ui_message('ui.4e4d519e9d85f3')
-                )
-            elif preview_stage == "Export FIR" and bool(output_fir_remove_nyquist_enabled):
-                st.caption(
-                    ui_message('ui.74fd4c2878ff59')
                 )
             elif preview_stage == "Export FIR":
                 st.caption(ui_message('ui.c5b65c07b93c58'))
@@ -21382,21 +21766,24 @@ with live_result_body_window:
             default="Error",
         )
         analysis_responses = None
-        if detail_view in {"Wavelet", "Response Advisor", "Impulse", "Step", "Group Delay"}:
+        detail_available = fir_preview.detail_available(detail_view)
+        if detail_available and detail_view in {"Wavelet", "Response Advisor", "Impulse", "Step", "Group Delay"}:
             if active_context.get("processed_range_hz") is not None:
                 st.caption(ui_message('ui.f3b48189c4a32a'))
             try:
                 analysis_responses = _display_response_bundles(
-                    result, speaker_response_before_iir if preview_stage in {"IIR EQ", "Export FIR"} else speaker_response,
+                    result, speaker_response_before_iir if fir_preview.analysis_uses_input_before_iir else speaker_response,
                     target_response, int(live_config.sample_rate),
                     list(live_config.iir_filters) if preview_stage == "IIR EQ" else None,
                     config=live_config, stage=preview_stage,
-                    fir_enabled=export_fir_enabled if preview_stage == "Export FIR" else True)
+                    fir_enabled=fir_preview.fir_enabled)
             except ValueError as exc:
                 st.warning(str(exc))
                 analysis_responses = {}
             st.caption(ui_message('ui.d390c5354e0789'))
-        if detail_view == "Error":
+        if not detail_available:
+            st.info(ui_message('ui.5a3c4f3d537130'))
+        elif detail_view == "Error":
             if preview_stage == "IIR EQ":
                 st.caption(ui_message('ui.e352b72c472910'))
                 iir_gain_error, iir_phase_error, _iir_group_delay_error, iir_reference_gain = (
@@ -21440,6 +21827,7 @@ with live_result_body_window:
             st.caption(ui_message('ui.f980e485e5eea2'))
             st.plotly_chart(coefficient_figure(
                 result.fir, window_enabled=bool(output_fir_cosine_taper_enabled) and preview_stage == "Export FIR",
+                protected_center_taps=result.output_window_protected_center_taps,
                 colors=_table_theme_colors(), height=RESPONSE_CHART_HEIGHT_PX,
             ), key="phaseeq_fir_cofs", theme=None, width="stretch", config=PLOTLY_CONFIG)
         elif detail_view == "Response Advisor":
@@ -21517,7 +21905,7 @@ with live_result_body_window:
                 ):
                     with st.container(border=True):
                         st.markdown(
-                            ui_message('ui.ff7183f39543f3')
+                            ui_message('ui.1332108d26bb1c')
                         )
             if detail_view == "Impulse":
                 visible_series = [name for name in impulse_series if name != "tap"]
@@ -21567,9 +21955,6 @@ with live_result_body_window:
         st.caption(ui_message('ui.f9dfd0159f13ed', p0=f"{('ON' if output_fir_polarity_invert else 'OFF')}"))
         st.caption(ui_message('ui.84c11b3fc7aa06', p0=f"{('ON' if dc_gain_normalize else 'OFF')}"))
         st.caption(ui_message('ui.7a60d8a5124c62', p0=f"{('ON' if fir_auto_gain_enabled else 'OFF')}"))
-        st.caption(
-            ui_message('ui.ecd4610c8796e6', p0=f"{('ON' if output_fir_remove_nyquist_enabled else 'OFF')}", p1=f'{float(output_fir_remove_nyquist_strength):.2f}')
-        )
 
         current_target_response = base_target_response
         export_base = project_file_base(project_name, app_slug=APP_SLUG, timestamp=OUTPUT_GENERATED_AT)
@@ -21602,8 +21987,6 @@ with live_result_body_window:
             output_fir_polarity_invert=output_fir_polarity_invert,
             output_fir_cosine_taper_enabled=bool(output_fir_cosine_taper_enabled),
             fir_auto_gain_enabled=bool(fir_auto_gain_enabled),
-            output_fir_remove_nyquist_enabled=bool(output_fir_remove_nyquist_enabled),
-            output_fir_remove_nyquist_strength=float(output_fir_remove_nyquist_strength),
             generated_at=OUTPUT_GENERATED_AT,
             band_name=output_band_name,
             system_context=(
@@ -21691,9 +22074,12 @@ with live_result_body_window:
                     ui_message('ui.7413c26f547261', p0=f'{format_name.upper()}'),
                     data=deferred_call(download_fir, format_name, base_result.fir, sample_rate, dict(
                         output_fir_polarity_invert=bool(output_fir_polarity_invert),
-                        output_fir_cosine_taper_enabled=bool(output_fir_cosine_taper_enabled),
-                        output_fir_remove_nyquist_enabled=bool(output_fir_remove_nyquist_enabled),
-                        output_fir_remove_nyquist_strength=float(output_fir_remove_nyquist_strength),
+                        output_fir_cosine_taper_enabled=(
+                            bool(output_fir_cosine_taper_enabled) and not base_result.output_window_applied
+                        ),
+                        output_fir_cosine_taper_protected_center_taps=(
+                            base_result.output_window_protected_center_taps
+                        ),
                         fir_auto_gain_enabled=bool(fir_auto_gain_enabled),
                     )),
                     file_name=output_file_name(project_name, "FIR", format_name, app_slug=APP_SLUG, sample_rate=sample_rate, band=output_band_name, timestamp=OUTPUT_GENERATED_AT),
@@ -22009,14 +22395,12 @@ with live_result_body_window:
                                 ),
                                 "composite_postprocess": {
                                     "output_fir_polarity_invert": False,
-                                    "output_fir_remove_nyquist_enabled": False,
-                                    "output_fir_remove_nyquist_strength": 0.0,
                                     "fir_auto_gain_enabled": False,
                                 },
                                 "fir_auto_gain_enabled": False,
                                 "iir_crossover": (
                                     dict(st.session_state["_composite_iir_crossover"])
-                                    if isinstance(st.session_state.get("_composite_iir_crossover"), dict)
+                                    if isinstance(active_assignment_crossover(st.session_state), dict)
                                     else None
                                 ),
                             }

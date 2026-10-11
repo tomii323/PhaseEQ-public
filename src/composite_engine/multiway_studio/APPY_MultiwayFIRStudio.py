@@ -25,11 +25,8 @@ from composite_engine.multiway_studio.utils.kaiser import (
 )
 from composite_engine.multiway_studio.utils.display_rounding import round_for_display
 from composite_engine.multiway_studio.processing.filter import (
-    generate_2way_filters, generate_3way_filters, generate_4way_filters,
-    combine_and_crop_fir_conv,
     make_baffle_step_fir, measure_fir_group_response_peaks,
     normalize_fir_group_response, odd_number, kaiser_overlap_edges_hz,
-    generate_exclusive_kaiser_firs, generate_residual_multiband_filters,
 )
 from composite_engine.multiway_studio.processing.design_response import (
     build_crossover_design_responses,
@@ -60,6 +57,8 @@ from composite_engine.multiway_studio.processing.fir_state import (
 from fir_design_common.kaiser import (
     KAISER_BETA_MAX,
     KAISER_BETA_MIN,
+    KAISER_CYCLES_MAX,
+    KAISER_CYCLES_MIN,
 )
 from composite_engine.multiway_studio.processing.crossover_controls import (
     acoustic_target_allowed,
@@ -345,6 +344,7 @@ def _assignment_band_fir_states(mode_key, conf, split_firs, *, auto_crop=False):
         conf.get("cross_freqs", ()),
         configured_taps,
         sample_rate_hz=int(conf.get("fs", 96_000)),
+        crossover_overlaps_oct=conf.get("boundary_overlaps_oct", ()),
     )
     return resolve_band_fir_states(
         bands,
@@ -520,7 +520,7 @@ OUTPUT_MAX_BAND_GAIN_DB = -0.3
 SUPPORTED_SAMPLE_RATES = [48000, 96000, 192000]
 DEFAULT_FIR_CYCLES = 3.5
 DEFAULT_FIR_BETA = 12.0
-FIR_CYCLES_MIN, FIR_CYCLES_MAX = 2.7, 15.0
+FIR_CYCLES_MIN, FIR_CYCLES_MAX = KAISER_CYCLES_MIN, KAISER_CYCLES_MAX
 FIR_BETA_MIN, FIR_BETA_MAX = KAISER_BETA_MIN, KAISER_BETA_MAX
 
 MODE_BANDS = {
@@ -647,7 +647,7 @@ default_settings = {
     "gain_y_max_db": 20,
     "phase_gain_mask_db": -60,
     "graph_mode": "Light",
-    "graph_max_points": 1024,
+    "graph_max_points": 2048,
     "auto_update": True,
     "output_format": "bin_float32",
     "output_normalize": False,
@@ -1732,6 +1732,10 @@ def normalize_settings(raw_settings):
     settings.pop("auto_crop_profile", None)
     settings.pop("auto_crop_pass_db", None)
     settings.pop("auto_crop_cross_db", None)
+    # Retired FIR Nyquist-removal settings are read only at this compatibility
+    # boundary and never restored, executed, or written back.
+    settings.pop("output_fir_remove_nyquist_enabled", None)
+    settings.pop("output_fir_remove_nyquist_strength", None)
     external_distance_config = settings.get("external_distance_timing")
     if isinstance(external_distance_config, dict):
         # Older settings stored a room-temperature value.  Delay conversion is
@@ -2317,7 +2321,7 @@ def _apply_imported_config(imported, source_label, resume_filename=None):
     st.session_state["composite_studio_phase_gain_mask_widget"] = st.session_state[KEY_PHASE_GAIN_MASK]
     st.session_state[KEY_GRAPH_MODE] = str(imported.get("graph_mode", "Light"))
     st.session_state["composite_studio_graph_mode_widget"] = st.session_state[KEY_GRAPH_MODE]
-    st.session_state[KEY_GRAPH_MAX_POINTS] = int(imported.get("graph_max_points", 1024))
+    st.session_state[KEY_GRAPH_MAX_POINTS] = visualization.DEFAULT_GRAPH_MAX_POINTS
     st.session_state["composite_studio_graph_max_points_widget"] = st.session_state[KEY_GRAPH_MAX_POINTS]
     _set_indexed_widget_state("__rad_val_", KEY_DBMIN, int(imported.get("db_min", -30)))
     st.session_state[KEY_BAFFLE_ON] = bool(mode_conf.get("baffle_on", False))
@@ -3129,14 +3133,14 @@ with st.sidebar:
         key=KEY_AUTO_CROP,
         on_change=clear_results,
         disabled=not fir_output_enabled or not _has_fir_split,
-        help=ui_message('ui.c93618e7431e4d')
+        help=ui_message('ui.cdbf94aad9f9d7')
     )
     if _has_fir_split:
-        st.caption(ui_message('ui.068d1a34166247'))
+        st.caption(ui_message('ui.0d2ca50b4bd8d3'))
     else:
         st.caption(ui_message('ui.d9d9113191c2a6'))
     st.caption(
-        ui_message('ui.afaf23c8e91fc3')
+        ui_message('ui.6fd2a08b475a3c')
     )
     lr2_bands = set()
     for boundary_index, method in enumerate(active_controls.methods):
@@ -3147,7 +3151,7 @@ with st.sidebar:
     user_crop_lengths = {}
     band_tap_count_hosts = {}
     crop_lens_conf = mode_conf.get("crop_lens", {})
-    application_max_fir_taps = max(ir_length_for_frequency_resolution(int(fs), 2.0), 262143)
+    application_max_fir_taps = max(ir_length_for_frequency_resolution(int(fs)), 262143)
     st.caption(
         ui_message('ui.222f6bb28785b1', p0=f'{DEFAULT_MANUAL_FIR_TAPS}')
     )
@@ -3159,7 +3163,7 @@ with st.sidebar:
             value=int(crop_lens_conf.get(band, 0)),
             key=crop_key,
             on_change=clear_results,
-            disabled=not fir_output_enabled or auto_crop,
+            disabled=not fir_output_enabled,
             help=(
                 ui_message('ui.12730b4003aa7e')
             ),
@@ -3480,21 +3484,9 @@ with preferences_host:
     graph_mode_host = preferences_host
     graph_mode = str(st.session_state[graph_mode_widget_key])
     graph_points_widget_key = "composite_studio_graph_max_points_widget"
-    graph_points_default = int(settings.get(
-        "graph_max_points", visualization.DEFAULT_GRAPH_MAX_POINTS,
-    ))
-    if st.session_state.get(graph_points_widget_key) not in visualization.GRAPH_MAX_POINTS_OPTIONS:
-        st.session_state[graph_points_widget_key] = graph_points_default
-    graph_max_points = int(shared_selectbox(
-        ui_message('ui.77deabe238de2f'),
-        visualization.GRAPH_MAX_POINTS_OPTIONS,
-        key=graph_points_widget_key,
-        format_func=lambda value: f"{value} points / series",
-        help=(
-            ui_message('ui.1d7b766a6ba310')
-        ),
-    ))
-    st.caption(ui_message('ui.973d8879816a81'))
+    graph_max_points = int(visualization.DEFAULT_GRAPH_MAX_POINTS)
+    st.session_state[graph_points_widget_key] = graph_max_points
+    st.caption(display_text("表示点数：2,048 points / series（Light／Interactive共通・固定）"))
 
 st.markdown(ui_message('ui.1d83bc28cb9047'))
 manual_refresh = st.button(
@@ -3632,126 +3624,6 @@ if should_generate:
     render_start_time = time.perf_counter()
     result_generated_at = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
-    crossover_methods = tuple(conf.get("crossover_methods", ()))
-    all_kaiser = all(method == "Kaiser FIR" for method in crossover_methods)
-    # フィルター生成
-    if mode_key == "Fullrange":
-        split_firs_before = {"Fullrange": np.asarray([1.0], dtype=float)}
-        split_firs = {"Fullrange": np.asarray([1.0], dtype=float)}
-    elif mode_key == "Fullrange+SUB":
-        boundary_cycles, boundary_betas, boundary_overlaps = _mode_boundary_values(
-            mode_key, conf,
-        )
-        base_before = generate_exclusive_kaiser_firs(
-            fs, ("SUB", "Fullrange"), tuple(conf["cross_freqs"]), crossover_methods,
-            (0.0,), boundary_cycles, boundary_betas,
-        )
-        base = generate_exclusive_kaiser_firs(
-            fs, ("SUB", "Fullrange"), tuple(conf["cross_freqs"]), crossover_methods,
-            boundary_overlaps, boundary_cycles, boundary_betas,
-        )
-        split_firs_before = {
-            "SUB": base_before["SUB"],
-            "Fullrange": base_before["Fullrange"],
-        }
-        split_firs = {
-            "SUB": base["SUB"],
-            "Fullrange": base["Fullrange"],
-        }
-    elif mode_key == "2Way":
-        fc = conf['cross_freqs'][0]
-        split_firs_before = generate_2way_filters(fs, fc, cycles, beta, overlap_hz=0)
-        split_firs = generate_2way_filters(fs, fc, cycles, beta, overlap_oct=conf.get('kaiser_overlap_oct', 0.0)) if all_kaiser else generate_exclusive_kaiser_firs(
-            fs, ("Low", "High"), (fc,), crossover_methods,
-            (conf.get('kaiser_overlap_oct', 0.0),), (cycles,), (beta,),
-        )
-        if not all_kaiser:
-            split_firs_before = generate_exclusive_kaiser_firs(fs, ("Low", "High"), (fc,), crossover_methods, (0.0,), (cycles,), (beta,))
-    elif mode_key == "3Way":
-        fc1, fc2 = conf['cross_freqs']
-        split_firs_before = generate_3way_filters(
-            fs, fc1, fc2, cycles, beta,
-            overlap1_hz=0,
-            overlap2_hz=0,
-            cycles_low=conf.get('cycles_low', cycles),
-            beta_low=conf.get('beta_low', beta),
-            cycles_high=conf.get('cycles_high', cycles),
-            beta_high=conf.get('beta_high', beta),
-        )
-        split_firs = generate_3way_filters(
-            fs, fc1, fc2, cycles, beta,
-            overlap1_oct=conf.get('kaiser_overlap_low_mid_oct', 0.0),
-            overlap2_oct=conf.get('kaiser_overlap_mid_high_oct', 0.0),
-            cycles_low=conf.get('cycles_low', cycles),
-            beta_low=conf.get('beta_low', beta),
-            cycles_high=conf.get('cycles_high', cycles),
-            beta_high=conf.get('beta_high', beta),
-        ) if all_kaiser else generate_exclusive_kaiser_firs(
-            fs, ("Low", "Mid", "High"), (fc1, fc2), crossover_methods,
-            (conf.get('kaiser_overlap_low_mid_oct', 0.0), conf.get('kaiser_overlap_mid_high_oct', 0.0)),
-            (conf.get('cycles_low', cycles), conf.get('cycles_high', cycles)),
-            (conf.get('beta_low', beta), conf.get('beta_high', beta)),
-        )
-        if not all_kaiser:
-            split_firs_before = generate_exclusive_kaiser_firs(
-                fs, ("Low", "Mid", "High"), (fc1, fc2), crossover_methods, (0.0, 0.0),
-                (conf.get('cycles_low', cycles), conf.get('cycles_high', cycles)),
-                (conf.get('beta_low', beta), conf.get('beta_high', beta)),
-            )
-    elif mode_key == "3Way+SUB":
-        fc1, fc2, fc3 = conf['cross_freqs']
-        common_4way_args = {
-            "cycles_sub_low": conf.get("cycles_sub_low", cycles),
-            "beta_sub_low": conf.get("beta_sub_low", beta),
-            "cycles_low_mid": conf.get("cycles_low_mid", cycles),
-            "beta_low_mid": conf.get("beta_low_mid", beta),
-            "cycles_mid_high": conf.get("cycles_mid_high", cycles),
-            "beta_mid_high": conf.get("beta_mid_high", beta),
-        }
-        split_firs_before = generate_4way_filters(
-            fs, fc1, fc2, fc3,
-            overlap1_hz=0,
-            overlap2_hz=0,
-            overlap3_hz=0,
-            **common_4way_args,
-        )
-        split_firs = generate_4way_filters(
-            fs, fc1, fc2, fc3,
-            overlap1_oct=conf.get("kaiser_overlap_sub_low_oct", 0.0),
-            overlap2_oct=conf.get("kaiser_overlap_low_mid_oct", 0.0),
-            overlap3_oct=conf.get("kaiser_overlap_mid_high_oct", 0.0),
-            **common_4way_args,
-        ) if all_kaiser else generate_exclusive_kaiser_firs(
-            fs, ("SUB", "Low", "Mid", "High"), (fc1, fc2, fc3), crossover_methods,
-            (conf.get("kaiser_overlap_sub_low_oct", 0.0), conf.get("kaiser_overlap_low_mid_oct", 0.0), conf.get("kaiser_overlap_mid_high_oct", 0.0)),
-            (common_4way_args["cycles_sub_low"], common_4way_args["cycles_low_mid"], common_4way_args["cycles_mid_high"]),
-            (common_4way_args["beta_sub_low"], common_4way_args["beta_low_mid"], common_4way_args["beta_mid_high"]),
-        )
-        if not all_kaiser:
-            split_firs_before = generate_exclusive_kaiser_firs(
-                fs, ("SUB", "Low", "Mid", "High"), (fc1, fc2, fc3), crossover_methods,
-                (0.0, 0.0, 0.0),
-                (common_4way_args["cycles_sub_low"], common_4way_args["cycles_low_mid"], common_4way_args["cycles_mid_high"]),
-                (common_4way_args["beta_sub_low"], common_4way_args["beta_low_mid"], common_4way_args["beta_mid_high"]),
-            )
-    else:
-        boundary_cycles, boundary_betas, boundary_overlaps = _mode_boundary_values(
-            mode_key, conf,
-        )
-        split_firs_before = generate_residual_multiband_filters(
-            fs, tuple(bands), tuple(conf["cross_freqs"]),
-            boundary_cycles, boundary_betas, tuple(0.0 for _ in boundary_overlaps),
-        ) if all_kaiser else generate_exclusive_kaiser_firs(
-            fs, tuple(bands), tuple(conf["cross_freqs"]), crossover_methods,
-            tuple(0.0 for _ in boundary_overlaps), boundary_cycles, boundary_betas,
-        )
-        split_firs = generate_residual_multiband_filters(
-            fs, tuple(bands), tuple(conf["cross_freqs"]),
-            boundary_cycles, boundary_betas, boundary_overlaps,
-        ) if all_kaiser else generate_exclusive_kaiser_firs(
-            fs, tuple(bands), tuple(conf["cross_freqs"]), crossover_methods,
-            boundary_overlaps, boundary_cycles, boundary_betas,
-        )
     # Sidebar、Assignment、グラフ、Exportで同じ実生成Split FIRを使用する。
     split_firs_before = {
         band: np.asarray(values, dtype=float).copy()
@@ -3761,6 +3633,9 @@ if should_generate:
         band: np.asarray(values, dtype=float).copy()
         for band, values in sidebar_split_firs.items()
     }
+    from fir_design_common.validation import validate_basic_fir
+    for coefficients in split_firs.values():
+        validate_basic_fir(coefficients)
 
     from composite_engine.multiway_studio.processing.eq_files import load_eq_firs
     eq_firs = load_eq_firs(
@@ -3781,24 +3656,16 @@ if should_generate:
         else None
     )
     st.session_state["composite_studio_baffle_fir"] = baffle_fir
+    from fir_design_common import compose_fir_stages_full
     for band in bands:
-        fir = split_firs[band]
-        state = sidebar_fir_states[band]
-        crop_len = (
-            int(state.tap_count or 0)
-            if state.tap_source in {"manual", "auto_target"}
-            else 0
-        )
-        # Adaptive auto-crop owns only the final Canonical FIR.  This Studio
-        # projection remains un-cropped so it cannot crop a stage twice.
-        if current_settings.get("auto_crop", False):
-            crop_len = 0
+        stages = [split_firs[band]]
         if baffle_fir is not None:
-            fir = combine_and_crop_fir_conv(fir, baffle_fir, crop_len)
-        fir = combine_and_crop_fir_conv(fir, eq_firs[band], crop_len)
-        final_firs[band] = fir
+            stages.append(baffle_fir)
+        if eq_firs[band] is not None:
+            stages.append(eq_firs[band])
+        final_firs[band] = compose_fir_stages_full(stages)
 
-    # クロップ後、グラフ表示と出力の前に全帯域へ同一ゲインを適用する。
+    # 全長合成後の正規化ゲインは、最終出力でも明示的な共通段とする。
     normalization_info = {
         "enabled": False,
         "gain_linear": 1.0,
@@ -3876,8 +3743,8 @@ if should_generate:
     )
     graph_group = graph_groups[0]
     graph_iir_configs = _shared_iir_configs(mode_key, tuple(conf["cross_freqs"]))
-    graph_ir_length = ir_length_for_frequency_resolution(fs, 2.0)
-    graph_response_points = response_points_for_frequency_resolution(fs, 2.0)
+    graph_ir_length = ir_length_for_frequency_resolution(fs)
+    graph_response_points = response_points_for_frequency_resolution(fs)
     graph_responses = {}
     graph_settings = {}
     phaseeq_graph_responses = {}
@@ -4144,7 +4011,7 @@ if (not should_generate) and st.session_state.get('studio_chart_bundle') is not 
                     cached_settings[cached_mode_key]["cross_freqs"]
                 ),
                 sample_rate_hz=cached_fs,
-                response_points=response_points_for_frequency_resolution(cached_fs, 2.0),
+                response_points=response_points_for_frequency_resolution(cached_fs),
                 graph_max_points=graph_max_points,
                 dsp_revision=st.session_state.get("last_conf_signature", ""),
                 db_min=db_min,
@@ -4210,6 +4077,7 @@ if fir_configuration_valid:
     render_composite_results(
         alignment_host=phase_alignment_host, output_timing_host=tap_alignment_host,
         band_tap_count_hosts=band_tap_count_hosts,
+        align_output_taps=bool(current_settings.get("align_output_taps", False)),
     )
 
 # ---- 実行ログ欄（メイン画面下） ----

@@ -10,7 +10,7 @@ from fir_design_common import generation_fft_size, generation_frequency_axis, ta
 from fir_design_common import normalize_dc_gain as _normalize_dc_gain
 
 from .config import DesignConfig
-from .linear_fir import add_linear_fir_target_response, apply_linear_fir_filters
+from .linear_fir import add_linear_fir_target_response, apply_linear_fir_filters, linear_fir_overlay
 from .phase_curves import (
     build_target_curves,
     frequency_axis,
@@ -34,6 +34,11 @@ class DesignResult:
     group_delay_ms: np.ndarray
     step_response: np.ndarray
     target_phase_unwrapped_deg: np.ndarray
+    output_window_protected_center_taps: int | None = None
+    output_window_applied: bool = False
+    crop_delay_samples: float = 0.0
+    fir_original_taps: int | None = None
+    basic_fir_taps: int = 1
 
 
 def design_phase_fir(
@@ -41,9 +46,18 @@ def design_phase_fir(
     *,
     compute_group_delay: bool = True,
     apply_linear_fir_overlay: bool = True,
+    reserve_missing_fir_eq: bool = False,
 ) -> DesignResult:
     normalized = config.normalized()
     normalized.validate()
+
+    # Steps ①/② precede correction design.  The generated basic FIR is also
+    # reused for target analysis; neither taper nor export may regenerate it.
+    overlay = linear_fir_overlay(normalized) if apply_linear_fir_overlay else None
+    if overlay is not None:
+        from fir_design_common.validation import validate_basic_fir
+        validate_basic_fir(overlay)
+    from fir_recipe_engine import fir_eq_is_active
 
     design_fft_size = _weighted_ls_grid_size(normalized)
     design_freq = generation_frequency_axis(normalized.sample_rate, design_fft_size)
@@ -54,14 +68,20 @@ def design_phase_fir(
         design_target_gain_db,
         design_target_phase_unwrapped_deg,
     )
-    fir = _design_fir_with_gain_correction(
-        normalized,
-        design_freq,
-        design_target_gain_db,
-        design_target_phase_unwrapped_deg,
-    )
-    if apply_linear_fir_overlay:
-        fir = apply_linear_fir_filters(normalized, fir)
+    if overlay is not None and not fir_eq_is_active(normalized):
+        if reserve_missing_fir_eq:
+            from fir_design_common import compose_fir_stages_full
+            from fir_design_common.unity_eq import unity_fir_eq
+            fir = compose_fir_stages_full((overlay, unity_fir_eq(2 * overlay.size + 1)))
+        else:
+            fir = overlay.copy()
+    else:
+        fir = _design_fir_with_gain_correction(
+            normalized, design_freq, design_target_gain_db,
+            design_target_phase_unwrapped_deg,
+        )
+        if apply_linear_fir_overlay:
+            fir = apply_linear_fir_filters(normalized, fir, generated_overlay=overlay, overlay_resolved=True)
     fir = fir.astype(np.float64, copy=False)
 
     analysis_fft_size = _analysis_fft_size_for_taps(normalized.analysis_fft_size, fir.size)
@@ -80,6 +100,7 @@ def design_phase_fir(
             target_phase_unwrapped_deg,
             analysis_fft_size,
             _realized_response,
+            generated_overlay=overlay, overlay_resolved=True,
         )
     realized_complex = _realized_response(fir, normalized.sample_rate, analysis_fft_size)
     realized_gain_db = 20.0 * np.log10(np.maximum(np.abs(realized_complex), 1e-12))
@@ -100,6 +121,7 @@ def design_phase_fir(
 
     return DesignResult(
         fir=fir,
+        basic_fir_taps=int(overlay.size) if overlay is not None else 1,
         frequency=analysis_freq,
         target_gain_db=target_gain_db,
         realized_gain_db=realized_gain_db,

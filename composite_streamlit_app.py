@@ -16,4 +16,11 @@ os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "phaseeq
 
 if str(APP_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "src"))
+import streamlit as st
+from utils.ui_visibility import start_visibility_diagnostics
+_ui_visibility_snapshot = start_visibility_diagnostics(APP_ROOT, "multiway")
+if _ui_visibility_snapshot is not None:
+    st.session_state["_ui_visibility_snapshot"] = _ui_visibility_snapshot
+else:
+    st.session_state.pop("_ui_visibility_snapshot", None)
 runpy.run_path(str(STUDIO_ROOT / "APPY_MultiwayFIRStudio.py"), run_name="__main__")

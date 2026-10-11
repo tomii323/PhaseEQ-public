@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from composite_engine.fir_artifact import FinalFIRArtifact
 
-from composite_engine.export import DSPChannelExportInput, compose_channel_fir
+from composite_engine.export import DSPChannelExportInput, compose_channel_fir, prepare_channel_fir
 
 from .models import CanonicalDSPChannel, CanonicalDSPPackage
 
@@ -19,11 +19,19 @@ def canonical_from_export_inputs(
     for output_index, channel in enumerate(channels, start=1):
         if channel.fir_stages and int(channel.tap_count or 0) < 1:
             raise ValueError("FIR-enabled DSP channels require a positive tap_count")
-        final_fir = (
-            compose_channel_fir(channel)
-            if channel.fir_stages else None
-        )
-        artifact = FinalFIRArtifact.capture(channel, final_fir) if final_fir is not None else None
+        prepared = (prepare_channel_fir(channel)
+                    if channel.fir_stages and channel.final_fir_override is None else None)
+        final_fir = (prepared.coefficients if prepared else
+                     compose_channel_fir(channel) if channel.fir_stages else None)
+        crop_delay = prepared.crop_delay_samples if prepared else 0.0
+        input_taps = prepared.input_taps if prepared else int(
+            (channel.adaptive_crop_metadata or {}).get("original_taps",channel.tap_count or 0))
+        artifact = (FinalFIRArtifact.capture(
+            channel, final_fir, allow_resolved_frame=True,
+            crop_delay_samples=(crop_delay if prepared else float(
+                (channel.adaptive_crop_metadata or {}).get("crop_delay_samples", 0.0))),
+            input_taps=input_taps,
+        ) if final_fir is not None else None)
         if artifact is not None:
             final_fir = artifact.coefficients
         result.append(CanonicalDSPChannel(
@@ -44,7 +52,7 @@ def canonical_from_export_inputs(
             crossover=channel.iir_crossover,
             crossover_allpass=channel.auto_alignment_allpass,
             gain_db=channel.gain_db, polarity=channel.polarity,
-            fir_alignment_delay_samples=channel.dsp_additional_delay_samples,
+            fir_alignment_delay_samples=channel.dsp_additional_delay_samples + crop_delay,
             manual_delay_samples=channel.channel_relative_delay_samples,
             phase_alignment_delay_samples=channel.auto_alignment_delay_samples,
             timing_provenance=(
@@ -55,6 +63,8 @@ def canonical_from_export_inputs(
                 dict(channel.adaptive_crop_metadata)
                 if isinstance(channel.adaptive_crop_metadata, dict) else None
             ),
+            pre_alignment_tap_count=(int(final_fir.size) if final_fir is not None
+                                     else None),
         ))
     system_payload = (
         workspace.get("multiway_system", {})

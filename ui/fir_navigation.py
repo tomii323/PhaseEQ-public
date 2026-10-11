@@ -22,8 +22,8 @@ def available_page(page, fir_enabled):
     return nearest_available_page(page, DESIGN_PAGES, () if fir_enabled else ('FIR EQ',))
 
 
-def render_fir_output_toggle(enabled, *, inherited, on_change):
-    """Mirror inherited capability without overwriting the standalone setting."""
+def render_fir_output_toggle(enabled, *, inherited, unavailable=False, on_change):
+    """Render requested state separately from inherited or unavailable capability."""
     import streamlit as st
     widget_key = 'standalone_fir_enabled_widget'
     st.session_state[widget_key] = bool(enabled)
@@ -32,7 +32,12 @@ def render_fir_output_toggle(enabled, *, inherited, on_change):
         st.session_state['standalone_fir_enabled'] = bool(st.session_state[widget_key])
         on_change()
 
-    return st.toggle('FIR ON / OFF', key=widget_key, disabled=inherited, on_change=commit)
+    return st.toggle(
+        'FIR ON / OFF',
+        key=widget_key,
+        disabled=bool(inherited or unavailable),
+        on_change=commit,
+    )
 
 
 def render_iir_only_pages(pages, labels, current, navigate, *, disabled=False):

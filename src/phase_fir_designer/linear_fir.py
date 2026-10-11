@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 from scipy import signal
 
+from fir_design_common.fir_state import boundary_requires_direct_fir
+
 from .config import DesignConfig, IIRFilter, LinearFIRFilter
 
 
@@ -20,16 +22,19 @@ def multiway_clip_cutoff_hz(fc: float, sample_rate: float) -> float:
     return float(min(max(float(fc), 1.0), nyquist - 1.0))
 
 
-def apply_linear_fir_filters(config: DesignConfig, fir: np.ndarray) -> np.ndarray:
+def apply_linear_fir_filters(config: DesignConfig, fir: np.ndarray, *,
+                             generated_overlay: np.ndarray | None = None,
+                             overlay_resolved: bool = False) -> np.ndarray:
     """Convolve the unmasked crossover after EQ-only masking and FIR design."""
     output = finite_fir(fir)
-    overlay = linear_fir_overlay(config)
+    overlay = generated_overlay if overlay_resolved else linear_fir_overlay(config)
     if overlay is None:
         return output
     overlay = finite_fir(overlay)
     # Truncating the convolution to the correction length destroys the
     # crossover's stopband attenuation. Keep the complete output boundary.
-    return signal.fftconvolve(output, overlay)
+    from fir_design_common import compose_fir_stages_full
+    return compose_fir_stages_full((output, overlay))
 
 
 def linear_fir_overlay(config: DesignConfig) -> np.ndarray | None:
@@ -42,7 +47,11 @@ def linear_fir_overlay(config: DesignConfig) -> np.ndarray | None:
     linear_filters = [
         item
         for item in config.linear_fir_filters
-        if item.enabled and not item.acoustic_target and item.response in FIR_BAND_SPLIT_METHODS
+        if item.enabled
+        and boundary_requires_direct_fir(
+            item.response,
+            acoustic_target=item.acoustic_target,
+        )
     ]
     overlay: np.ndarray | None = None
     for item in linear_filters:
@@ -60,8 +69,9 @@ def add_linear_fir_target_response(
     target_phase_unwrapped_deg: np.ndarray,
     fft_size: int,
     realized_response_func,
+    *, generated_overlay: np.ndarray | None = None, overlay_resolved: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
-    overlay = linear_fir_overlay(config)
+    overlay = generated_overlay if overlay_resolved else linear_fir_overlay(config)
     if overlay is None:
         return target_gain_db, target_phase_unwrapped_deg
     overlay_response = realized_response_func(overlay, config.sample_rate, fft_size)
@@ -112,28 +122,28 @@ def design_linear_fir(
         return firwin(taps, _clip_cutoff(cutoff, config.sample_rate)/(config.sample_rate/2),
                       window=("kaiser", detail["beta"]), pass_zero=output_mode == "lp")
     if item.response == "linear_phase_lr4":
-        from crossover_engine.lr4_taps import automatic_lr4_taps
+        from fir_design_common.fir_state import automatic_lr_natural_taps
         from crossover_engine.filters import _linear_phase_lr4_fir
-        plan = automatic_lr4_taps(int(config.sample_rate),
-                                  float(item.base_crossover_hz or item.fc), item.overlap_oct)
-        return _linear_phase_lr4_fir(config.sample_rate, output_mode, item.fc, plan.taps)
-    if item.response == "linear_phase_lr2":
-        if item.lr2_auto_taps:
-            from crossover_engine.lr2_taps import automatic_lr2_taps
-            from crossover_engine.filters import _linear_phase_lr2_fir
-            plan = automatic_lr2_taps(int(config.sample_rate),
-                                      float(item.base_crossover_hz or item.fc), item.overlap_oct)
-            return _linear_phase_lr2_fir(config.sample_rate, output_mode, item.fc, plan.taps)
-        if item.base_crossover_hz is not None:
-            from crossover_engine.filters import _linear_phase_lr2_fir
-            return _linear_phase_lr2_fir(config.sample_rate, output_mode, item.fc,
-                multiway_kaiser_taps(config.sample_rate, item.base_crossover_hz, item.cycles))
-        return design_linear_phase_lr2_fir(
-            config.sample_rate,
-            output_mode,
-            item.fc,
-            taps=config.taps,
+        natural_taps = automatic_lr_natural_taps(
+            int(config.sample_rate),
+            float(item.base_crossover_hz or item.fc),
+            item.response,
+            overlap_oct=item.overlap_oct,
         )
+        return _linear_phase_lr4_fir(config.sample_rate, output_mode, item.fc, natural_taps)
+    if item.response == "linear_phase_lr2":
+        # Standalone and Multiway share the qualified LR2 natural-length
+        # calculator. Acoustic-target OFF changes where the FIR is applied,
+        # not how its required length is determined.
+        from fir_design_common.fir_state import automatic_lr_natural_taps
+        from crossover_engine.filters import _linear_phase_lr2_fir
+        natural_taps = automatic_lr_natural_taps(
+            int(config.sample_rate),
+            float(item.base_crossover_hz or item.fc),
+            item.response,
+            overlap_oct=item.overlap_oct,
+        )
+        return _linear_phase_lr2_fir(config.sample_rate, output_mode, item.fc, natural_taps)
     if item.response == "kaiser":
         if item.base_crossover_hz is not None:
             from crossover_engine.filters import firwin, _clip_cutoff
@@ -261,10 +271,10 @@ def center_or_crop_fir(fir: np.ndarray, target_size: int) -> np.ndarray:
 
 
 def finite_fir(fir: np.ndarray) -> np.ndarray:
-    source = np.asarray(fir, dtype=np.float64)
-    if source.size == 0 or np.all(np.isfinite(source)):
-        return source.copy()
-    return np.where(np.isfinite(source), source, 0.0).astype(np.float64, copy=False)
+    """Validate an input stage; never replace invalid coefficients with zero."""
+    from fir_design_common.validation import validate_basic_fir
+    validate_basic_fir(fir)
+    return np.asarray(fir, dtype=np.float64).copy()
 
 
 def band_split_alignment_sos(config: DesignConfig) -> np.ndarray:

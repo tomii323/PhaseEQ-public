@@ -15,8 +15,6 @@ class DSPSystemProcessing:
     gain_shift_db: float = 0.0
     fir_enabled: bool = True
     auto_gain: bool = True
-    remove_nyquist: bool = False
-    remove_nyquist_strength: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -335,8 +333,6 @@ class DSPSystem:
             route_pairs.add(pair)
         if self.processing.smoothing_fraction < 0.0:
             raise ValueError("smoothing_fraction must not be negative")
-        if not 0.0 <= self.processing.remove_nyquist_strength <= 1.0:
-            raise ValueError("remove_nyquist_strength must be between zero and one")
         if self.crossover_plan is not None:
             self.crossover_plan.validate()
             crossover_ids = set(self.crossover_plan.main_way_ids) | {

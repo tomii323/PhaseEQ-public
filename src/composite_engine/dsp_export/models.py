@@ -33,6 +33,7 @@ class CanonicalDSPChannel:
     timing_provenance: dict[str, object] | None = None
     final_fir_artifact: FinalFIRArtifact | None = field(default=None, repr=False, compare=False)
     adaptive_crop_metadata: dict[str, object] | None = None
+    pre_alignment_tap_count: int | None = None
 
     @property
     def total_delay_samples(self) -> float:

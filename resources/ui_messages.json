@@ -1,4 +1,14 @@
 {
+  "ui.48b7ca78705bec": {
+    "source": "{channel}: 拡張用の実係数が左右にないため、テーパーON/OFFとも{final} tapsです（110%目標{requested}／入力{input} taps）。中央係数を保持し、窓による変更はありません。",
+    "ja": "{channel}: 拡張用の実係数が左右にないため、テーパーON/OFFとも{final} tapsです（110%目標{requested}／入力{input} taps）。中央係数を保持し、窓による変更はありません。",
+    "en": "{channel}: No symmetric real-coefficient extension is available; taper ON/OFF both use {final} taps (110% target {requested} / input {input} taps). The protected coefficients remain unchanged; the window has no effect."
+  },
+  "ui.388ef763d6f483": {
+    "source": "{channel}: 有効領域{core} → 最終{final} taps。110%目標{requested} tapsには実係数が不足するため、入力{input} tapsの範囲で左右対称に拡張しています。ゼロ埋めは行いません。",
+    "ja": "{channel}: 有効領域{core} → 最終{final} taps。110%目標{requested} tapsには実係数が不足するため、入力{input} tapsの範囲で左右対称に拡張しています。ゼロ埋めは行いません。",
+    "en": "{channel}: Protected support {core} → final {final} taps. Real coefficients are insufficient for the 110% target of {requested} taps, so symmetric extension is limited to the {input}-tap input. No zero padding is used."
+  },
   "ui.a1d94f4f9c7fe2": {
     "source": "{p0}: 表示件数 {p1}件 / 最大表示 {p2}件",
     "ja": "{p0}: 表示件数 {p1}件 / 最大表示 {p2}件",
@@ -884,11 +894,6 @@
     "ja": "Measurements、Driver Database、Settings、Working Session ZIPを用途別に保存してください。",
     "en": "Save Measurements, driver database, settings, and Working Session ZIPs separately for their intended purposes."
   },
-  "ui.ad20c54265744a": {
-    "source": "出力FIR {p0} taps（{p1} ms）｜補正用FIR {p2} taps。帯域分割合成後の長さを保持します。",
-    "ja": "出力FIR {p0} taps（{p1} ms）｜補正用FIR {p2} taps。帯域分割合成後の長さを保持します。",
-    "en": "Output FIR: {p0} taps ({p1} ms) | Correction FIR: {p2} taps. The length after crossover composition is retained."
-  },
   "ui.c46df9db911f40": {
     "source": "Auto Gain EQ / Auto Phase EQにはSpeaker/Inputが必要です。",
     "ja": "Auto Gain EQ / Auto Phase EQにはSpeaker/Inputが必要です。",
@@ -1579,11 +1584,6 @@
     "ja": "**PhaseEQ FIR**",
     "en": "**PhaseEQ FIR**"
   },
-  "ui.1ed5bef4078c89": {
-    "source": "補正用FIR · Draft — {p0} · Applied — {p1} taps · {p2} ms",
-    "ja": "補正用FIR · Draft — {p0} · Applied — {p1} taps · {p2} ms",
-    "en": "Correction FIR · Draft — {p0} · Applied — {p1} taps · {p2} ms"
-  },
   "ui.e84cebec570ddf": {
     "source": "Apply FIR tap count",
     "ja": "FIRタップ数を適用",
@@ -1798,11 +1798,6 @@
     "source": "FIR Auto Gain: {p0}",
     "ja": "FIRの自動ゲイン: {p0}",
     "en": "FIR Auto Gain: {p0}"
-  },
-  "ui.ecd4610c8796e6": {
-    "source": "Remove FIR Nyquist component: {p0} / strength={p1}",
-    "ja": "FIRのナイキスト成分除去: {p0} / 強度={p1}",
-    "en": "Remove FIR Nyquist component: {p0} / strength={p1}"
   },
   "ui.a237cca6de5ba2": {
     "source": "ダウンロードを押すと、表示中の確定済み設定から選択したファイルを生成します。",
@@ -2514,35 +2509,10 @@
     "ja": "Multiway Assignment接続中は、補正用FIRのタップ数を受信側の設計条件へ固定します。",
     "en": "While connected to a Multiway Assignment, the correction FIR tap count is fixed to the received design conditions."
   },
-  "ui.230b91e2d911be": {
-    "source": "補正用FIRのタップ数です。帯域分割を合成する場合、個別Exportは合成後の全長になります。偶数・奇数を指定できます。",
-    "ja": "補正用FIRのタップ数です。帯域分割を合成する場合、個別Exportは合成後の全長になります。偶数・奇数を指定できます。",
-    "en": "Correction FIR tap count. When combined with crossover filters, standalone export uses the full combined length. Both even and odd counts are allowed."
-  },
-  "ui.159b8d470b2161": {
-    "source": "FIR tap count",
-    "ja": "FIRタップ数",
-    "en": "FIR tap count"
-  },
-  "ui.72b6437595e11a": {
-    "source": "Standaloneでは直接指定できます。Multiway Assignment接続中は、チャンネル間の不一致を防ぐため受信値を使用します。",
-    "ja": "Standaloneでは直接指定できます。Multiway Assignment接続中は、チャンネル間の不一致を防ぐため受信値を使用します。",
-    "en": "Can be set directly in Standalone. With a Multiway Assignment, the received value is used to prevent channel mismatches."
-  },
   "ui.61340b2b60fddb": {
     "source": "Export前に、Driver ProfileとPredicted ResponseのResponse / Errorを確認してください。",
     "ja": "Export前に、Driver ProfileとPredicted ResponseのResponse / Errorを確認してください。",
     "en": "Before exporting, check the Driver Profile and the Response/Error views of Predicted Response."
-  },
-  "ui.9004bca80c9432": {
-    "source": "Nyquist removal strength",
-    "ja": "ナイキスト成分の除去強度",
-    "en": "Nyquist removal strength"
-  },
-  "ui.42c6bff99efe8a": {
-    "source": "1.00で完全除去、0.50で半分だけ除去します。",
-    "ja": "1.00で完全除去、0.50で半分だけ除去します。",
-    "en": "1.00 removes the component completely; 0.50 removes half."
   },
   "ui.c682744829bd4d": {
     "source": "FIR Auto Gain: {p0} / Target FIR Peak -0.3 dB / Attenuation only / FFT oversampling 64. IIRフィルターを含めず、最終FIR係数単体の周波数応答最大値が-0.3 dBを超える場合だけ、ON時に全FIR係数へ同じ倍率を1回だけ適用します。Multiway返却FIRでは機能重複回避のため常にOFFです。",
@@ -2628,11 +2598,6 @@
     "source": "背景帯は入力外への追加範囲です。P0のブレンド等で変化した入力内の点は次の範囲です。",
     "ja": "背景帯は入力外への追加範囲です。P0のブレンド等で変化した入力内の点は次の範囲です。",
     "en": "Background bands show additions outside the input range. Points changed inside the input band by P0 blending or related processing are listed below."
-  },
-  "ui.74fd4c2878ff59": {
-    "source": "Export FIR: Remove FIR Nyquist componentはNyquist近傍のPhase表示に影響する場合があります。",
-    "ja": "Export FIR: Remove FIR Nyquist componentはNyquist近傍のPhase表示に影響する場合があります。",
-    "en": "Export FIR: Remove FIR Nyquist component may affect the phase display near Nyquist."
   },
   "ui.f3b48189c4a32a": {
     "source": "Speaker時間応答：帯域外補完を含む有限長推定。補完の影響を時間区間へ分割して表示するものではありません。",
@@ -3364,11 +3329,6 @@
     "ja": "Linear FIRページでクロス用FIRとEQ mask状態を確認します。",
     "en": "Review crossover FIR and EQ mask settings on the Output Band Split page."
   },
-  "ui.60966a428844e3": {
-    "source": "Composite Assignment中のFIR出力後処理はMultiway管理です。DC Raw / Out Normal / Nyquist Keep / Auto Gain OFFで固定されます。",
-    "ja": "Composite Assignment中のFIR出力後処理はMultiway管理です。DC Raw / Out Normal / Nyquist Keep / Auto Gain OFFで固定されます。",
-    "en": "Multiway manages FIR output postprocessing during a Composite Assignment. Fixed to DC Raw / Out Normal / Nyquist Keep / Auto Gain OFF."
-  },
   "ui.ba183562a958de": {
     "source": "Design Libraryへ保存できませんでした: {p0}",
     "ja": "Design Libraryへ保存できませんでした: {p0}",
@@ -3889,10 +3849,10 @@
     "ja": "マイク校正: {p0} / {p1}行",
     "en": "Mic Calibration: {p0} / {p1} rows"
   },
-  "ui.ff7183f39543f3": {
-    "source": "インパルス応答とステップ応答は、出力ポラリティ、DC Gain Normalize、Remove FIR Nyquist componentを反映した最終FIR係数です。",
-    "ja": "インパルス応答とステップ応答は、出力ポラリティ、DC Gain Normalize、Remove FIR Nyquist componentを反映した最終FIR係数です。",
-    "en": "Impulse and step responses use the final FIR coefficients, including output polarity, DC gain normalization, and Nyquist component removal."
+  "ui.1332108d26bb1c": {
+    "source": "インパルス応答とステップ応答は、出力ポラリティとDC Gain Normalizeを反映した最終FIR係数です。",
+    "ja": "インパルス応答とステップ応答は、出力ポラリティとDC Gain Normalizeを反映した最終FIR係数です。",
+    "en": "Impulse and step responses use the final FIR coefficients, including output polarity and DC gain normalization."
   },
   "ui.63efae34388297": {
     "source": "測定原本・校正・外部出力",
@@ -6344,10 +6304,10 @@
     "ja": "周波数特性を確認して自動クロップ",
     "en": "Automatically crop after checking frequency response"
   },
-  "ui.afaf23c8e91fc3": {
-    "source": "高精度Guard：Gain 0.05 dB以下／Phase 0.5 deg以下／Complex 0.01以下／削除Energy比 1e-6以下。",
-    "ja": "高精度Guard：Gain 0.05 dB以下／Phase 0.5 deg以下／Complex 0.01以下／削除Energy比 1e-6以下。",
-    "en": "High-precision guards: Gain ≤0.05 dB, Phase ≤0.5 deg, Complex ≤0.01, and removed-energy ratio ≤1e-6."
+  "ui.6fd2a08b475a3c": {
+    "source": "クロップ前の最終FIRとの差がGain 0.05 dB以下／Phase 0.5 deg以下／Complex 0.01以下、かつ削除Energy比1e-6以下の候補だけを採用します。非対称時はzeroを追加して時間位置をFIR内に保持し、適合候補がなければ元FIRを維持します。",
+    "ja": "元FIRとの差がGain 0.05 dB以下／Phase 0.5 deg以下／Complex 0.01以下、削除Energy比1e-6以下の範囲を採用します。開始位置を外部Delayで補償します。適合範囲がなければクロップしません。最終検証不適合、またはテーパー用の安全な奇数範囲が得られない場合は出力を停止します。",
+    "en": "Accepted support stays within 0.05 dB gain, 0.5 deg phase, 0.01 complex error and 1e-6 removed-energy ratio. External delay compensates the crop origin. No passing support means no crop. Failed final validation or no safe odd taper support stops output."
   },
   "ui.222f6bb28785b1": {
     "source": "FIRクロスの0は、自動クロップのON／OFFにかかわらず分割FIR長×2＋1を仮割り当てします。IIR／Fullrangeでは0がFIR OFF、初回ONの基本値は{p0} tapsです。",
@@ -6411,8 +6371,8 @@
   },
   "ui.fc418a054c1294": {
     "source": "自動クロップ後、短い帯域の前後へzeroを追加して最長の採用タップ数へ揃えます。",
-    "ja": "自動クロップ後、短い帯域の前後へzeroを追加して最長の採用タップ数へ揃えます。",
-    "en": "After automatic cropping, pad shorter bands with zeros before and after to match the longest adopted tap count."
+    "ja": "保存済みの整列設定を保持します。共通最終FIR処理では、係数をゼロ埋めせず、クロップ開始位置と元の時間基準をDSP追加Delayで保持します。",
+    "en": "The saved alignment setting is retained. Common finalization never pads coefficients; DSP delay preserves the crop origin and original time reference."
   },
   "ui.53ca5c1d4607c3": {
     "source": "各出力帯域の最大ゲインを -0.3 dB に調整",
@@ -6629,10 +6589,10 @@
     "ja": "FIR出力 OFF：FIR専用設定は保持し、生成経路だけを停止します。",
     "en": "FIR output OFF: FIR-specific settings are retained, but generation is stopped."
   },
-  "ui.068d1a34166247": {
-    "source": "ON時は最終FIR全段を合成後に1回だけ高精度解析し、手動タップ長は使用しません。",
-    "ja": "ON時は最終FIR全段を合成後に1回だけ高精度解析し、手動タップ長は使用しません。",
-    "en": "When ON, all final FIR stages are composed and analyzed once at high precision. Manual tap lengths are not used."
+  "ui.0d2ca50b4bd8d3": {
+    "source": "ON時は、帯域分割・PhaseEQ返却FIR・バッフル／追加EQ FIRを全長合成した最終FIRを1回だけ解析します。手動タップ長は使用しません。",
+    "ja": "ON時は、帯域分割・PhaseEQ返却FIR・バッフル／追加EQ FIRを全長合成した最終FIRを1回だけ解析します。手動タップ長は使用しません。",
+    "en": "When ON, it analyzes the final FIR once after full-length composition of the crossover, PhaseEQ-returned, baffle, and additional-EQ FIRs. Manual tap lengths are not used."
   },
   "ui.d9d9113191c2a6": {
     "source": "帯域分割FIRがないため自動クロップはOFFです。FIRを使うWayはタップ長を1以上に指定してください。0はFIR OFFです。",
@@ -7176,33 +7136,13 @@
   },
   "ui.ac662edb6c68df": {
     "source": "作業バックアップ・実機DSP出力のFIRに適用します。解析用Group応答には適用しません。",
-    "ja": "作業バックアップ・実機DSP出力のFIRに適用します。解析用Group応答には適用しません。",
-    "en": "Applied to FIRs in work backups and hardware DSP output, not to group responses for analysis."
-  },
-  "ui.13ec7c644f445c": {
-    "source": "Remove FIR Nyquist component",
-    "ja": "FIRのナイキスト成分を除去",
-    "en": "Remove FIR Nyquist component"
-  },
-  "ui.4af9483c20a26d": {
-    "source": "最終合成FIRの(-1)^n成分を除去します。PhaseEQと同じ処理で、窓の前に適用します。",
-    "ja": "最終合成FIRの(-1)^n成分を除去します。PhaseEQと同じ処理で、窓の前に適用します。",
-    "en": "Remove the final FIR's (-1)^n component before windowing, using the same processing as PhaseEQ."
-  },
-  "ui.1f204c955f24b0": {
-    "source": "1.00で完全除去、0.50で半分除去。後段の窓によってNyquist値は再び変化し得ます。",
-    "ja": "1.00で完全除去、0.50で半分除去。後段の窓によってNyquist値は再び変化し得ます。",
-    "en": "1.00 removes it completely; 0.50 removes half. Subsequent windowing can change the Nyquist value again."
+    "ja": "確定した最終FIRを、Group解析・グラフ・作業バックアップ・DSP出力で共用します。",
+    "en": "Confirmed final FIR coefficients are shared by Group analysis, graphs, working backup and DSP output."
   },
   "ui.78c3bbd1fa1439": {
     "source": "Cosine Tapered window (α=0.10)",
     "ja": "コサインテーパー窓（α=0.10）",
     "en": "Cosine Tapered window (α=0.10)"
-  },
-  "ui.06fa323b93f168": {
-    "source": "全チャンネルの最終FIRの合成・切り詰め後に1回適用。1〜2タップは恒等窓です。",
-    "ja": "全チャンネルの最終FIRの合成・切り詰め後に1回適用。1〜2タップは恒等窓です。",
-    "en": "Applied once after composition and truncation of every channel's final FIR. For 1–2 taps, the window is unity."
   },
   "ui.1e3e6c4ad3bd1e": {
     "source": "各チャンネルの最終FIR特性を表示",
@@ -7734,10 +7674,10 @@
     "ja": "DSP Packageを復元できません: {p0}",
     "en": "Cannot restore DSP Package: {p0}"
   },
-  "ui.acecce7bb9d51c": {
-    "source": "{p0} / {p1} · {p2} taps · Nyquist除去 {p3} · 窓 {p4}",
-    "ja": "{p0} / {p1} · {p2} taps · Nyquist除去 {p3} · 窓 {p4}",
-    "en": "{p0} / {p1} · {p2} taps · Nyquist removal {p3} · Window {p4}"
+  "ui.174cdb10f8e281": {
+    "source": "{p0} / {p1} · {p2} taps · 窓 {p3}",
+    "ja": "{p0} / {p1} · {p2} taps · 窓 {p3}",
+    "en": "{p0} / {p1} · {p2} taps · Window {p3}"
   },
   "ui.e099bb49637a33": {
     "source": "{p0}: PhaseEQ Wayは{p1}ですが、Composite Channelは{p2}です。High/Mid/Lowを取り違えないため接続を拒否しました。",
@@ -12716,13 +12656,8 @@
   },
   "ui.69a7379732a802": {
     "source": "α=0.10固定。最終切り詰め後の両端各5%へ適用。1〜2タップは恒等窓。Composite返却はOFF、最終窓はCompositeで設定します。",
-    "ja": "α=0.10固定。最終切り詰め後の両端各5%へ適用。1〜2タップは恒等窓。Composite返却はOFF、最終窓はCompositeで設定します。",
-    "en": "Fixed α=0.10. Applied to 5% at each end after final trimming. Identity window for 1–2 taps. Disabled for Composite returns; set the final window in Composite."
-  },
-  "ui.9533ad6486be20": {
-    "source": "FIR係数に含まれる (-1)^n 成分を射影して、Nyquist成分だけを直接除去します。",
-    "ja": "FIR係数に含まれる (-1)^n 成分を射影して、Nyquist成分だけを直接除去します。",
-    "en": "Project out the (-1)^n component of FIR coefficients to remove only the Nyquist component."
+    "ja": "中央有効領域は変更せず、110%長を目標に追加した実係数の範囲だけへテーパーを適用します。端不足時は追加範囲を制限します。Composite返却はOFF、最終窓はCompositeで設定します。",
+    "en": "Preserve the active core exactly and taper only the real-coefficient extension targeting an odd 110% length. Available tails limit the extension. Disabled for Composite returns; set the final window in Composite."
   },
   "ui.0f78934e5485dd": {
     "source": "FIR Auto Gain",
@@ -12768,6 +12703,11 @@
     "source": "この帯域分割設定はFIR OFFです。",
     "ja": "この帯域分割設定はFIR OFFです。",
     "en": "This crossover configuration has FIR disabled."
+  },
+  "ui.5a3c4f3d537130": {
+    "source": "FIRはOFFです。FIR係数とFIR補正の解析結果は表示しません。",
+    "ja": "FIRはOFFです。FIR係数とFIR補正の解析結果は表示しません。",
+    "en": "FIR is OFF. FIR coefficients and FIR correction analysis are hidden."
   },
   "ui.3c9940bdb2b1ae": {
     "source": "FIR係数の生成、個別ダウンロード、Working SessionへのFIR収録は行いません。",
@@ -14204,10 +14144,10 @@
     "ja": "目標減衰 約{p0}dB（設計目安）｜{p1}｜カイザー窓FIR 約{p2} taps",
     "en": "Target attenuation approx. {p0} dB (design guide) | {p1} | Kaiser-window FIR approx. {p2} taps"
   },
-  "ui.ecf3836abc7924": {
-    "source": "### 周期数と減衰スロープの目安\n\nカイザーHPの周期数だけを調整した比較です。**96 kHz・クロス1 kHz・重ね合わせなし**で、\n**−20〜−100 dB間の平均減衰スロープ**を評価しました。表の数値は設定周期数です。\n\n| 目標減衰 | β＝8 | β＝10 | β＝12 | β＝14 |\n|---|---:|---:|---:|---:|\n| −24 dB/oct | 2.7292 | 3.4167 | 4.0000 | 4.5000 |\n| −48 dB/oct | 3.2083 | 4.1042 | 4.7917 | 5.4375 |\n| −72 dB/oct | 3.8542 | 4.8542 | 5.7292 | 6.5000 |\n| −96 dB/oct | 4.4792 | 5.6250 | 6.6875 | 7.6250 |\n| −192 dB/oct | 6.8750 | 8.8958 | 10.6458 | 12.2083 |\n\n周期数は2.7〜15.0、小数4桁で直接入力できます。キーボードと±ボタンの増減ステップは0.1です。表のすべての値を設定できます。\n\n- 平均の傾きの目安であり、途中の傾きが一定になることや、LRの振幅曲線との一致を意味しません。\n- −100 dBは傾きを測る端点です。阻止帯域全体が−100 dB以下になる保証ではありません。\n- 平均傾きの誤差は、−24 dB/octのβ＝8・10・12で約1.26・1.05・1.27%、その他は1%以内でした。\n- 別のサンプルレートやクロス周波数では同じ精度を保証しません。周期数を細かく変えても、奇数化後のタップ数が同じなら特性は変わりません。\n",
-    "ja": "### 周期数と減衰スロープの目安\n\nカイザーHPの周期数だけを調整した比較です。**96 kHz・クロス1 kHz・重ね合わせなし**で、\n**−20〜−100 dB間の平均減衰スロープ**を評価しました。表の数値は設定周期数です。\n\n| 目標減衰 | β＝8 | β＝10 | β＝12 | β＝14 |\n|---|---:|---:|---:|---:|\n| −24 dB/oct | 2.7292 | 3.4167 | 4.0000 | 4.5000 |\n| −48 dB/oct | 3.2083 | 4.1042 | 4.7917 | 5.4375 |\n| −72 dB/oct | 3.8542 | 4.8542 | 5.7292 | 6.5000 |\n| −96 dB/oct | 4.4792 | 5.6250 | 6.6875 | 7.6250 |\n| −192 dB/oct | 6.8750 | 8.8958 | 10.6458 | 12.2083 |\n\n周期数は2.7〜15.0、小数4桁で直接入力できます。キーボードと±ボタンの増減ステップは0.1です。表のすべての値を設定できます。\n\n- 平均の傾きの目安であり、途中の傾きが一定になることや、LRの振幅曲線との一致を意味しません。\n- −100 dBは傾きを測る端点です。阻止帯域全体が−100 dB以下になる保証ではありません。\n- 平均傾きの誤差は、−24 dB/octのβ＝8・10・12で約1.26・1.05・1.27%、その他は1%以内でした。\n- 別のサンプルレートやクロス周波数では同じ精度を保証しません。周期数を細かく変えても、奇数化後のタップ数が同じなら特性は変わりません。\n",
-    "en": "### Cycles and roll-off guide\n\nComparison using only the cycle count of a Kaiser HP filter. Conditions: **96 kHz, 1 kHz crossover, no overlap**. Evaluated the **average roll-off between −20 and −100 dB**. Table values are cycle counts.\n\n| Target slope | β＝8 | β＝10 | β＝12 | β＝14 |\n|---|---:|---:|---:|---:|\n| −24 dB/oct | 2.7292 | 3.4167 | 4.0000 | 4.5000 |\n| −48 dB/oct | 3.2083 | 4.1042 | 4.7917 | 5.4375 |\n| −72 dB/oct | 3.8542 | 4.8542 | 5.7292 | 6.5000 |\n| −96 dB/oct | 4.4792 | 5.6250 | 6.6875 | 7.6250 |\n| −192 dB/oct | 6.8750 | 8.8958 | 10.6458 | 12.2083 |\n\nCycles accept direct entry from 2.7 to 15.0 with four decimal places. Keyboard and +/- steps are 0.1. All table values can be entered.\n\n- These are average slopes, not a guarantee of constant slope or a match to an LR amplitude curve.\n- −100 dB is the slope measurement endpoint, not a guarantee that the entire stopband stays below −100 dB.\n- Average slope errors at −24 dB/oct were approximately 1.26%, 1.05%, and 1.27% for β=8, 10, and 12; all other cases were within 1%.\n- Accuracy is not guaranteed at other sample rates or crossover frequencies. Small cycle changes do not change the response if rounding to an odd tap count gives the same length.\n"
+  "ui.ea4e8f695d4905": {
+    "source": "### 周期数と減衰スロープの目安\n\nカイザーHPの周期数だけを調整した比較です。**96 kHz・クロス1 kHz・重ね合わせなし**で、\n**−20〜−100 dB間の平均減衰スロープ**を評価しました。表の数値は設定周期数です。\n\n| 目標減衰 | β＝8 | β＝10 | β＝12 | β＝14 | β＝15 | β＝16 |\n|---|---:|---:|---:|---:|---:|---:|\n| −24 dB/oct | 2.7292 | 3.4167 | 4.0000 | 4.5000 | 4.7292 | 4.9583 |\n| −48 dB/oct | 3.2083 | 4.1042 | 4.7917 | 5.4375 | 5.7292 | 6.0000 |\n| −72 dB/oct | 3.8542 | 4.8542 | 5.7292 | 6.5000 | 6.8750 | 7.2083 |\n| −96 dB/oct | 4.4792 | 5.6250 | 6.6875 | 7.6250 | 8.0417 | 8.4583 |\n| −192 dB/oct | 6.8750 | 8.8958 | 10.6458 | 12.2083 | 12.8958 | 13.5625 |\n\n周期数は2.7〜15.0、小数4桁で直接入力できます。キーボードと±ボタンの増減ステップは0.1です。表のすべての値を設定できます。\n\n- 平均の傾きの目安であり、途中の傾きが一定になることや、LRの振幅曲線との一致を意味しません。\n- −100 dBは傾きを測る端点です。阻止帯域全体が−100 dB以下になる保証ではありません。\n- 平均傾きの誤差は、−24 dB/octのβ＝8・10・12で約1.26・1.05・1.27%、その他は1%以内でした。\n- 別のサンプルレートやクロス周波数では同じ精度を保証しません。周期数を細かく変えても、奇数化後のタップ数が同じなら特性は変わりません。\n",
+    "ja": "### 周期数と減衰スロープの目安\n\nカイザーHPの周期数だけを調整した比較です。**96 kHz・クロス1 kHz・重ね合わせなし**で、\n**−20〜−100 dB間の平均減衰スロープ**を評価しました。表の数値は設定周期数です。\n\n| 目標減衰 | β＝8 | β＝10 | β＝12 | β＝14 | β＝15 | β＝16 |\n|---|---:|---:|---:|---:|---:|---:|\n| −24 dB/oct | 2.7292 | 3.4167 | 4.0000 | 4.5000 | 4.7292 | 4.9583 |\n| −48 dB/oct | 3.2083 | 4.1042 | 4.7917 | 5.4375 | 5.7292 | 6.0000 |\n| −72 dB/oct | 3.8542 | 4.8542 | 5.7292 | 6.5000 | 6.8750 | 7.2083 |\n| −96 dB/oct | 4.4792 | 5.6250 | 6.6875 | 7.6250 | 8.0417 | 8.4583 |\n| −192 dB/oct | 6.8750 | 8.8958 | 10.6458 | 12.2083 | 12.8958 | 13.5625 |\n\n周期数は2.7〜15.0、小数4桁で直接入力できます。キーボードと±ボタンの増減ステップは0.1です。表のすべての値を設定できます。\n\n- 平均の傾きの目安であり、途中の傾きが一定になることや、LRの振幅曲線との一致を意味しません。\n- −100 dBは傾きを測る端点です。阻止帯域全体が−100 dB以下になる保証ではありません。\n- 平均傾きの誤差は、−24 dB/octのβ＝8・10・12で約1.26・1.05・1.27%、その他は1%以内でした。\n- 別のサンプルレートやクロス周波数では同じ精度を保証しません。周期数を細かく変えても、奇数化後のタップ数が同じなら特性は変わりません。\n",
+    "en": "### Cycles and roll-off guide\n\nComparison using only the cycle count of a Kaiser HP filter. Conditions: **96 kHz, 1 kHz crossover, no overlap**. Evaluated the **average roll-off between −20 and −100 dB**. Table values are cycle counts.\n\n| Target slope | β＝8 | β＝10 | β＝12 | β＝14 | β＝15 | β＝16 |\n|---|---:|---:|---:|---:|---:|---:|\n| −24 dB/oct | 2.7292 | 3.4167 | 4.0000 | 4.5000 | 4.7292 | 4.9583 |\n| −48 dB/oct | 3.2083 | 4.1042 | 4.7917 | 5.4375 | 5.7292 | 6.0000 |\n| −72 dB/oct | 3.8542 | 4.8542 | 5.7292 | 6.5000 | 6.8750 | 7.2083 |\n| −96 dB/oct | 4.4792 | 5.6250 | 6.6875 | 7.6250 | 8.0417 | 8.4583 |\n| −192 dB/oct | 6.8750 | 8.8958 | 10.6458 | 12.2083 | 12.8958 | 13.5625 |\n\nCycles accept direct entry from 2.7 to 15.0 with four decimal places. Keyboard and +/- steps are 0.1. All table values can be entered.\n\n- These are average slopes, not a guarantee of constant slope or a match to an LR amplitude curve.\n- −100 dB is the slope measurement endpoint, not a guarantee that the entire stopband stays below −100 dB.\n- Average slope errors at −24 dB/oct were approximately 1.26%, 1.05%, and 1.27% for β=8, 10, and 12; all other cases were within 1%.\n- Accuracy is not guaranteed at other sample rates or crossover frequencies. Small cycle changes do not change the response if rounding to an odd tap count gives the same length.\n"
   },
   "ui.4c67a9fc596438": {
     "source": "PhaseEQはStandaloneで開いています。このChannelには未接続です。",
@@ -16201,8 +16141,8 @@
   },
   "ui.382ac85c81b616": {
     "source": "α=0.10固定。最終切り詰め後の両端各5%に窓を適用します。1〜2タップでは係数を変更しません。",
-    "ja": "α=0.10固定。最終切り詰め後の両端各5%に窓を適用します。1〜2タップでは係数を変更しません。",
-    "en": "Fixed α=0.10. Taper 5% at each end after final trimming. Coefficients are unchanged for 1–2 taps."
+    "ja": "中央有効領域は変更せず、110%長を目標に追加した実係数の範囲だけへテーパーを適用します。端不足時は追加範囲を制限し、追加範囲がなければ係数を変更しません。",
+    "en": "Preserve the active core exactly and taper only the real-coefficient extension targeting an odd 110% length. Available tails limit the extension; no extension means unchanged coefficients."
   },
   "ui.6c27d355c507fa": {
     "source": "最終FIR単体の周波数応答ピークが−0.3 dBを超える場合だけ、全係数を同じ倍率で減衰します。IIRは含みません。",
@@ -16254,6 +16194,21 @@
     "ja": "分割＋追加EQタップ数",
     "en": "Crossover + additional EQ taps"
   },
+  "ui.be2015aa3c6ea2": {
+    "source": "最長タップ整列",
+    "ja": "最長タップ整列",
+    "en": "Align to longest taps"
+  },
+  "ui.7e271e745c6ef8": {
+    "source": "整列前FIRタップ数",
+    "ja": "整列前FIRタップ数",
+    "en": "Pre-alignment FIR taps"
+  },
+  "ui.67a43bbfa01712": {
+    "source": "整列追加zero [taps]",
+    "ja": "整列追加zero [taps]",
+    "en": "Alignment zero padding [taps]"
+  },
   "ui.065f7cd09b2c24": {
     "source": "タップ数・Delayの明細",
     "ja": "タップ数・Delayの明細",
@@ -16264,20 +16219,15 @@
     "ja": "最終FIRタップ数は保存・出力するFIRと同じです。DSP追加Delayは手動・位相整合を含む合計値です。msかsamplesのどちらかで入力し、FIR自体の遅延を重ねて加えないでください。",
     "en": "Final FIR taps match the saved/exported FIR. DSP additional delay includes manual and phase alignment delays. Enter either ms or samples; do not add the intrinsic FIR latency again."
   },
-  "ui.af1d5e0caf0c89": {
-    "source": "補正用割り当てはPhaseEQで補正を設計する長さ、帯域分割FIRは分割フィルター単体の長さです。分割＋追加EQはPhaseEQ返却前の中間結果です。グラフ用の表示IR長はDSPへ入力しません。",
-    "ja": "補正用割り当てはPhaseEQで補正を設計する長さ、帯域分割FIRは分割フィルター単体の長さです。分割＋追加EQはPhaseEQ返却前の中間結果です。グラフ用の表示IR長はDSPへ入力しません。",
-    "en": "Assigned correction taps are the frame used to design correction in PhaseEQ. Crossover FIR taps describe the crossover filter alone. Crossover + additional EQ is an intermediate result before PhaseEQ returns. Do not enter the graph display IR length into your DSP."
+  "ui.e87a1197849d41": {
+    "source": "補正用割り当てはPhaseEQで補正を設計する長さ、帯域分割FIRは分割フィルター単体の長さです。分割＋追加EQはPhaseEQ返却前の中間結果です。最長タップ整列ONでは、整列前FIRから最終FIRへ追加したzero数を表示します。FIR OFFはzeroを追加せず、FIR長差Delayで補います。グラフ用の表示IR長はDSPへ入力しません。",
+    "ja": "補正用割り当てはPhaseEQで補正を設計する長さ、帯域分割FIRは分割フィルター単体の長さです。分割＋追加EQはPhaseEQ返却前の中間結果です。最長タップ整列ONでは、整列前FIRから最終FIRへ追加したzero数を表示します。FIR OFFはzeroを追加せず、FIR長差Delayで補います。グラフ用の表示IR長はDSPへ入力しません。",
+    "en": "Assigned correction taps are the frame used to design correction in PhaseEQ. Crossover FIR taps describe the crossover filter alone. Crossover + additional EQ is an intermediate result before PhaseEQ returns. When longest-tap alignment is ON, the table shows the zeros added from the pre-alignment FIR to the final FIR. FIR-OFF channels are not zero-padded; FIR length-difference delay compensates them. Do not enter the graph display IR length into your DSP."
   },
   "ui.529e33bb932695": {
     "source": "現在の最終FIRタップ数：再計算待ち",
     "ja": "現在の最終FIRタップ数：再計算待ち",
     "en": "Current final FIR taps: awaiting recalculation"
-  },
-  "ui.4cd14ccb61c041": {
-    "source": "現在の最終FIRタップ数：{taps}",
-    "ja": "現在の最終FIRタップ数：{taps}",
-    "en": "Current final FIR taps: {taps}"
   },
   "ui.ac1552a16b02f5": {
     "source": "出力チャンネルなし",
@@ -16469,14 +16419,119 @@
     "ja": "Adaptive FIR Croppingの明細",
     "en": "Adaptive FIR Cropping details"
   },
-  "ui.c3165585bb409a": {
-    "source": "最終FIR全段の合成後に高精度判定しています。非対称クロップは短い側へのzero追加でtap-centerを保持します。",
-    "ja": "最終FIR全段の合成後に高精度判定しています。非対称クロップは短い側へのzero追加でtap-centerを保持します。",
-    "en": "High-precision evaluation runs after composing every final FIR stage. Asymmetric crops preserve the tap center by adding zeros to the shorter side."
+  "ui.48ecf773577d95": {
+    "source": "Final output taps",
+    "ja": "最終出力タップ数",
+    "en": "Final output taps"
   },
-  "ui.c93618e7431e4d": {
-    "source": "帯域分割FIRがある場合のみ使用できます。最終FIR全段を合成後に高精度解析し、安全条件を満たす場合だけクロップします。",
-    "ja": "帯域分割FIRがある場合のみ使用できます。最終FIR全段を合成後に高精度解析し、安全条件を満たす場合だけクロップします。",
-    "en": "Available only with crossover FIR filters. Analyzes all composed final FIR stages at high precision and crops only when the safety guards pass."
+  "ui.96036f0600de68": {
+    "source": "出力FIR {p0} taps（{p1} ms）｜出力タップ設定 {p2}。帯域分割合成後に最終フレームを確定しています。",
+    "ja": "出力FIR {p0} taps（{p1} ms）｜出力タップ設定 {p2}。帯域分割合成後に最終フレームを確定しています。",
+    "en": "Output FIR: {p0} taps ({p1} ms) | Output tap setting: {p2}. The final frame is determined after crossover composition."
+  },
+  "ui.cdbf94aad9f9d7": {
+    "source": "全段を全長合成した最終FIRを1回だけ解析し、基準タップ枠を上限として、クロップ前応答との差と時間位置の安全条件を満たす場合だけ短縮します。0タップ設定とは独立した機能です。",
+    "ja": "全段を全長合成した最終FIRを1回だけ解析し、基準タップ枠を上限として、クロップ前応答との差と時間位置の安全条件を満たす場合だけ短縮します。0タップ設定とは独立した機能です。",
+    "en": "Analyzes the final FIR once after full-length composition and shortens it within the provisional tap frame only when the response difference and timing safety checks pass. This option is independent from the zero-tap setting."
+  },
+  "ui.3e891ae6fd9fb3": {
+    "source": "0（自動割り当て）",
+    "ja": "0（自動割り当て）",
+    "en": "0 (automatic assignment)"
+  },
+  "ui.3c0c0d5ba2bc0d": {
+    "source": "最終出力FIR · 下書き — {p0} · 適用中 — {p1}",
+    "ja": "最終出力FIR · 下書き — {p0} · 適用中 — {p1}",
+    "en": "Final output FIR · Draft — {p0} · Applied — {p1}"
+  },
+  "ui.d922fbc497528d": {
+    "source": "最終出力FIR · 設定 — 0（自動割り当て）",
+    "ja": "最終出力FIR · 設定 — 0（自動割り当て）",
+    "en": "Final output FIR · Setting — 0 (automatic assignment)"
+  },
+  "ui.34ed421896036f": {
+    "source": "最終出力FIR · 設定 — {p0} taps · {p1} ms",
+    "ja": "最終出力FIR · 設定 — {p0} taps · {p1} ms",
+    "en": "Final output FIR · Setting — {p0} taps · {p1} ms"
+  },
+  "ui.38575ed42cebea": {
+    "source": "現在の最終FIRタップ数：{p0} taps（{p1} ms）",
+    "ja": "現在の最終FIRタップ数：{p0} taps（{p1} ms）",
+    "en": "Current final FIR taps: {p0} taps ({p1} ms)"
+  },
+  "ui.37dd20ce86ae46": {
+    "source": "0（自動割り当て、基準 {p0} taps）＋Adaptive",
+    "ja": "0（自動割り当て、基準 {p0} taps）＋Adaptive",
+    "en": "0 (automatic assignment, {p0}-tap reference) + Adaptive"
+  },
+  "ui.49638bc0d93a1e": {
+    "source": "0（自動割り当て、解決値 {p0} taps）",
+    "ja": "0（自動割り当て、解決値 {p0} taps）",
+    "en": "0 (automatic assignment, resolved to {p0} taps)"
+  },
+  "ui.907ac2c611ac50": {
+    "source": "Adaptive（基準 {p0} taps）",
+    "ja": "Adaptive（基準 {p0} taps）",
+    "en": "Adaptive ({p0}-tap reference)"
+  },
+  "ui.4cd14ccb61c041": {
+    "source": "現在の最終FIRタップ数：{taps}",
+    "ja": "現在の最終FIRタップ数：{taps}",
+    "en": "Current final FIR taps: {taps}"
+  },
+  "ui.63b78a555d678a": {
+    "source": "最終出力FIRのタップ設定です。正数は帯域分割合成後に中央クロップ／左右ゼロ埋めする基準長です。0はFIR帯域分割時に分割FIR長×2＋1、FIR LR2／LR4の音響ターゲット時に自然長×2＋1を仮割り当てします。自動割り当て元がない0ではFIR ON/OFFの選択を保持したまま無効表示し、正数へ変更すると再び操作できます。",
+    "ja": "最終出力FIRのタップ設定です。正数は合成後に中央クロップする基準長です。実係数が不足する場合はゼロを補わず実長を保持します。0は帯域分割から自動割り当てします。設定値と最終係数長は別に表示します。",
+    "en": "Final output tap setting. Positive values set the central crop support after composition. Missing real coefficients are not padded; the actual length is retained. Zero resolves an automatic frame from the crossover. The saved setting and final coefficient count are shown separately."
+  },
+  "ui.1cbe21dbfa60f3": {
+    "source": "Standaloneの最終出力タップ設定です。0はFIR帯域分割時に分割FIR長×2＋1を仮割り当てします。FIR LR2／LR4は音響ターゲットON/OFFのどちらでもMultiway共通の自然長算出を使います。自動割り当て元がない0ではFIR ON/OFFを保持したまま無効表示し、正数へ変更すると再び操作できます。Multiway Assignment接続中は受信値を使用します。",
+    "ja": "Standaloneの最終出力タップ設定です。0はFIR帯域分割時に分割FIR長×2＋1を仮割り当てします。FIR LR2／LR4は音響ターゲットON/OFFのどちらでもMultiway共通の自然長算出を使います。自動割り当て元がない0ではFIR ON/OFFを保持したまま無効表示し、正数へ変更すると再び操作できます。Multiway Assignment接続中は受信値を使用します。",
+    "en": "Standalone final-output tap setting. Zero provisionally assigns twice the split-FIR length plus one for a FIR crossover. LR2/LR4 FIR uses the shared Multiway natural-length calculation whether the acoustic target is ON or OFF. When zero has no automatic frame source, the FIR ON/OFF choice is preserved but disabled; entering a positive value makes it available again. A Multiway Assignment uses its received value."
+  },
+  "ui.e697f304f587c2": {
+    "source": "表示点数：2,048 points / series（Light／Interactive共通・固定）",
+    "ja": "表示点数：2,048 points / series（Light／Interactive共通・固定）",
+    "en": "Display density: 2,048 points per series (fixed for Light and Interactive)"
+  },
+  "ui.3e69666e886662": {
+    "source": "コサインテーパー保護枠 [taps]",
+    "ja": "コサインテーパー保護枠 [taps]",
+    "en": "Cosine-taper protection frame [taps]"
+  },
+  "ui.eb63db50f8b937": {
+    "source": "110%保護枠 [taps]",
+    "ja": "110%保護枠 [taps]",
+    "en": "110% protection frame [taps]"
+  },
+  "ui.9c4b06b3f9936d": {
+    "source": "テーパー上限 [taps]",
+    "ja": "テーパー上限 [taps]",
+    "en": "Taper source limit [taps]"
+  },
+  "ui.50afae67eec81c": {
+    "source": "窓OFFと同じAdaptive範囲を計算し、窓ONでは元FIRの実係数で左右を最大110%まで対称拡張します。中央係数は厳密に維持し、端不足時は利用可能な範囲に制限します。再生成・ゼロ埋めは行いません。",
+    "ja": "窓OFFと同じAdaptive範囲を計算し、窓ONでは長さの110%を奇数に切り上げ、元FIRの実係数で左右対称に拡張します。中央係数は厳密に維持し、端不足時は利用可能な範囲に制限します。再生成・ゼロ埋めは行いません。",
+    "en": "The same Adaptive support is expanded symmetrically using original real coefficients. Round 110% of its length up to an odd tap count, then limit it by available tails. The center is preserved exactly. No regeneration or padding is performed."
+  },
+  "ui.023f329fe82da0": {
+    "source": "補正用割り当て、分割FIR、中間合成、最終FIRの長さを分けて表示します。テーパーは元FIRの追加実係数内で完了し、クロップ開始位置はDSP追加Delayで補償します。最終係数のゼロ埋めは行いません。",
+    "ja": "補正用割り当て、分割FIR、中間合成、最終FIRの長さを分けて表示します。テーパーは元FIRの追加実係数内で完了し、クロップ開始位置はDSP追加Delayで補償します。最終係数のゼロ埋めは行いません。",
+    "en": "Correction allocation, split FIR, intermediate composition and final FIR lengths are shown separately. The taper completes within added original coefficients, and DSP delay compensates the crop origin. Final coefficients are never padded."
+  },
+  "ui.86730e8c2449e1": {
+    "source": "全FIR段の合成後、窓なし係数から高精度で範囲を決定します。Kaiser／FIR LR2／LR4で共通の実係数拡張・クロップ・テーパーを行い、開始位置をDSP追加Delayで補償します。",
+    "ja": "全FIR段の合成後、窓なし係数から高精度で範囲を決定します。Kaiser／FIR LR2／LR4で共通の実係数拡張・クロップ・テーパーを行い、開始位置をDSP追加Delayで補償します。",
+    "en": "High-precision support selection uses unwindowed coefficients after all FIR stages. Kaiser, FIR LR2 and FIR LR4 share real-coefficient expansion, cropping and tapering. DSP delay compensates the crop origin."
+  },
+  "ui.2cd460df44d014": {
+    "source": "テーパー追加実係数 [taps]",
+    "ja": "テーパー追加実係数 [taps]",
+    "en": "Additional real taper coefficients [taps]"
+  },
+  "ui.d41fd600a2ef4e": {
+    "source": "クロップ補償Delay：{p0} samples（{p1} ms）。係数単体の利用時も設定してください。",
+    "ja": "クロップ補償Delay：{p0} samples（{p1} ms）。係数単体の利用時も設定してください。",
+    "en": "Crop compensation delay: {p0} samples ({p1} ms). Apply this delay when using the coefficients separately."
   }
 }

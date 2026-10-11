@@ -140,6 +140,7 @@ def final_way_complex_response(
             np.asarray(way.coefficients, dtype=float),
             int(way.sample_rate),
             max(2, (len(frequency) - 1) * 2),
+            original_taps=way.fir_original_taps,
         )
         fir = _project_complex(
             fir_frequency,
@@ -226,6 +227,7 @@ def signal_path_stage_response(
             np.asarray(way.coefficients, dtype=float),
             int(way.sample_rate),
             max(2, (len(frequency) - 1) * 2),
+            original_taps=way.fir_original_taps,
         )
         fir = _project_complex(
             fir_frequency,

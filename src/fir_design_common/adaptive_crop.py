@@ -8,29 +8,29 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 from itertools import product
+from numbers import Integral
 from typing import Literal
 
 import numpy as np
 from scipy.ndimage import maximum_filter1d, uniform_filter1d
 from scipy.signal import find_peaks
 
-from fir_output_window import apply_output_window
 
 
-THRESHOLD_DB = -120.0
+THRESHOLD_DB = -132.0
 ACTIVE_FLOOR_DB = -80.0
 MAX_GAIN_ERROR_DB = 0.05
 MAX_PHASE_ERROR_DEG = 0.5
 MAX_COMPLEX_ERROR = 0.01
 MAX_REMOVED_ENERGY_RATIO = 1e-6
 MAX_DIP_ENDPOINT_DB = -40.0
-ALGORITHM_VERSION = "adaptive-fir-crop-v1"
+ALGORITHM_VERSION = "adaptive-fir-crop-v6"
 
 
 @dataclass(frozen=True)
 class SideCandidate:
     cut_samples: int
-    source: Literal["none", "threshold", "dip"]
+    source: Literal["none", "zero", "threshold", "dip"]
     endpoint_db: float
     outer_peak_db: float
     removed_energy_ratio: float
@@ -42,6 +42,28 @@ class AdaptiveCropMetrics:
     phase_error_deg: float
     complex_error: float
     removed_energy_ratio: float
+
+
+@dataclass(frozen=True)
+class AdaptiveCropPlan:
+    """Immutable range decision; coefficients and time origin are untouched."""
+
+    input_taps: int
+    start: int
+    stop: int
+    adopted: bool
+    metrics: AdaptiveCropMetrics
+    source_left: str = "none"
+    source_right: str = "none"
+    candidate_count: int = 0
+    input_digest: str = ""
+    requested_minimum_taps: object = 1
+    effective_minimum_taps: int = 1
+    minimum_expanded: bool = False
+
+    @property
+    def taps(self) -> int:
+        return self.stop - self.start
 
 
 @dataclass(frozen=True)
@@ -67,6 +89,13 @@ class AdaptiveCropResult:
     target_kind: str = "original_fir_complex_response"
     window_mode: str = "none"
     algorithm_version: str = ALGORITHM_VERSION
+    base_candidate_taps: int = 0
+    base_left_removed: int = 0
+    base_right_removed: int = 0
+    protection_length_ratio: float = 1.0
+    requested_minimum_taps: object = 1
+    effective_minimum_taps: int = 1
+    minimum_expanded: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -93,6 +122,13 @@ class AdaptiveCropResult:
             "candidate_count": self.candidate_count,
             "target_kind": self.target_kind,
             "window_mode": self.window_mode,
+            "base_candidate_taps": self.base_candidate_taps,
+            "base_left_removed": self.base_left_removed,
+            "base_right_removed": self.base_right_removed,
+            "protection_length_ratio": self.protection_length_ratio,
+            "requested_minimum_taps": self.requested_minimum_taps,
+            "effective_minimum_taps": self.effective_minimum_taps,
+            "minimum_expanded": self.minimum_expanded,
         }
 
 
@@ -122,6 +158,12 @@ def _side_candidates(values: np.ndarray) -> tuple[SideCandidate, ...]:
     energy = float(np.dot(values, values))
 
     positions: dict[int, str] = {0: "none"}
+    nonzero = np.flatnonzero(values)
+    zero_run = int(nonzero[0]) if nonzero.size else 0
+    if 0 < zero_run < half:
+        # The exact Unity-EQ support boundary must be evaluated even when
+        # smoothing moves the threshold candidate into significant samples.
+        positions[zero_run] = "zero"
     threshold_run = 0
     for index in range(half):
         if envelope[index] > THRESHOLD_DB:
@@ -192,98 +234,164 @@ def _passes(metrics: AdaptiveCropMetrics) -> bool:
     )
 
 
-def adaptive_crop_fir(
+def normalize_minimum_taps(value: object, input_taps: int, maximum_taps: int) -> int:
+    """Normalize only integer inputs; never truncate or coerce user values."""
+    is_positive_integer = (isinstance(value, Integral)
+                           and not isinstance(value, (bool, np.bool_)) and value > 0)
+    minimum = int(value) if is_positive_integer else 1
+    if minimum % 2 == 0:
+        minimum += 1
+    if minimum > input_taps or minimum > maximum_taps:
+        raise ValueError("minimum taps exceed input length or maximum taps")
+    return minimum
+
+
+def minimum_candidate_ranges(start: int, stop: int, count: int,
+                             minimum: int, symmetric: bool) -> list[tuple[int, int]]:
+    """Return source-only ranges containing the candidate, without cropping."""
+    if stop - start >= minimum:
+        return [(start, stop)]
+    extra = minimum - (stop - start)
+    if symmetric:
+        side = extra // 2
+        if extra % 2 or start < side or count - stop < side:
+            return []
+        return [(start - side, stop + side)]
+    # Evaluate balanced expansion and both feasible boundary placements.
+    lower = max(0, stop - minimum)
+    upper = min(start, count - minimum)
+    if lower > upper:
+        return []
+    balanced = min(upper, max(lower, start - extra // 2))
+    return [(left, left + minimum) for left in sorted({lower, balanced, upper})]
+
+
+def plan_adaptive_crop(
     coefficients: np.ndarray,
     *,
+    minimum_taps: object = 1,
     maximum_taps: int | None = None,
     linear_phase: bool | None = None,
-    timing_mode: Literal["embedded_zero_padding", "external_delay"] = "embedded_zero_padding",
-    output_window_enabled: bool = False,
-) -> AdaptiveCropResult:
-    """Return the shortest passing high-precision candidate.
-
-    ``embedded_zero_padding`` pads the side with more removed samples so the
-    original tap centre remains the centre of the shortened FIR.
-    """
+) -> AdaptiveCropPlan:
+    """Select the shortest passing unwindowed support using existing criteria."""
     original = _validated(coefficients)
     count = original.size
-    maximum = count if maximum_taps is None else max(1, int(maximum_taps))
+    maximum = count if maximum_taps is None else int(maximum_taps)
+    if maximum < 1:
+        raise ValueError("maximum taps must be positive")
+    minimum = normalize_minimum_taps(minimum_taps, count, maximum)
     if linear_phase is None:
         scale = max(float(np.max(np.abs(original))), 1.0)
         linear_phase = bool(np.max(np.abs(original - original[::-1])) <= scale * 1e-10)
-
     left = _side_candidates(original)
     right = _side_candidates(original[::-1])
-    pairs = []
     if linear_phase:
         by_left = {item.cut_samples: item for item in left}
         by_right = {item.cut_samples: item for item in right}
         pairs = [(by_left[k], by_right[k]) for k in sorted(set(by_left) & set(by_right))]
     else:
         pairs = list(product(left, right))
-
-    reference = apply_output_window(original, output_window_enabled)
-    accepted: list[tuple[int, float, float, SideCandidate, SideCandidate, np.ndarray, AdaptiveCropMetrics, int, int]] = []
+    accepted = []
     total_energy = max(float(np.dot(original, original)), 1e-300)
-    for left_item, right_item in pairs:
-        l_cut, r_cut = left_item.cut_samples, right_item.cut_samples
-        if l_cut + r_cut <= 0 or l_cut + r_cut >= count:
+    for l_item, r_item in pairs:
+        start, stop = l_item.cut_samples, count - r_item.cut_samples
+        if (stop - start) % 2 == 0:
+            if stop < count:
+                stop += 1
+            elif start > 0:
+                start -= 1
+            elif abs(original[0]) <= abs(original[-1]):
+                start += 1
+            else:
+                stop -= 1
+        if not 0 < stop - start <= maximum or (start == 0 and stop == count):
             continue
-        direct = original[l_cut:count-r_cut]
-        pad_left = pad_right = 0
-        if timing_mode == "embedded_zero_padding":
-            pad_left = max(l_cut - r_cut, 0)
-            pad_right = max(r_cut - l_cut, 0)
-        candidate = np.pad(direct, (pad_left, pad_right))
-        if candidate.size > maximum:
-            continue
-        candidate = apply_output_window(candidate, output_window_enabled)
-        metrics = _metrics(
-            reference,
-            candidate,
-            centered_shift_samples=(
-                (r_cut - l_cut) / 2.0 if timing_mode == "external_delay" else 0.0
-            ),
-        )
-        removed_energy = (
-            float(np.dot(original[:l_cut], original[:l_cut]))
-            + float(np.dot(original[count-r_cut:], original[count-r_cut:]))
-        ) / total_energy
-        metrics = AdaptiveCropMetrics(
-            metrics.gain_error_db, metrics.phase_error_deg,
-            metrics.complex_error, removed_energy,
-        )
-        endpoints_are_safe = all(
-            item.source != "dip" or item.endpoint_db <= MAX_DIP_ENDPOINT_DB
-            for item in (left_item, right_item)
-        )
-        if endpoints_are_safe and _passes(metrics):
-            accepted.append((
-                candidate.size, metrics.gain_error_db, metrics.complex_error,
-                left_item, right_item, candidate, metrics, pad_left, pad_right,
-            ))
+        original_length = stop - start
+        for start, stop in minimum_candidate_ranges(start, stop, count, minimum, linear_phase):
+            minimum_expanded = stop - start > original_length
+            # A view is used only for evaluation. No output FIR is constructed here.
+            metrics = _metrics(original, original[start:stop],
+                               centered_shift_samples=(count - stop - start) / 2.0)
+            removed = (float(np.dot(original[:start], original[:start]))
+                       + float(np.dot(original[stop:], original[stop:]))) / total_energy
+            metrics = AdaptiveCropMetrics(metrics.gain_error_db, metrics.phase_error_deg,
+                                          metrics.complex_error, removed)
+            safe = all(item.source != "dip" or item.endpoint_db <= MAX_DIP_ENDPOINT_DB
+                       for item in (l_item, r_item))
+            if safe and _passes(metrics):
+                accepted.append(AdaptiveCropPlan(count, start, stop, True, metrics,
+                                                l_item.source, r_item.source,
+                                                len(pairs), _digest(original), minimum_taps, minimum,
+                                                minimum_expanded))
+    if accepted:
+        return min(accepted, key=lambda plan: (plan.taps, plan.metrics.gain_error_db,
+                                              plan.metrics.complex_error))
+    return AdaptiveCropPlan(count, 0, count, False, _metrics(original, original),
+                            candidate_count=len(pairs), input_digest=_digest(original),
+                            requested_minimum_taps=minimum_taps, effective_minimum_taps=minimum)
 
-    if not accepted:
-        unchanged = apply_output_window(original, output_window_enabled)
-        metrics = _metrics(reference, unchanged)
-        return AdaptiveCropResult(
-            unchanged, False, "no_candidate_passed", count, count, count,
-            0, 0, 0, 0, "none", 0.0, "none", "none", metrics,
-            original_digest=_digest(original), final_digest=_digest(unchanged),
-            candidate_count=len(pairs),
-            window_mode="cosine_taper" if output_window_enabled else "none",
-        )
 
-    selected = min(accepted, key=lambda item: (item[0], item[1], item[2]))
-    final_taps, _gain, _complex, left_item, right_item, candidate, metrics, pad_left, pad_right = selected
-    crop_delay = float(left_item.cut_samples) if timing_mode == "external_delay" else 0.0
+def execute_crop(coefficients: np.ndarray, plan: AdaptiveCropPlan,
+                 *, start: int | None = None, stop: int | None = None) -> np.ndarray:
+    """Materialize a range once from its verified original real coefficients."""
+    source = _validated(coefficients)
+    first = plan.start if start is None else int(start)
+    last = plan.stop if stop is None else int(stop)
+    if source.size != plan.input_taps or _digest(source) != plan.input_digest:
+        raise ValueError("crop plan does not match its input FIR")
+    if not 0 <= first <= plan.start < plan.stop <= last <= source.size:
+        raise ValueError("crop range must contain the Adaptive support")
+    return source[first:last].copy()
+
+
+def crop_result(coefficients: np.ndarray, plan: AdaptiveCropPlan,
+                start: int, stop: int, output: np.ndarray,
+                *, window_enabled: bool = False) -> AdaptiveCropResult:
+    """Record final coefficients and their external absolute time origin."""
+    source = _validated(coefficients)
+    metrics = _metrics(source, output,
+                       centered_shift_samples=(source.size - stop - start) / 2.0)
+    removed = (float(np.dot(source[:start], source[:start]))
+               + float(np.dot(source[stop:], source[stop:]))) / max(float(np.dot(source, source)), 1e-300)
+    metrics = AdaptiveCropMetrics(metrics.gain_error_db, metrics.phase_error_deg,
+                                  metrics.complex_error, removed)
     return AdaptiveCropResult(
-        candidate, True, "accepted", count,
-        count - left_item.cut_samples - right_item.cut_samples,
-        final_taps, left_item.cut_samples, right_item.cut_samples,
-        pad_left, pad_right, timing_mode, crop_delay,
-        left_item.source, right_item.source, metrics,
-        original_digest=_digest(original), final_digest=_digest(candidate),
-        candidate_count=len(pairs),
-        window_mode="cosine_taper" if output_window_enabled else "none",
+        output, plan.adopted, "accepted" if plan.adopted else "no_candidate_passed",
+        source.size, plan.taps, output.size, start, source.size - stop,
+        0, 0, "external_delay" if start else "none", float(start),
+        plan.source_left, plan.source_right, metrics,
+        original_digest=plan.input_digest, final_digest=_digest(output),
+        candidate_count=plan.candidate_count,
+        window_mode="cosine_taper" if window_enabled else "none",
+        base_candidate_taps=plan.taps, base_left_removed=plan.start,
+        base_right_removed=source.size-plan.stop,
+        protection_length_ratio=output.size / plan.taps,
+        requested_minimum_taps=(int(plan.requested_minimum_taps)
+                                if isinstance(plan.requested_minimum_taps, Integral)
+                                else repr(plan.requested_minimum_taps)),
+        effective_minimum_taps=plan.effective_minimum_taps,
+        minimum_expanded=plan.minimum_expanded,
     )
+
+
+def adaptive_crop_fir(
+    coefficients: np.ndarray,
+    *,
+    minimum_taps: object = 1,
+    maximum_taps: int | None = None,
+    linear_phase: bool | None = None,
+    timing_mode: Literal["embedded_zero_padding", "external_delay"] = "external_delay",
+    output_window_enabled: bool = False,
+) -> AdaptiveCropResult:
+    """Compatibility facade for the common range/execute/taper pipeline.
+
+    Legacy embedded timing requests now receive explicit external delay;
+    padding is never used to compensate a removed time origin.
+    """
+    if timing_mode not in {"embedded_zero_padding", "external_delay"}:
+        raise ValueError("unsupported timing mode")
+    from .output_tap_policy import finalize_adaptive_fir
+    return finalize_adaptive_fir(
+        coefficients, minimum_taps=minimum_taps, maximum_taps=maximum_taps, linear_phase=linear_phase,
+        output_window_enabled=output_window_enabled,
+    ).adaptive

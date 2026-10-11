@@ -460,10 +460,10 @@ PROFILE_SCALAR_KEYS = (
     "auto_iir_headroom_db",
     "output_fir_polarity_invert",
     "output_fir_cosine_taper_enabled",
-    "output_fir_remove_nyquist_enabled",
-    "output_fir_remove_nyquist_strength",
     "dc_gain_normalize",
+    "fir_auto_gain_enabled",
     "standalone_fir_enabled",
+    "standalone_auto_crop",
     "fir_output_formats",
     "target_output_formats",
 )
@@ -581,7 +581,6 @@ DEPENDENCY_DEFINITIONS = {
     "auto_phase_section_count": ("FIR EQ", "Correction Filter", "Speaker + Realized", "Export FIR"),
     "linear_fir_count": ("Linear FIR", "Correction Filter", "Speaker + Realized", "Export FIR"),
     "output_fir_polarity_invert": ("Export FIR",),
-    "output_fir_remove_nyquist_enabled": ("Export FIR",),
     "output_fir_cosine_taper_enabled": ("Export FIR",),
     "dc_gain_normalize": ("Correction Filter", "Export FIR"),
 }

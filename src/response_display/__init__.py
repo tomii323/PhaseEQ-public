@@ -1,6 +1,43 @@
 """Display-only Multiway sampling; no smoothing, DSP or persistence transforms."""
+import hashlib
+
 import numpy as np
 from .cache import content_cached
+
+
+# PhaseEQ and Multiway evaluate Gain/Phase on the same arithmetic grid before
+# reducing it for a logarithmic display.  These are display-only constants;
+# FIR generation, Analysis FFT, and exported coefficients do not depend on them.
+DISPLAY_FREQUENCY_RESOLUTION_HZ = 2.0
+DISPLAY_GRAPH_POINTS = 2048
+
+
+def array_content_revision(values) -> str:
+    """Return a stable revision for browser-side redraw of numeric arrays."""
+    array = np.ascontiguousarray(np.asarray(values, dtype="<f8"))
+    return hashlib.sha256(array.tobytes()).hexdigest()[:16]
+
+
+def display_fft_length(sample_rate, *, minimum_length=0):
+    """Return an odd FFT length with spacing no coarser than the display policy."""
+    fs = int(sample_rate)
+    required = int(minimum_length)
+    if fs <= 0:
+        raise ValueError("sample rate must be positive")
+    if required < 0:
+        raise ValueError("minimum length must not be negative")
+    length = max(
+        int(np.ceil(fs / DISPLAY_FREQUENCY_RESOLUTION_HZ)),
+        required,
+        3,
+    )
+    return length if length % 2 else length + 1
+
+
+def display_frequency_axis(sample_rate, *, minimum_length=0):
+    """Return the shared linear analysis grid used before logarithmic sampling."""
+    length = display_fft_length(sample_rate, minimum_length=minimum_length)
+    return np.fft.rfftfreq(length, 1.0 / int(sample_rate))
 
 
 @content_cached(revision="multiway-indices-v1", max_entries=32, max_bytes=4*1024*1024)

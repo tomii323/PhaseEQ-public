@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import numpy as np
+from response_display import DISPLAY_FREQUENCY_RESOLUTION_HZ
 from scipy import signal
 from scipy.io import wavfile
 
@@ -21,7 +22,8 @@ from composite_engine.speaker_timing import (
 
 
 def ir_length_for_frequency_resolution(
-    sample_rate_hz: int, minimum_frequency_hz: float = 2.0,
+    sample_rate_hz: int,
+    minimum_frequency_hz: float = DISPLAY_FREQUENCY_RESOLUTION_HZ,
 ) -> int:
     """Return an odd IR/FFT length whose bin spacing reaches the frequency."""
     if int(sample_rate_hz) <= 0 or float(minimum_frequency_hz) <= 0.0:
@@ -31,7 +33,8 @@ def ir_length_for_frequency_resolution(
 
 
 def response_points_for_frequency_resolution(
-    sample_rate_hz: int, minimum_frequency_hz: float = 2.0,
+    sample_rate_hz: int,
+    minimum_frequency_hz: float = DISPLAY_FREQUENCY_RESOLUTION_HZ,
 ) -> int:
     """Return the RFFT point count matching the requested IR resolution."""
     return (

@@ -29,7 +29,6 @@ from .system_target_shaper import (
     design_system_target_fir,
     power_average_gain_db,
 )
-from .fir_chain_composer import FIRChainComposition, FIRStage, center_fit_fir, compose_fir_chain
 from .way_fir_synthesis import (
     WAY_FIR_SYNTHESIS_ENGINE,
     WayFIRSynthesisResult,
@@ -191,8 +190,6 @@ __all__ = [
     "SystemTargetShaperSettings",
     "SystemTargetShaperResult",
     "SystemTargetFIRResult",
-    "FIRStage",
-    "FIRChainComposition",
     "WAY_FIR_SYNTHESIS_ENGINE",
     "WayFIRTargetStage",
     "WayFIRSynthesisResult",
@@ -201,8 +198,6 @@ __all__ = [
     "build_system_target_shaper",
     "design_system_target_fir",
     "apply_system_target_shaper",
-    "center_fit_fir",
-    "compose_fir_chain",
     "synthesize_way_fir",
     "fixed_way_fir_result",
     "DESIGN_SIGNATURE_SCHEMA_VERSION",

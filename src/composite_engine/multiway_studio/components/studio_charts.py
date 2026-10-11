@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 import numpy as np
+from response_display import DISPLAY_GRAPH_POINTS
 
 from response_display import phase_segment_ids, sample_series
 from utils.ui_localization import display_text, ui_message
@@ -159,7 +160,7 @@ def build_studio_chart_bundle(
     speaker_responses: Mapping[str, np.ndarray] | None = None,
     baffle_response: np.ndarray | None = None,
     baffle_label: str | None = None,
-    max_points: int = 1024,
+    max_points: int = DISPLAY_GRAPH_POINTS,
     source_revision: str = "",
 ) -> StudioChartBundle:
     """Project the six Studio graphs without importing a plotting library."""

@@ -8,12 +8,15 @@ import numpy as np
 from scipy import fft
 from scipy.sparse.linalg import LinearOperator, lsqr
 
+from fir_design_common import compose_fir_stages_full
+from fir_design_common.output_tap_policy import apply_final_output_tap_policy
+
 from ..config import DesignConfig
 from ..design import DesignResult, calculate_group_delay_ms
 from ..phase_curves import build_target_curves, frequency_axis, phase_error_deg, wrapped_phase_deg
 
 
-WAY_FIR_SYNTHESIS_ENGINE = "single_projection_v1"
+WAY_FIR_SYNTHESIS_ENGINE = "single_projection_v3"
 
 
 @dataclass(frozen=True)
@@ -23,11 +26,12 @@ class WayFIRTargetStage:
     name: str
     coefficients: np.ndarray
     enabled: bool = True
+    is_basic_fir: bool = True
 
 
 @dataclass(frozen=True)
 class WayFIRSynthesisResult:
-    """A single fixed-length Way FIR and the target it was projected from."""
+    """One validated final Way FIR and its unchanged generation target."""
 
     design_result: DesignResult
     engine: str
@@ -51,20 +55,29 @@ def synthesize_way_fir(
     *,
     enabled: bool = True,
     compute_group_delay: bool = True,
+    adaptive: bool = True,
+    output_window_enabled: bool = False,
+    reserve_missing_fir_eq: bool = False,
 ) -> WayFIRSynthesisResult:
-    """Project all enabled FIR targets directly into one device-length FIR.
+    """Build the Adaptive input from the existing Way complex target.
 
     The Project Input, IIR EQ, FIR EQ and Auto EQ remain represented by
     ``DesignConfig``.  Crossover and alignment FIRs are supplied as target
     stages.  Their centered complex responses are multiplied in frequency,
-    then solved once at the requested output tap count.  No intermediate FIR
-    convolution or crop is performed.
+    then solved once at the requested nominal tap count when correction or
+    tap-budget optimization is necessary. EQ-free stages within the budget
+    retain their full real coefficients. Both feed the common range/execution
+    pipeline; output never reprojects, recrops or rewindows this result.
     """
 
     normalized = config.normalized()
     normalized.validate()
     active = tuple(_validated_stage(stage, index) for index, stage in enumerate(stages) if stage.enabled)
     natural_taps = 1 + sum(coefficients.size - 1 for _, coefficients in active)
+    basic_taps = 1 + sum(coefficients.size - 1
+                         for stage, (_, coefficients) in zip(
+                             (stage for stage in stages if stage.enabled), active)
+                         if stage.is_basic_fir)
 
     if not enabled:
         design = _bypass_design_result(normalized, compute_group_delay=compute_group_delay)
@@ -88,11 +101,22 @@ def synthesize_way_fir(
         design_fft_size += 1
     design_frequency = frequency_axis(normalized.sample_rate, design_fft_size)
     target = _combined_target_response(normalized, design_frequency, design_fft_size, active)
-    fir = _project_complex_target(
-        target,
-        taps=int(normalized.taps),
-        grid_size=design_fft_size,
+    from fir_recipe_engine import fir_eq_is_active
+    if active and not fir_eq_is_active(normalized) and natural_taps <= normalized.taps:
+        fir = compose_fir_stages_full(values for _, values in active)
+        if reserve_missing_fir_eq:
+            from fir_design_common.unity_eq import unity_fir_eq
+            fir = compose_fir_stages_full((fir, unity_fir_eq(2 * natural_taps + 1)))
+    else:
+        # Retain the existing coefficient optimization when the tap budget
+        # is insufficient or correction EQ changes the target response.
+        fir = _project_complex_target(target, taps=int(normalized.taps), grid_size=design_fft_size)
+
+    final = apply_final_output_tap_policy(
+        fir, int(normalized.taps), adaptive=adaptive, minimum_taps=basic_taps,
+        output_window_enabled=output_window_enabled,
     )
+    fir = final.coefficients
 
     analysis_fft_size = fft.next_fast_len(
         max(int(normalized.analysis_fft_size), int(normalized.taps)),
@@ -108,12 +132,15 @@ def synthesize_way_fir(
         active,
     )
     realized = _centered_fir_response(fir, normalized.sample_rate, analysis_fft_size)
+    shift = (final.input_taps-fir.size)/2.0-final.crop_delay_samples
+    realized *= np.exp(2j*np.pi*analysis_frequency*shift/normalized.sample_rate)
     target_gain = 20.0 * np.log10(np.maximum(np.abs(analysis_target), 1e-12))
     realized_gain = 20.0 * np.log10(np.maximum(np.abs(realized), 1e-12))
     target_phase = np.rad2deg(np.unwrap(np.angle(analysis_target)))
     realized_phase = np.rad2deg(np.unwrap(np.angle(realized)))
     if compute_group_delay:
-        group_delay = calculate_group_delay_ms(fir, normalized.sample_rate, analysis_frequency)
+        group_delay = (calculate_group_delay_ms(fir, normalized.sample_rate, analysis_frequency)
+                       + final.crop_delay_samples * 1000.0 / normalized.sample_rate)
     else:
         group_delay = np.full_like(analysis_frequency, np.nan, dtype=float)
     design = DesignResult(
@@ -134,6 +161,11 @@ def synthesize_way_fir(
         group_delay_ms=group_delay,
         step_response=np.cumsum(fir),
         target_phase_unwrapped_deg=target_phase,
+        output_window_applied=True,
+        crop_delay_samples=final.crop_delay_samples,
+        fir_original_taps=final.input_taps,
+        basic_fir_taps=basic_taps,
+        output_window_protected_center_taps=final.taper_reference_taps,
     )
     return _result(
         normalized,
@@ -328,6 +360,8 @@ def _result(
     for name, coefficients in stages:
         signature.update(name.encode("utf-8"))
         signature.update(np.asarray(coefficients, dtype="<f8").tobytes())
+    signature.update(np.asarray(design.fir, dtype="<f8").tobytes())
+    signature.update(str(design.crop_delay_samples).encode("ascii"))
     signature.update(np.asarray(design.target_gain_db, dtype="<f8").tobytes())
     signature.update(np.asarray(design.target_phase_unwrapped_deg, dtype="<f8").tobytes())
     if target is None or realized is None:
@@ -352,11 +386,15 @@ def _result(
 
 
 def _validated_stage(stage: WayFIRTargetStage, index: int) -> tuple[str, np.ndarray]:
+    if np.iscomplexobj(stage.coefficients):
+        raise ValueError("Way FIR coefficients must be real")
     values = np.asarray(stage.coefficients, dtype=np.float64)
     if values.ndim != 1 or values.size == 0:
         raise ValueError("Way FIR target stages must be non-empty one-dimensional arrays")
     if not np.all(np.isfinite(values)):
         raise ValueError("Way FIR target stages must contain only finite coefficients")
+    from fir_design_common.validation import validate_basic_fir
+    validate_basic_fir(values)
     return stage.name.strip() or f"stage-{index + 1}", values.copy()
 
 

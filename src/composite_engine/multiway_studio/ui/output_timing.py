@@ -10,7 +10,8 @@ from ..processing.output_summary import output_timing_rows
 _TAP_COUNT_COLUMNS = (
     "最終FIRタップ数", "補正用割り当てタップ数",
     "帯域分割FIRタップ数", "分割＋追加EQタップ数",
-    "Adaptive削減 [taps]",
+    "コサインテーパー保護枠 [taps]",
+    "整列前FIRタップ数", "整列追加zero [taps]", "Adaptive削減 [taps]",
 )
 
 
@@ -38,10 +39,15 @@ def render_band_tap_counts(package, hosts):
         host.caption(display_text("現在の最終FIRタップ数：{taps}").format(taps=value))
 
 
-def render_output_timing(package, *, assigned_taps, split_lengths, intermediate_lengths):
+def render_output_timing(
+    package, *, assigned_taps, split_lengths, intermediate_lengths,
+    align_output_taps, taper_protection_taps=None,
+):
     summary, details = output_timing_rows(
         package, assigned_taps=assigned_taps, split_lengths=split_lengths,
         intermediate_lengths=intermediate_lengths,
+        align_output_taps=align_output_taps,
+        taper_protection_taps=taper_protection_taps,
     )
     st.subheader(ui_message('ui.d52c03834c9fd6'))
     st.caption(display_text(
@@ -49,7 +55,5 @@ def render_output_timing(package, *, assigned_taps, split_lengths, intermediate_
     ))
     st.dataframe(output_timing_frame(summary), hide_index=True, width="stretch")
     with st.expander(display_text("タップ数・Delayの明細"), expanded=False):
-        st.caption(display_text(
-            "補正用割り当てはPhaseEQで補正を設計する長さ、帯域分割FIRは分割フィルター単体の長さです。分割＋追加EQはPhaseEQ返却前の中間結果です。グラフ用の表示IR長はDSPへ入力しません。"
-        ))
+        st.caption(ui_message('ui.023f329fe82da0'))
         st.dataframe(output_timing_frame(details), hide_index=True, width="stretch")

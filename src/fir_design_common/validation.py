@@ -1,0 +1,84 @@
+"""Coefficient and response checks, independent of design, UI and export."""
+from dataclasses import dataclass
+
+import numpy as np
+
+from .adaptive_crop import ACTIVE_FLOOR_DB, _metrics, _passes
+
+
+class FIRValidationError(ValueError):
+    """A candidate must not become the authoritative output."""
+
+
+@dataclass(frozen=True)
+class FIRResponseValidation:
+    taps: int
+    peak_magnitude: float
+    max_abs_phase_deg: float
+    min_group_delay_samples: float
+    max_group_delay_samples: float
+    max_group_delay_error_samples: float = 0.0
+
+
+def _response(values, size):
+    response = np.fft.rfft(values, size)
+    peak = max(float(np.max(np.abs(response))), 1e-15)
+    mask = np.abs(response) >= peak * 10 ** (ACTIVE_FLOOR_DB / 20)
+    weighted = np.fft.rfft(np.arange(values.size) * values, size)
+    delay = np.zeros(response.size)
+    delay[mask] = np.real(weighted[mask] / response[mask])
+    return response, mask, delay
+
+
+def validate_basic_fir(coefficients):
+    """Inspect taps, amplitude, phase and group delay without modifying FIR."""
+    if np.iscomplexobj(coefficients):
+        raise FIRValidationError("FIR coefficients must be real")
+    values = np.asarray(coefficients, dtype=float)
+    if values.ndim != 1 or not values.size or not np.isfinite(values).all():
+        raise FIRValidationError("FIR coefficients must be a nonempty finite vector")
+    size = 1 << max(4, (values.size * 8 - 1).bit_length())
+    response, mask, delay = _response(values, size)
+    phase = np.unwrap(np.angle(response))
+    if not np.isfinite(response).all() or not np.isfinite(delay[mask]).all():
+        raise FIRValidationError("FIR response contains invalid amplitude or group delay")
+    active_delay = delay[mask] if np.any(mask) else np.array([0.0])
+    return FIRResponseValidation(values.size, float(np.max(np.abs(response))),
+                                 float(np.max(np.abs(np.rad2deg(phase)))),
+                                 float(np.min(active_delay)), float(np.max(active_delay)))
+
+
+def validate_final_fir(source, plan, start, stop, output, *, window,
+                       enforce_precision):
+    """Verify the actual DSP coefficients and their compensated time origin.
+
+    Existing amplitude/phase/complex/energy limits remain authoritative.
+    Group delay is measured on active reference bins, without inventing a new
+    numerical acceptance threshold or changing the optimization target.
+    """
+    report = validate_basic_fir(output)
+    if output.size != stop - start or not 0 <= start <= plan.start < plan.stop <= stop <= source.size:
+        raise FIRValidationError("final FIR does not match its crop range")
+    expected = source[start:stop] * window
+    if not np.array_equal(output, expected):
+        raise FIRValidationError("final FIR differs from the one crop/window operation")
+    first, last = plan.start - start, plan.stop - start
+    if not np.array_equal(window[first:last], np.ones(plan.taps)):
+        raise FIRValidationError("Adaptive core window must be exactly 1.0")
+    if not np.array_equal(output[first:last], source[plan.start:plan.stop]):
+        raise FIRValidationError("Adaptive core coefficients have changed")
+    metrics = _metrics(source, output, centered_shift_samples=(source.size-stop-start)/2)
+    removed = float(np.dot(source[:start], source[:start]) + np.dot(source[stop:], source[stop:]))
+    from dataclasses import replace
+    metrics = replace(metrics, removed_energy_ratio=removed / max(float(np.dot(source, source)), 1e-300))
+    if enforce_precision and not _passes(metrics):
+        raise FIRValidationError(
+            f"final FIR validation failed: gain={metrics.gain_error_db:.6g} dB, "
+            f"phase={metrics.phase_error_deg:.6g} deg, complex={metrics.complex_error:.6g}; "
+            "no FIR output was adopted")
+    size = 1 << max(4, (source.size * 8 - 1).bit_length())
+    ref, mask, ref_delay = _response(source, size)
+    got, got_mask, got_delay = _response(output, size)
+    active = mask & got_mask
+    error = float(np.max(np.abs(got_delay[active] + start - ref_delay[active]))) if np.any(active) else 0.0
+    return replace(report, max_group_delay_error_samples=error)

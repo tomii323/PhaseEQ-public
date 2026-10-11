@@ -25,6 +25,18 @@ def _mode_boundary_values(mode_key, conf):
     overlaps = list(conf.get("boundary_overlaps_oct", ()))
     fallback_cycles = float(conf.get("cycles", DEFAULT_FIR_CYCLES))
     fallback_beta = float(conf.get("beta", DEFAULT_FIR_BETA))
+    mode_cycle_keys = {
+        "3Way": ("cycles_low", "cycles_high"),
+        "3Way+SUB": ("cycles_sub_low", "cycles_low_mid", "cycles_mid_high"),
+    }.get(mode_key, ())
+    mode_beta_keys = {
+        "3Way": ("beta_low", "beta_high"),
+        "3Way+SUB": ("beta_sub_low", "beta_low_mid", "beta_mid_high"),
+    }.get(mode_key, ())
+    if not cycles and len(mode_cycle_keys) == count:
+        cycles = [conf.get(key, fallback_cycles) for key in mode_cycle_keys]
+    if not betas and len(mode_beta_keys) == count:
+        betas = [conf.get(key, fallback_beta) for key in mode_beta_keys]
     cycles = (cycles + [fallback_cycles] * count)[:count]
     betas = (betas + [fallback_beta] * count)[:count]
     overlaps = (overlaps + [0.0] * count)[:count]
@@ -36,11 +48,11 @@ def generate_split_filter_bank(mode_key, fs, conf, crossover_methods):
     from .filters import generate_exclusive_kaiser_firs as exclusive_bank
     generate_exclusive_kaiser_firs = partial(exclusive_bank, lr2_auto_taps=conf.get("lr2_auto_taps", True))
     bands = MODE_BANDS[mode_key]
-    cycles = float(conf.get("cycles", DEFAULT_FIR_CYCLES))
-    beta = float(conf.get("beta", DEFAULT_FIR_BETA))
     targets = conf.get("boundary_acoustic_targets", [])
     methods = tuple("Through" if i < len(targets) and targets[i] else str(method)
                     for i, method in enumerate(crossover_methods))
+    cycles = float(conf.get("cycles", DEFAULT_FIR_CYCLES))
+    beta = float(conf.get("beta", DEFAULT_FIR_BETA))
     all_kaiser = all(method == "Kaiser FIR" for method in methods)
     if mode_key == "Fullrange":
         unity = {"Fullrange": np.asarray([1.0], dtype=float)}

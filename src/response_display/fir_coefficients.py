@@ -2,11 +2,13 @@
 import numpy as np
 import plotly.graph_objects as go
 from fir_output_window import output_window
+from response_display import array_content_revision
 
 
-def coefficient_figure(fir, *, window_enabled=False, colors=None, height=360):
+def coefficient_figure(fir, *, window_enabled=False, colors=None, height=360, protected_center_taps=None):
     values = np.asarray(fir, dtype=float)
-    window = output_window(values.size, window_enabled)
+    coefficient_revision = array_content_revision(values)
+    window = output_window(values.size, window_enabled, protected_center_taps=protected_center_taps)
     palette = {"text": "#454545", "chart_grid": "#dddddd", "border": "#999999",
                "series_delta": "#d58b36", "series_result": "#438b70",
                "series_gain_error": "#688fbc"} | (colors or {})
@@ -29,6 +31,7 @@ def coefficient_figure(fir, *, window_enabled=False, colors=None, height=360):
         yaxis=axis | dict(title="linear value / window function"),
         yaxis2=axis | dict(title="dB re 1.0", overlaying="y", side="right", showgrid=False),
         legend=dict(orientation="h", y=-.22), dragmode="zoom",
+        datarevision=coefficient_revision,
         uirevision=f"fir-cofs-{values.size}",
     )
     return fig

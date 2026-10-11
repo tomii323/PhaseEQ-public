@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import io
 import json
@@ -8,11 +8,14 @@ import re
 import zipfile
 
 import numpy as np
-from fir_output_window import apply_output_window, COSINE_TAPER_ALPHA, remove_nyquist_component
+from fir_output_window import COSINE_TAPER_ALPHA
 from scipy.io import wavfile
-from scipy.signal import fftconvolve
 from ..fir_artifact import FinalFIRArtifact
-from fir_design_common import generation_fft_size, generation_frequency_axis, project_centered_fir, compose_fir_stages
+from fir_design_common import generation_fft_size, generation_frequency_axis, project_centered_fir, compose_fir_stages_full
+from fir_design_common.output_tap_policy import (
+    FinalOutputTapResult,
+    apply_final_output_tap_policy,
+)
 
 from ..core import CompositeResult, MultichannelCompositeResult
 from ..fft import fir_complex_response, group_delay_ms
@@ -69,66 +72,73 @@ class DSPChannelExportInput:
     auto_alignment_allpass: tuple[AllPassSection, ...] = ()
     timing_provenance: dict[str, object] | None = None
     cosine_taper_enabled: bool = False
-    remove_nyquist_enabled: bool = False
-    remove_nyquist_strength: float = 1.0
+    kaiser_band_split_active: bool = False
     pre_alignment_tap_count: int | None = None
     final_fir_override: np.ndarray | None = None
     adaptive_crop_metadata: dict[str, object] | None = None
+    cosine_taper_protected_center_taps: int | None = None
+    final_window_applied: bool = False
+    basic_fir_taps: int = 1
 
 
 def compose_channel_fir(channel: DSPChannelExportInput) -> np.ndarray:
-    """Finish the assigned FIR frame before zero-padding it for output alignment."""
-    output_taps = int(channel.tap_count or 0)
-    design_taps = int(
-        channel.pre_alignment_tap_count
-        if channel.pre_alignment_tap_count is not None else output_taps
-    )
-    if not 0 < design_taps <= output_taps:
-        raise ValueError("FIR alignment cannot shorten the assigned frame")
+    """Return authoritative coefficients; output never reframes an artifact."""
     if channel.final_fir_override is not None:
+        if np.iscomplexobj(channel.final_fir_override):
+            raise ValueError("final FIR coefficients must be real")
         fir = np.asarray(channel.final_fir_override, dtype=float).copy()
-        if fir.ndim != 1 or fir.size != design_taps or not np.isfinite(fir).all():
-            raise ValueError("adaptive final FIR does not match its design frame")
-    else:
-        fir = postprocess_channel_fir(compose_fir_stages(
-            (values for _, values in channel.fir_stages), design_taps,
-        ), channel)
-    padding = output_taps - design_taps
-    return np.pad(fir, (padding // 2, padding - padding // 2))
+        if (fir.ndim != 1 or fir.size != channel.tap_count
+                or not np.isfinite(fir).all()):
+            raise ValueError("final FIR does not match its output frame")
+        return fir
+    return prepare_channel_fir(channel).coefficients
 
 
-def prepare_adaptive_channel_fir(channel: DSPChannelExportInput):
-    """Compose all FIR stages once, then crop before the configured final window."""
-    if not channel.fir_stages:
-        raise ValueError("adaptive crop requires FIR stages")
-    natural = None
-    for _name, coefficients in channel.fir_stages:
-        values = np.asarray(coefficients, dtype=float)
-        if values.ndim != 1 or not values.size or not np.isfinite(values).all():
-            raise ValueError("invalid FIR stage")
-        natural = values.copy() if natural is None else fftconvolve(natural, values, mode="full")
-    assert natural is not None
-    if channel.remove_nyquist_enabled:
-        natural, _ = remove_nyquist_component(natural, channel.remove_nyquist_strength)
-    from fir_design_common.adaptive_crop import adaptive_crop_fir
-    maximum_taps = int(channel.tap_count or natural.size)
-    result = adaptive_crop_fir(
-        natural,
-        maximum_taps=maximum_taps,
-        timing_mode="embedded_zero_padding",
-        output_window_enabled=bool(channel.cosine_taper_enabled),
+def prepare_channel_fir(channel: DSPChannelExportInput, *, adaptive: bool = False) -> FinalOutputTapResult:
+    """Compose unchanged stages and finalize with the common policy."""
+    if channel.final_fir_override is not None or channel.final_window_applied:
+        raise ValueError("a finalized channel must not regenerate its FIR")
+    natural = compose_fir_stages_full(values for _, values in channel.fir_stages)
+    return apply_final_output_tap_policy(
+        natural, int(channel.pre_alignment_tap_count or channel.tap_count or natural.size),
+        adaptive=adaptive, minimum_taps=channel.basic_fir_taps,
+        output_window_enabled=channel.cosine_taper_enabled,
     )
-    return result
 
 
-def postprocess_channel_fir(fir: np.ndarray, channel: DSPChannelExportInput) -> np.ndarray:
-    """Match PhaseEQ order: remove Nyquist, then final taper; no Auto Gain."""
-    values = np.asarray(fir, dtype=float)
-    if channel.remove_nyquist_enabled:
-        if not np.isfinite(channel.remove_nyquist_strength):
-            raise ValueError("Nyquist removal strength must be finite")
-        values, _ = remove_nyquist_component(values, channel.remove_nyquist_strength)
-    return apply_output_window(values, channel.cosine_taper_enabled)
+def finalized_channel(channel: DSPChannelExportInput, *, adaptive: bool = False) -> DSPChannelExportInput:
+    """Capture one final coefficient set with its compensated time origin."""
+    if not channel.fir_stages or channel.final_fir_override is not None:
+        return channel
+    result = prepare_channel_fir(channel, adaptive=adaptive)
+    return capture_finalized_channel(channel, result)
+
+
+def capture_finalized_channel(channel: DSPChannelExportInput,
+                               result: FinalOutputTapResult) -> DSPChannelExportInput:
+    """Commit validated coefficients and origin once, without any DSP work."""
+    if result.validation is None:
+        raise ValueError("a final FIR requires a successful validation report")
+    metadata = result.adaptive.to_dict() if result.adaptive else {
+        "mode": "fixed", "original_taps": result.input_taps,
+        "final_taps": result.final_taps, "crop_delay_samples": result.crop_delay_samples,
+        "timing_mode": "external_delay" if result.crop_delay_samples else "none",
+    }
+    metadata["configured_taps"] = result.configured_taps
+    metadata["final_validation"] = asdict(result.validation)
+    metadata["final_crop_range"] = asdict(result.crop_range) if result.crop_range else None
+    return replace(channel, tap_count=result.final_taps, pre_alignment_tap_count=None,
+                   final_fir_override=result.coefficients, final_window_applied=True,
+                   cosine_taper_protected_center_taps=result.taper_reference_taps,
+                   adaptive_crop_metadata=metadata,
+                   dsp_additional_delay_samples=channel.dsp_additional_delay_samples + result.crop_delay_samples)
+
+
+def prepare_adaptive_channel_fir(
+    channel: DSPChannelExportInput,
+) -> FinalOutputTapResult:
+    """Compatibility entry point for common Adaptive finalization."""
+    return prepare_channel_fir(channel, adaptive=True)
 
 
 def fit_centered_fir_to_complex_response(response: np.ndarray, tap_count: int) -> np.ndarray:
@@ -188,16 +198,30 @@ def build_dsp_resume_zip(
             desired *= stage_response
             contains.append(str(stage_name))
         fir = None
+        crop_delay = 0.0
+        origin = float((channel.adaptive_crop_metadata or {}).get("crop_delay_samples", 0.0))
+        input_taps = int((channel.adaptive_crop_metadata or {}).get("original_taps", 0))
         if channel.fir_stages:
             if final_fir_artifacts is not None:
                 if channel.channel_id not in final_fir_artifacts:
                     raise ValueError(f'missing final FIR artifact: {channel.channel_id}')
-                fir = final_fir_artifacts[channel.channel_id].validated_coefficients(channel)
+                artifact = final_fir_artifacts[channel.channel_id]
+                fir = artifact.validated_coefficients(channel)
+                origin = artifact.crop_delay_samples
+                input_taps = artifact.input_taps
+                crop_delay = origin if channel.final_fir_override is None else 0.0
             else:
-                fir = compose_channel_fir(channel)
+                if channel.final_fir_override is None:
+                    prepared = prepare_channel_fir(channel)
+                    fir = prepared.coefficients
+                    crop_delay = prepared.crop_delay_samples
+                    origin, input_taps = crop_delay, prepared.input_taps
+                else:
+                    fir = compose_channel_fir(channel)
         if fir is not None:
             _frequency, realized = fir_complex_response(
-                fir, sample_rate, fft_size, center_position=(fir.size - 1) / 2.0,
+                fir, sample_rate, fft_size,
+                center_position=((input_taps or fir.size)-1)/2.0-origin,
             )
         else:
             realized = np.ones(frequency.shape, dtype=np.complex128)
@@ -218,7 +242,7 @@ def build_dsp_resume_zip(
             baffle_sos = baffle_sos.reshape(-1, 6)
             if not sos_is_stable(baffle_sos):
                 raise ValueError(f"unstable IIR baffle compensation: {channel.name}")
-        requested_dsp_delay = float(channel.dsp_additional_delay_samples)
+        requested_dsp_delay = float(channel.dsp_additional_delay_samples) + crop_delay
         automatic_dsp_delay = 0.0
         effective_dsp_delay = requested_dsp_delay if requested_dsp_delay > 0.0 else automatic_dsp_delay
         alignment_sos = np.vstack([
@@ -242,9 +266,6 @@ def build_dsp_resume_zip(
             "processing_order": ["channel_fir", "phaseeq_iir", "baffle_iir", "iir_crossover", "phase_alignment", "gain", "polarity", "delay"],
             "fir_output_window": {"enabled": channel.cosine_taper_enabled,
                                   "name": "Cosine Tapered", "alpha": COSINE_TAPER_ALPHA},
-            "fir_nyquist_removal": {"enabled": channel.remove_nyquist_enabled,
-                                    "strength": channel.remove_nyquist_strength,
-                                    "application": "before_output_window"},
             "channel_fir": (
                 {"enabled": True, "file": "fir.wav", "tap_count": int(fir.size), "center_position": (fir.size - 1) / 2.0, "contains": contains}
                 if fir is not None else

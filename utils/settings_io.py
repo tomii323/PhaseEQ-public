@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -13,6 +13,22 @@ from phase_fir_designer import DesignConfig, SpeakerResponse
 CURRENT_SETTINGS_FILE_REVISION = 2
 MIN_SUPPORTED_SETTINGS_FILE_REVISION = CURRENT_SETTINGS_FILE_REVISION
 CURRENT_CONFIG_SCHEMA_VERSION = 3
+
+
+@dataclass(frozen=True)
+class SettingsLoadResult:
+    """Validated startup-settings read result and recovery decision."""
+
+    payload: dict[str, Any] | None
+    status: str
+    source_path: Path
+    recovery_path: Path | None = None
+    error: Exception | None = None
+
+    @property
+    def autosave_allowed(self) -> bool:
+        """Whether startup may replace the active settings file."""
+        return self.status in {"missing", "loaded", "quarantined_old"}
 
 
 class UnsupportedSettingsFileRevision(ValueError):
@@ -97,6 +113,51 @@ def quarantine_unsupported_settings_file(path: Path, *, revision: int) -> Path:
         sequence += 1
     path.replace(target)
     return target
+
+
+def load_startup_settings(
+    path: Path,
+    *,
+    expected_schema_version: int = CURRENT_CONFIG_SCHEMA_VERSION,
+) -> SettingsLoadResult:
+    """Read startup settings without overwriting an unreadable source.
+
+    Obsolete files are moved to the existing recoverable quarantine.  Invalid
+    and too-new files remain in place, and callers must suppress autosave until
+    the user explicitly loads valid settings or resets the project.
+    """
+    source = Path(path)
+    if not source.exists():
+        return SettingsLoadResult(None, "missing", source)
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        validated = validate_current_config_payload(
+            payload,
+            expected_schema_version=expected_schema_version,
+        )
+        return SettingsLoadResult(validated, "loaded", source)
+    except UnsupportedSettingsFileRevision as exc:
+        if exc.reason == "too_old":
+            try:
+                quarantined = quarantine_unsupported_settings_file(
+                    source,
+                    revision=exc.revision,
+                )
+            except OSError as quarantine_error:
+                return SettingsLoadResult(
+                    None, "unreadable_preserved", source,
+                    error=quarantine_error,
+                )
+            return SettingsLoadResult(
+                None, "quarantined_old", source,
+                recovery_path=quarantined,
+                error=exc,
+            )
+        return SettingsLoadResult(None, "unreadable_preserved", source, error=exc)
+    except UnsupportedSettingsSchema as exc:
+        return SettingsLoadResult(None, "unreadable_preserved", source, error=exc)
+    except (OSError, ValueError, TypeError) as exc:
+        return SettingsLoadResult(None, "unreadable_preserved", source, error=exc)
 
 
 def speaker_response_payload(response: SpeakerResponse | None) -> dict[str, Any] | None:

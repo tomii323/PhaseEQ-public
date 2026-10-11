@@ -471,6 +471,11 @@ def system_from_payload(payload: dict[str, Any]) -> DSPSystem:
     bindings = tuple(
         DSPInputBinding(**item) for item in data.get("input_bindings", [])
     )
+    processing_payload = dict(data.get("processing", {}))
+    # Compatibility-only read boundary for the retired Nyquist-removal fields.
+    # They are intentionally ignored and omitted from subsequent serialization.
+    processing_payload.pop("remove_nyquist", None)
+    processing_payload.pop("remove_nyquist_strength", None)
     system = DSPSystem(
         id=str(data.get("id") or uuid.uuid4()),
         name=str(data.get("name") or "DSP System"),
@@ -488,7 +493,7 @@ def system_from_payload(payload: dict[str, Any]) -> DSPSystem:
         ),
         input_bindings=bindings,
         routes=tuple(DSPRoute(**item) for item in data.get("routes", [])),
-        processing=DSPSystemProcessing(**data.get("processing", {})),
+        processing=DSPSystemProcessing(**processing_payload),
         targets=targets,
         project_revisions={str(key): str(value) for key, value in data.get("project_revisions", {}).items()},
         crossover_plan=crossover_plan,

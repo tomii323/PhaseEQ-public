@@ -24,6 +24,7 @@ class ResponseStage:
     name: str
     filename: str
     data: bytes
+    reference_center_samples: float | None = None
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,7 @@ class GroupTargetInput:
     edit_payload: dict[str, object] | None = None
 
 
-@content_cached(revision="composite-channel-evaluation-v2", max_entries=4, max_bytes=64*1024*1024)
+@content_cached(revision="composite-channel-evaluation-v3", max_entries=4, max_bytes=64*1024*1024)
 def build_channel_pipelines(
     sample_rate_hz: int,
     channels: list[ChannelPipelineInput],
@@ -290,6 +291,11 @@ def _realize_stage_response(stage: ResponseStage, sample_rate_hz: int, fft_size:
     )])
     frequency, responses, _ = package.evaluate_responses("Pipeline", fft_size=fft_size)
     response = responses[stage_name]
+    if stage.reference_center_samples is not None:
+        taps = _wav_taps(stage)
+        if not np.isfinite(stage.reference_center_samples) or taps < 1:
+            raise ValueError("invalid FIR time reference")
+        response *= np.exp(2j*np.pi*frequency*(stage.reference_center_samples-(taps-1)/2.0)/sample_rate_hz)
     if (complete_boundaries or stage.name in {"PhaseEQ Response Processing", "Speaker Package", "Manual Speaker"}) and Path(stage.filename).suffix.casefold() in {".frd", ".csv", ".txt"}:
         from response_completion import complete_response
         values = _load_frd_bytes(stage.data, stage.name)

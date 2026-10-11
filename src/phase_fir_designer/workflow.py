@@ -8,8 +8,7 @@ from .acoustic_target import enabled as acoustic_target_enabled
 
 
 def stage_shows_linear_fir_eq_mask(stage: str) -> bool:
-    """Keep FIR-only mask guides off pre-FIR and separate-IIR result stages."""
-
+    """Show FIR-EQ mask guides only on stages that include FIR correction."""
     return str(stage) not in {"Speaker/Input", "Target Response", "IIR EQ"}
 
 

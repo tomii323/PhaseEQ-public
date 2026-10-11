@@ -80,6 +80,8 @@ def build_dsp_system(
     *,
     fir_artifact_loader: Callable[[str], np.ndarray | None] | None = None,
     analysis_fft_size: int = 16_384,
+    adaptive: bool = True,
+    output_window_enabled: bool = False,
 ) -> DSPSystemBuild:
     system = ensure_system_crossover_plan(
         ensure_output_channel_assignments(system)
@@ -89,12 +91,14 @@ def build_dsp_system(
         system,
         project_loader,
         analysis_fft_size=analysis_fft_size,
+        adaptive=adaptive, output_window_enabled=output_window_enabled,
     )
     alignment_signature = alignment_design_signature(system, expected_fir_signatures)
     design_signature = system_design_signature(
         system,
         project_loader,
         analysis_fft_size=analysis_fft_size,
+        adaptive=adaptive, output_window_enabled=output_window_enabled,
     )
     warnings: list[str] = []
     stale: list[str] = []
@@ -156,6 +160,7 @@ def build_dsp_system(
                 input_iir_filters=common_input_iir_filters(system, way.id),
                 fir_master_enabled=bool(system.processing.fir_enabled),
                 analysis_fft_size=analysis_fft_size,
+                adaptive=adaptive, output_window_enabled=output_window_enabled,
             )
             results.append(result)
             saved_way_signature = system.way_design_signatures.get(way.id, "")
@@ -181,8 +186,6 @@ def build_dsp_system(
         raise ValueError(f"{message} {detail}" if detail else message)
     output = prepare_system_output(
         results, auto_gain=system.processing.auto_gain,
-        remove_nyquist=system.processing.remove_nyquist,
-        remove_nyquist_strength=system.processing.remove_nyquist_strength,
         inputs=system.inputs,
         input_bindings=system.input_bindings,
         routes=system.routes,

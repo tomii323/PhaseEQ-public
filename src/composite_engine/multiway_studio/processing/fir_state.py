@@ -1,29 +1,29 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal, Mapping, Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
+from fir_design_common.fir_state import (
+    DEFAULT_MANUAL_FIR_TAPS,
+    FIRFrameState,
+    boundary_requires_direct_fir,
+    direct_fir_split_family,
+    initialize_taps_for_fir_enable,
+    plan_acoustic_target_taps,
+    resolve_fir_frame_state,
+)
 
 
 FIR_CROSSOVER_METHODS = frozenset({"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"})
-DEFAULT_MANUAL_FIR_TAPS = 1023
-
-
-@dataclass(frozen=True)
-class BandFIRState:
-    enabled: bool
-    tap_source: Literal["none", "auto_split", "auto_target", "manual"]
-    tap_count: int | None
-    split_fir_required: bool
-
+KAISER_CROSSOVER_METHOD = "Kaiser FIR"
+class BandFIRState(FIRFrameState):
     def to_dict(self) -> dict[str, object]:
-        return {
-            "enabled": self.enabled,
-            "tap_source": self.tap_source,
-            "tap_count": self.tap_count,
-            "split_fir_required": self.split_fir_required,
-        }
+        return dict(
+            enabled=self.enabled,
+            tap_source=self.tap_source,
+            tap_count=self.tap_count,
+            split_fir_required=self.split_fir_required,
+        )
 
 
 def bands_requiring_split_fir(
@@ -35,7 +35,22 @@ def bands_requiring_split_fir(
         raise ValueError("crossover method count does not match bands")
     required: set[str] = set()
     for index, method in enumerate(methods):
-        if method in FIR_CROSSOVER_METHODS:
+        if boundary_requires_direct_fir(method):
+            required.update((bands[index], bands[index + 1]))
+    return frozenset(required)
+
+
+def bands_using_kaiser_split(
+    ordered_bands: Sequence[str], crossover_methods: Sequence[str],
+) -> frozenset[str]:
+    """Return bands touching at least one Kaiser FIR boundary."""
+    bands = tuple(str(value) for value in ordered_bands)
+    methods = tuple(str(value) for value in crossover_methods)
+    if len(methods) != max(0, len(bands) - 1):
+        raise ValueError("crossover method count does not match bands")
+    required: set[str] = set()
+    for index, method in enumerate(methods):
+        if direct_fir_split_family(method) == "kaiser":
             required.update((bands[index], bands[index + 1]))
     return frozenset(required)
 
@@ -55,30 +70,22 @@ def resolve_band_fir_states(
     states: dict[str, BandFIRState] = {}
     for band in bands:
         split_required = band in required
-        if not fir_output_enabled:
-            states[band] = BandFIRState(False, "none", None, split_required)
-            continue
-        manual_taps = int(configured_taps.get(band, 0) or 0)
-        if manual_taps > 0:
-            states[band] = BandFIRState(True, "manual", manual_taps, split_required)
-            continue
-        target_taps = int((automatic_taps or {}).get(band, 0) or 0)
-        if target_taps > 0:
-            states[band] = BandFIRState(True, "auto_target", target_taps, split_required)
-            continue
-        if not split_required:
-            states[band] = BandFIRState(False, "none", None, False)
-            continue
-        if split_firs is None or band not in split_firs:
-            states[band] = BandFIRState(True, "auto_split", None, True)
-            continue
-        coefficients = np.asarray(split_firs[band], dtype=float)
-        if coefficients.ndim != 1 or coefficients.size < 1 or not np.isfinite(coefficients).all():
-            raise ValueError(f"{band}: generated split FIR is invalid")
-        # Reserve correction headroom regardless of automatic cropping. The split
-        # coefficients and the crop search's minimum length stay unchanged.
-        taps = int(coefficients.size) * 2 + 1
-        states[band] = BandFIRState(True, "auto_split", taps, True)
+        try:
+            resolved = resolve_fir_frame_state(
+                int(configured_taps.get(band, 0) or 0),
+                fir_output_enabled=fir_output_enabled,
+                split_fir=(split_firs or {}).get(band),
+                split_fir_required=split_required,
+                automatic_taps=int((automatic_taps or {}).get(band, 0) or 0),
+            )
+        except ValueError as exc:
+            raise ValueError(f"{band}: {exc}") from exc
+        states[band] = BandFIRState(
+            resolved.enabled,
+            resolved.tap_source,
+            resolved.tap_count,
+            resolved.split_fir_required,
+        )
     return states
 
 
@@ -110,42 +117,9 @@ def initialize_manual_taps_for_enable(
     required = bands_requiring_split_fir(ordered_bands, crossover_methods)
     result = {str(band): int(configured_taps.get(str(band), 0) or 0) for band in ordered_bands}
     for band in result:
-        if band not in required and result[band] < 1:
-            result[band] = int(default_taps)
-    return result
-
-
-def plan_acoustic_target_taps(
-    ordered_bands: Sequence[str],
-    crossover_methods: Sequence[str],
-    acoustic_targets: Sequence[bool],
-    crossover_frequencies_hz: Sequence[float],
-    configured_taps: Mapping[str, int],
-    *,
-    sample_rate_hz: int,
-) -> dict[str, int]:
-    """Plan transient target headroom without changing configured tap values."""
-    bands = tuple(str(value) for value in ordered_bands)
-    methods = tuple(str(value) for value in crossover_methods)
-    targets = tuple(bool(value) for value in acoustic_targets)
-    frequencies = tuple(float(value) for value in crossover_frequencies_hz)
-    boundary_count = max(0, len(bands) - 1)
-    if not (
-        len(methods) == len(targets) == len(frequencies) == boundary_count
-    ):
-        raise ValueError("acoustic target boundary count does not match bands")
-
-    from crossover_engine.lr2_taps import automatic_lr2_taps
-    from crossover_engine.lr4_taps import automatic_lr4_taps
-
-    configured = {band: int(configured_taps.get(band, 0) or 0) for band in bands}
-    result = dict.fromkeys(bands, 0)
-    for index, enabled in enumerate(targets):
-        if not enabled:
-            continue
-        planner = automatic_lr4_taps if "4" in methods[index] else automatic_lr2_taps
-        target_taps = 2 * planner(sample_rate_hz, frequencies[index]).taps + 1
-        for band in bands[index:index + 2]:
-            if configured[band] == 0 and result[band] == 0:
-                result[band] = target_taps
+        result[band] = initialize_taps_for_fir_enable(
+            result[band],
+            split_fir_required=band in required,
+            default_taps=default_taps,
+        )
     return result

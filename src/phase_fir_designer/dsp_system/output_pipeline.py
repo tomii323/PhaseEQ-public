@@ -8,7 +8,6 @@ import numpy as np
 
 from ..config import IIRFilter
 from ..fir_auto_gain import apply_fixed_multiway_fir_auto_gain, measure_fir_peak_db
-from ..fir_postprocess import remove_nyquist_component
 from .regeneration import DSPWayResult
 from .models import DSPInput, DSPInputBinding, DSPRoute
 
@@ -35,6 +34,7 @@ class DSPWayOutput:
     design_signature: str = ""
     composite_group: str = "Main"
     composite_channel_name: str = ""
+    fir_original_taps: int | None = None
 
 
 @dataclass(frozen=True)
@@ -56,8 +56,6 @@ def prepare_system_output(
     way_results: list[DSPWayResult] | tuple[DSPWayResult, ...],
     *,
     auto_gain: bool = True,
-    remove_nyquist: bool = False,
-    remove_nyquist_strength: float = 1.0,
     inputs: tuple[DSPInput, ...] = (),
     input_bindings: tuple[DSPInputBinding, ...] = (),
     routes: tuple[DSPRoute, ...] = (),
@@ -72,11 +70,6 @@ def prepare_system_output(
     level_adjusted: list[np.ndarray] = []
     for result in active:
         coefficients = np.asarray(result.fir, dtype=float).copy()
-        if remove_nyquist and float(remove_nyquist_strength) > 0.0:
-            coefficients, _removed = remove_nyquist_component(
-                coefficients,
-                strength=float(remove_nyquist_strength),
-            )
         prepared.append(coefficients)
         # Output trim and polarity are explicit DSP stages.  They must remain
         # available when FIR is OFF and must never change the FIR artifact.
@@ -120,8 +113,11 @@ def prepare_system_output(
                 output_channel=int(result.way.output_channel),
                 sample_rate=int(result.device.sample_rate),
                 coefficients=values,
+                fir_original_taps=result.fir_synthesis.design_result.fir_original_taps,
                 peak_db=float(measure_fir_peak_db(values)[0]),
-                delay_ms=float(result.way.delay_ms),
+                delay_ms=(float(result.way.delay_ms)
+                          + result.fir_synthesis.design_result.crop_delay_samples
+                          * 1000.0 / result.device.sample_rate),
                 project_revision=result.project_revision,
                 way_gain_db=float(result.way.gain_db),
                 polarity_invert=bool(result.way.polarity_invert),

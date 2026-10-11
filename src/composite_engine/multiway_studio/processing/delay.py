@@ -10,6 +10,23 @@ class OutputTiming:
     additional_delay_samples: float
 
 
+def defer_output_timing(
+    assigned_taps: Mapping[str, int | None],
+) -> dict[str, OutputTiming]:
+    """Keep design frames unchanged until final FIR lengths are known.
+
+    Adaptive cropping changes the lengths used by the alignment policy.  Its
+    FIR-length delay must therefore be resolved once, after cropping, rather
+    than carrying a provisional delay into the final result.
+    """
+    if any(taps is not None and taps < 1 for taps in assigned_taps.values()):
+        raise ValueError("assigned FIR tap counts must be positive or None")
+    return {
+        band: OutputTiming(taps, 0.0)
+        for band, taps in assigned_taps.items()
+    }
+
+
 def resolve_output_timing(
     assigned_taps: Mapping[str, int | None], *, align_output_taps: bool,
 ) -> dict[str, OutputTiming]:

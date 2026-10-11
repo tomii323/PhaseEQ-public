@@ -2,6 +2,52 @@
 from typing import Any, Callable
 
 
+SETTING_WIDGET_PREFIXES = (
+    '__num_val_', '__sel_val_', '__chk_val_', '__rad_val_',
+    '__seg_val_', '__slider_val_', '__multi_val_', '__text_val_',
+)
+OUTPUT_POSTPROCESS_DEFAULTS = {
+    'dc_gain_normalize': True,
+    'output_fir_polarity_invert': False,
+    'output_fir_cosine_taper_enabled': False,
+    'fir_auto_gain_enabled': True,
+}
+
+
+def clear_restored_setting_widgets(state, setting_keys) -> None:
+    """Discard source projections, including custom aliases and new settings.
+
+    Restore boundaries never read an old widget back into destination settings.
+    Rendered wrappers register aliases; conventional keys cover hidden controls.
+    Unrelated application widgets and canonical values are left untouched.
+    """
+    keys = set(setting_keys)
+    widgets = {prefix + key for key in keys for prefix in SETTING_WIDGET_PREFIXES}
+    widgets.update(key + '_widget' for key in keys)
+    for entry in state.get('__ui_index_registry', {}).values():
+        if entry.get('settings_key') in keys:
+            widget = entry.get('widget_key')
+            if widget and widget not in keys:
+                widgets.add(widget)
+    for widget in widgets:
+        state.pop(widget, None)
+
+
+def sync_output_postprocess_state(state, *, inherited: bool) -> dict[str, bool]:
+    """Project owner policy to both canonical settings and widget mirrors."""
+    values = {key: False if inherited else bool(state.get(key, default))
+              for key, default in OUTPUT_POSTPROCESS_DEFAULTS.items()}
+    for key, value in values.items():
+        state[key] = value
+        state['__chk_val_' + key] = value
+    state['_output_restore_snapshot'] = {
+        'owner': 'assignment' if inherited else 'standalone',
+        'settings': list(values),
+        'consistent': all(state[key] == state['__chk_val_' + key] for key in values),
+    }
+    return values
+
+
 def _commit(settings_key, widget_key, transform, callback, args, kwargs):
     import streamlit as st
 

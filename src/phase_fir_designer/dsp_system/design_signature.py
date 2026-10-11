@@ -51,6 +51,7 @@ def system_design_signature(
     project_loader: Callable[[str], ProjectRuntimeSnapshot | None],
     *,
     analysis_fft_size: int = 16_384,
+    adaptive: bool = True, output_window_enabled: bool = False,
 ) -> str:
     """Return the Export signature for the current end-to-end DSP design.
 
@@ -62,6 +63,7 @@ def system_design_signature(
         system,
         project_loader,
         analysis_fft_size=analysis_fft_size,
+        adaptive=adaptive, output_window_enabled=output_window_enabled,
     )
     alignment = alignment_design_signature(system, fir_signatures)
     return export_design_signature(
@@ -77,6 +79,7 @@ def fir_design_signatures(
     project_loader: Callable[[str], ProjectRuntimeSnapshot | None],
     *,
     analysis_fft_size: int = 16_384,
+    adaptive: bool = True, output_window_enabled: bool = False,
 ) -> dict[str, str]:
     normalized = ensure_system_crossover_plan(
         ensure_output_channel_assignments(system)
@@ -112,6 +115,7 @@ def fir_design_signatures(
             "schema": DESIGN_SIGNATURE_SCHEMA_VERSION,
             "algorithm": DSP_SYSTEM_DESIGN_ALGORITHM_VERSION,
             "way_fir_engine": WAY_FIR_SYNTHESIS_ENGINE,
+            "finalization": {"adaptive": bool(adaptive), "cosine_taper": bool(output_window_enabled)},
             "source": {"id": source_id, "signature": project_signature},
             "device": {
                 "sample_rate": device.sample_rate,

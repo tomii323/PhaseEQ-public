@@ -14,6 +14,7 @@ import warnings
 from contextlib import contextmanager
 from utils.plot_fonts import get_japanese_font
 from utils.ui_semantic_colors import semantic_chart_colors
+from response_display import DISPLAY_GRAPH_POINTS, log_spaced_sample_indices, sample_series
 
 GROUP_DELAY_DISPLAY_REVISION = 2
 TIME_RESPONSE_DISPLAY_MIN_MS = -2.0
@@ -28,8 +29,8 @@ PHASE_GAIN_MASK_OPTIONS_DB = (-60, -80)
 DEFAULT_PHASE_GAIN_MASK_DB = -60
 GRAPH_MODE_OPTIONS = ("Light", "Interactive")
 DEFAULT_GRAPH_MODE = "Light"
-GRAPH_MAX_POINTS_OPTIONS = (1024, 2048, 4096)
-DEFAULT_GRAPH_MAX_POINTS = 1024
+GRAPH_MAX_POINTS_OPTIONS = (DISPLAY_GRAPH_POINTS,)
+DEFAULT_GRAPH_MAX_POINTS = DISPLAY_GRAPH_POINTS
 STUDIO_LIGHT_IMAGE_MAX_WIDTH = 1460
 
 
@@ -53,10 +54,6 @@ def _source_keyed_figure(function):
         figure._studio_source_revision = studio_figure_revision((function.__name__, args, kwargs))
         return figure
     return wrapped
-
-
-# Compatibility re-export: the implementation is shared with PhaseEQ.
-from response_display import log_spaced_sample_indices, sample_series
 
 
 @contextmanager

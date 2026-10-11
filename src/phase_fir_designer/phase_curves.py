@@ -384,6 +384,8 @@ def _maybe_apply_linear_fir_eq_mask(
 ) -> np.ndarray:
     if not enabled:
         return values
+    # The mask limits the FIR EQ correction only.  The output-band split FIR is
+    # convolved later at full length and is never modified by this operation.
     return _apply_linear_fir_eq_mask(config, frequency, values, mode=mode)
 
 

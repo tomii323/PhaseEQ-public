@@ -63,6 +63,8 @@ def regenerate_way(
     input_iir_filters: tuple[IIRFilter, ...] = (),
     fir_master_enabled: bool = True,
     analysis_fft_size: int = 16_384,
+    adaptive: bool = True,
+    output_window_enabled: bool = False,
 ) -> DSPWayResult:
     device.validate()
     way.validate()
@@ -142,7 +144,7 @@ def regenerate_way(
         stages.append(WayFIRTargetStage("Crossover", crossover_fir))
     alignment_fir = np.asarray(way.alignment_fir, dtype=float) if way.alignment_fir else None
     if alignment_fir is not None:
-        stages.append(WayFIRTargetStage("Alignment", alignment_fir))
+        stages.append(WayFIRTargetStage("Alignment", alignment_fir, is_basic_fir=False))
     fir_active = bool(fir_master_enabled and device.fir_supported and way.fir_enabled)
     # FIR OFF is always a true bypass: retain the editor settings, but remove
     # the FIR transfer and its latency from the active signal path.
@@ -151,6 +153,7 @@ def regenerate_way(
         stages,
         enabled=fir_active,
         compute_group_delay=compute_group_delay,
+        adaptive=adaptive, output_window_enabled=output_window_enabled,
     )
     correction = correction_from_design_result(
         transient,
@@ -162,6 +165,8 @@ def regenerate_way(
         combined_fir,
         int(device.sample_rate),
         effective_analysis_fft_size,
+        crop_delay_samples=fir_synthesis.design_result.crop_delay_samples,
+        original_taps=fir_synthesis.design_result.fir_original_taps,
     )
     source = speaker_response or (
         project.processed_speaker_response or project.raw_speaker_response
@@ -193,6 +198,14 @@ def regenerate_way(
         fixed_processing_delay_ms=float(device.latency_offset_ms),
         common_processing_cancels=True,
     )
+    crop_delay_ms = fir_synthesis.design_result.crop_delay_samples * 1000.0 / device.sample_rate
+    if crop_delay_ms:
+        latency = replace(latency,
+            fir=replace(latency.fir,
+                scalar_delay_ms=latency.fir.scalar_delay_ms + crop_delay_ms,
+                group_delay_ms=latency.fir.group_delay_ms + crop_delay_ms),
+            filter_delay_ms=latency.filter_delay_ms + crop_delay_ms,
+            total_delay_ms=latency.total_delay_ms + crop_delay_ms)
     return DSPWayResult(
         way=way,
         device=device,
