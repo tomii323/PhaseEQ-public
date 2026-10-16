@@ -1,7 +1,7 @@
 # PhaseEQ 出力ファイル仕様
 
 - 文書更新日: 2026-10-02
-- 対象公開版: PhaseEQ v1.20.26
+- 対象公開版: PhaseEQ v1.20.27
 - 文書状態: v1.20.1リリース版
 
 PhaseEQの「書き出し」、マルチウェイの「保存・出力」、PhaseEQの「設定 → バックアップと復元」で保存できるファイルを説明します。操作順は[操作ガイド](user-guide.md)、過去の変更は[更新履歴](history.md)を参照してください。
@@ -101,7 +101,7 @@ PhaseEQ同梱マルチウェイ Studioの`DSP 書き出し v3`は、上記PhaseE
 - PhaseEQ IIR、IIRバッフル補正、IIR帯域分割、帯域分割補償オールパスを別Stage／別ファイルで保持
 - `manifest.json`（`format: phaseeq-multiway-dsp-export`, `format_version: 3`）、SHA-256、ワークスペース、チャンネル設定表、検証Report
 - 処理順は`Final FIR → PhaseEQ IIR → Baffle IIR → IIR crossover → crossover All-pass → Gain → Polarity → Delay`
-- `Delay [samples]`は画面の「タップ長とディレイ目安」と同じく、`FIR長差Delay + 手動Delay + 位相・時間整合Delay`を出力します。FIR係数自体が持つ固有センター遅延`(N-1)/2`は二重加算しません。出力タップ統一時のFIR長差遅延は0です。
+- 画面の「タップ長とディレイ目安」にある`DSP追加Delay [samples]`と同じ積算結果を出力します。FIR起点補償・FIR理論差補償・測定補正・Way相対Delay・整合Delayの残り・共通オフセットを含み、FIR使用時は最小値を全出力から差し引きます。FIR係数自体の中心遅延`(N-1)/2`は追加しません。内訳は[利用ガイドのDelay説明](user-guide.md#composite-engine)で確認できます。
 - 外部アプリで測った距離を時間基準にした場合、チャンネル別`channel_config.json`の`timing_provenance.external_distance_alignment`へ距離[m]、公称音速343.42 m/s、入力元を監査情報として記録します。距離から求めた実適用値は`delay.phase_alignment_samples`へ一度だけ含め、書き出し時に再加算しません。
 - FIR OFFのチャンネルは`tap_count=null`、`final_fir=null`として扱い、FIR WAV／CSV／BIN、FIR 生成定義、FIR reportを出力しません。IIR、ゲイン、極性、遅延はFIRと独立して出力します。
 - `documentation/system_summary.md`、`documentation/system_specification.md`、`documentation/system_specification.json`を同梱します。3ファイルは同じCanonical DSP Packageから生成し、保存済みマルチウェイ システムがある場合はシステム ID、管理No、システム 改訂番号、content hashを記録します。チャンネル、FIR固有センター遅延、DSP追加遅延、FIR／IIR、DSP profile、signature、検証結果も同じ型番から出力します。単独編集出力は保存済みシステムを偽装しません。
@@ -172,7 +172,7 @@ PhaseEQ同梱マルチウェイ Studioの`DSP 書き出し v3`は、上記PhaseE
 
 書き出した後は[出力データの確認と外部機器での利用](user-guide.md#external-use)を参照してください。形式への対応は全機種・全ファームウェアでの実機動作確認を意味しません。機種別の取込・接続・再生操作は、対象機器の公式説明書で確認します。PhaseEQには音楽再生機能はありません。
 
-実画面で手順を確認する場合は、[画像付き操作マニュアル（PDF）](manual/PhaseEQ_v1.20.24_画像付き操作マニュアル_日本語.pdf)の第9章「書き出しとマルチウェイ連携」と第12章「マルチウェイ FIR Studio」を参照してください。
+実画面で手順を確認する場合は、[画像付き操作マニュアル（PDF）](manual/PhaseEQ_v1.20.26_画像付き操作マニュアル_日本語.pdf)の第9章「書き出しとマルチウェイ連携」と第12章「マルチウェイ FIR Studio」を参照してください。
 
 
 ### Delayの内訳と合計

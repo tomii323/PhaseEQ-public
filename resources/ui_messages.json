@@ -6449,10 +6449,10 @@
     "ja": "LightはSafariや低速PC向けの軽量表示、Interactiveは拡大・パン・ツールチップを有効にします。",
     "en": "Light is optimized for Safari and slower computers. Interactive enables zoom, pan, and tooltips."
   },
-  "ui.376d2f2901a29a": {
-    "source": "推定タップ長が1800を超えています。再計算が重い場合は、AutoをOFFにしてください。",
-    "ja": "推定タップ長が1800を超えています。再計算が重い場合は、AutoをOFFにしてください。",
-    "en": "Estimated tap length exceeds 1800. Turn Auto OFF if recalculation is slow."
+  "ui.efdbe8e357b0a6": {
+    "source": "カイザー窓の分割FIRが長くなる設定です。計算が重い場合は「自動」をOFFにし、調整後に「再計算」を押してください。",
+    "ja": "カイザー窓の分割FIRが長くなる設定です。計算が重い場合は「自動」をOFFにし、調整後に「再計算」を押してください。",
+    "en": "These settings produce a longer Kaiser crossover FIR. If calculation is slow, turn Auto OFF, finish adjusting, then press Recalculate."
   },
   "ui.5531f87fbc78dd": {
     "source": "FIR出力がOFFですが、FIRクロスまたはFIR処理が設定されています。DSP FIR出力をONにするか、FIR処理を外してください。",

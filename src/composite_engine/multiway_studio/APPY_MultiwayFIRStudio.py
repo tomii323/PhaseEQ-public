@@ -66,6 +66,7 @@ from composite_engine.multiway_studio.processing.crossover_controls import (
 )
 from composite_engine.multiway_studio.processing.render_policy import (
     should_generate_result,
+    should_warn_about_kaiser_recalculation,
 )
 from composite_engine.multiway_studio.utils.io import load_fir_file
 import composite_engine.multiway_studio.components.visualization as visualization
@@ -3552,25 +3553,13 @@ conf_signature = json.dumps({
     ],
     'studio_dsp_input_signature': studio_dsp_signature,
 }, ensure_ascii=False, sort_keys=True)
-if mode_key == "Fullrange":
-    estimated_taps = 1
-elif mode_key == "3Way":
-    estimated_taps = int(max(
-        fs / max(conf['cross_freqs'][0], 1) * conf.get('cycles_low', conf['cycles']),
-        fs / max(conf['cross_freqs'][1], 1) * conf.get('cycles_high', conf['cycles']),
-        1,
-    ))
-elif mode_key == "4Way":
-    estimated_taps = int(max(
-        fs / max(conf['cross_freqs'][0], 1) * conf.get('cycles_sub_low', conf['cycles']),
-        fs / max(conf['cross_freqs'][1], 1) * conf.get('cycles_low_mid', conf['cycles']),
-        fs / max(conf['cross_freqs'][2], 1) * conf.get('cycles_mid_high', conf['cycles']),
-        1,
-    ))
-else:
-    estimated_taps = int(max(1, fs / max(min(conf['cross_freqs']), 1) * conf['cycles']))
-if estimated_taps > 1800:
-    st.warning(ui_message('ui.376d2f2901a29a'))
+if should_warn_about_kaiser_recalculation(
+    fir_output_enabled=bool(conf.get('fir_output_enabled', False)),
+    auto_update=bool(auto_update),
+    sample_rate_hz=int(fs),
+    band_filters=_assignment_band_linear_fir_filters(mode_key, conf),
+):
+    st.warning(ui_message('ui.efdbe8e357b0a6'))
 
 last_conf_signature = st.session_state.get('last_conf_signature')
 signature_changed = last_conf_signature != conf_signature

@@ -10,7 +10,7 @@ Windows版はPython 3.12／3.13のx64を対象とします。Windows 11 ARMで�
 
 ## 配布物とマニュアル
 
-リリースZIPを展開すると、`docs/distribution/manual/` に[画像付き操作マニュアル（PDF）](manual/PhaseEQ_v1.20.24_画像付き操作マニュアル_日本語.pdf)があります。PDF表紙の対応版を確認してください。通常の利用にテスト環境の構築は不要です。テスト・開発文書・開発用スクリプトはZIPに含みません。実行用ソースは[一般公開リポジトリ](https://github.com/tomii323/PhaseEQ-public)から取得できます。
+リリースZIPを展開すると、`docs/distribution/manual/` に[画像付き操作マニュアル（PDF）](manual/PhaseEQ_v1.20.26_画像付き操作マニュアル_日本語.pdf)があります。PDF表紙の対応版を確認してください。通常の利用にテスト環境の構築は不要です。テスト・開発文書・開発用スクリプトはZIPに含みません。実行用ソースは[一般公開リポジトリ](https://github.com/tomii323/PhaseEQ-public)から取得できます。
 
 ## 新版へ更新する
 
