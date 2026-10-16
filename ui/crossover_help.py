@@ -6,8 +6,15 @@ from composite_engine.crossover_help import (
     method_usage_text, setup_guide_text,
 )
 from composite_engine.kaiser_help import KAISER_SLOPE_GUIDE
+from composite_engine.phase_alignment_help import structural_phase_guide_text, structural_phase_labels
 from utils.ui_language import current_language
 from utils.ui_localization import display_text, ui_message
+
+
+def render_structural_phase_guide() -> None:
+    language = current_language()
+    with st.expander(structural_phase_labels(language)['title'], expanded=False):
+        st.markdown(structural_phase_guide_text(language))
 
 
 def render_filter_comparison(*, expandable: bool = False) -> None:

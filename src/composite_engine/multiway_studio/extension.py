@@ -3632,6 +3632,9 @@ def _system_alignment_context(
 
 
 def _render_alignment_target_control(mode):
+    from composite_engine.phase_alignment_help import structural_phase_labels
+    from ui.crossover_help import render_structural_phase_guide
+    from utils.ui_language import current_language
     settings = st.session_state.get("settings", {})
     automatic_key = "composite_alignment_auto_structure"
     st.session_state[automatic_key] = bool(settings.get("phase_alignment_auto_structure", False))
@@ -3646,7 +3649,8 @@ def _render_alignment_target_control(mode):
         )
     st.checkbox(display_text("位相構造補償を自動適用"), key=automatic_key,
                 on_change=automatic_changed,
-                help=display_text("ONではWay・分割方式・分割周波数に合わせて理論配置を更新します。適用ボタンは時間整合だけを実行します。ONからOFFへ切り替えると自動補償を解除し、Delayと極性は維持します。"))
+                help=structural_phase_labels(current_language())['tooltip'])
+    render_structural_phase_guide()
     selected = bool(settings.get(mode, {}).get("phase_alignment_acoustic_target", False))
     key = f"composite_alignment_target_{mode}"
     st.session_state[key] = selected
