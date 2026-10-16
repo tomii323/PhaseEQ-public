@@ -79,6 +79,7 @@ class DSPChannelExportInput:
     cosine_taper_protected_center_taps: int | None = None
     final_window_applied: bool = False
     basic_fir_taps: int = 1
+    output_reference_delay_samples: float = 0.0
 
 
 def compose_channel_fir(channel: DSPChannelExportInput) -> np.ndarray:
@@ -254,6 +255,7 @@ def build_dsp_resume_zip(
             effective_dsp_delay
             + float(channel.channel_relative_delay_samples)
             + float(channel.auto_alignment_delay_samples)
+            - float(channel.output_reference_delay_samples)
         )
         if requested_dsp_delay < 0.0 or total_delay < 0.0:
             raise ValueError(f"negative DSP delay: {channel.name}")
@@ -295,6 +297,8 @@ def build_dsp_resume_zip(
                 "dsp_additional_automatic": False,
                 "channel_relative_samples": float(channel.channel_relative_delay_samples),
                 "auto_alignment_samples": float(channel.auto_alignment_delay_samples),
+                **({"reference_reduction_samples": float(channel.output_reference_delay_samples)}
+                   if channel.output_reference_delay_samples else {}),
                 "total_samples": total_delay,
                 "application": "frequency_domain_phase_rotation",
             },

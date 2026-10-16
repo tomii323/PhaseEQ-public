@@ -52,3 +52,16 @@ def timing_for_asset(result, asset):
     if asset is not None and not asset["phase_available"]:
         timing["phase_origin"] = "missing"
     return timing
+
+
+def commit_speaker_snapshot(row, result, asset):
+    """Replace the optional speaker/time pair after all receipt checks pass."""
+    timing = timing_for_asset(result, asset)
+    if asset is None:
+        row.pop('phaseeq_speaker_response', None)
+    else:
+        row['phaseeq_speaker_response'] = asset
+    if timing is None:
+        row.pop('timing_provenance', None)
+    else:
+        row['timing_provenance'] = timing

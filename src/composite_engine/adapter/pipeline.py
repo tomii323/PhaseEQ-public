@@ -42,6 +42,7 @@ class ChannelPipelineInput:
     auto_alignment_allpass: tuple[AllPassSection, ...] = ()
     iir_sos: tuple[tuple[float, ...], ...] = ()
     speaker_relative_timing_samples: float = 0.0
+    output_reference_delay_samples: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -54,7 +55,7 @@ class GroupTargetInput:
     edit_payload: dict[str, object] | None = None
 
 
-@content_cached(revision="composite-channel-evaluation-v3", max_entries=4, max_bytes=64*1024*1024)
+@content_cached(revision="composite-channel-evaluation-v4", max_entries=4, max_bytes=64*1024*1024)
 def build_channel_pipelines(
     sample_rate_hz: int,
     channels: list[ChannelPipelineInput],
@@ -169,6 +170,7 @@ def build_channel_pipelines(
             float(channel.dsp_additional_delay_samples)
             + float(channel.delay_samples)
             + float(channel.auto_alignment_delay_samples)
+            - float(channel.output_reference_delay_samples)
         )
         if int(channel.polarity) < 0:
             continuous_phase += np.pi

@@ -25,6 +25,7 @@ def output_timing_rows(
         )
         taper_protection = (taper_protection_taps or {}).get(channel.way)
         identity = {"出力CH": channel.output_index, "グループ": channel.group, "チャンネル": channel.name}
+        terms = (channel.adaptive_crop_metadata or {}).get("delay_breakdown", {})
         summary.append({
             **identity,
             "最終FIRタップ数": taps if taps is not None else "—",
@@ -43,7 +44,16 @@ def output_timing_rows(
             "整列前FIRタップ数": pre_alignment_taps if pre_alignment_taps is not None else "—",
             "整列追加zero [taps]": alignment_padding if alignment_padding is not None else "—",
             "最終FIRタップ数": taps if taps is not None else "—",
-            "FIR長差Delay [samples]": round(channel.fir_alignment_delay_samples, 6),
+            "FIR長差Delay [samples]": round(float(terms.get("fir_base", channel.fir_alignment_delay_samples)), 6),
+            "FIR理論差補償 [samples]": round(float(
+                (channel.adaptive_crop_metadata or {}).get("theoretical_alignment_delay_samples", 0.0)
+            ), 6),
+            "FIR起点補償 [samples]": round(float(terms.get("fir_origin", 0.0)), 6),
+            "測定到達差 [samples]": terms.get("speaker_arrival", "—") if terms.get("speaker_arrival") is not None else "—",
+            "測定補正 [samples]": round(float(terms.get("measurement", 0.0)), 6),
+            "共通オフセット [samples]": round(float(terms.get("common", 0.0)), 6),
+            "共通基準差引 [samples]": round(channel.output_reference_delay_samples, 6),
+            "DSP追加Delay合計 [samples]": round(channel.total_delay_samples, 6),
             "手動Delay [samples]": round(channel.manual_delay_samples, 6),
             "整合Delay [samples]": round(channel.phase_alignment_delay_samples, 6),
             "Adaptive削減 [taps]": (
@@ -59,3 +69,24 @@ def output_timing_rows(
             ),
         })
     return summary, details
+
+
+def delay_breakdown_rows(package):
+    """Render correction terms from the committed artifact, never recalculate them."""
+    labels = (("fir_origin", "FIR起点補償"), ("fir_difference", "FIR理論差補償"),
+              ("measurement", "測定補正"), ("way", "Way相対Delay"),
+              ("alignment", "整合Delay残り"), ("common", "共通オフセット"))
+    rows = []
+    for channel in package.channels:
+        terms = (channel.adaptive_crop_metadata or {}).get("delay_breakdown", {})
+        if not terms:
+            continue
+        scale = 1000.0 / channel.sample_rate_hz
+        row = {"出力CH": channel.output_index, "チャンネル": channel.name}
+        row.update({label + " [ms]": round(float(terms[key]) * scale, 6) for key, label in labels})
+        row["共通基準差引 [ms]"] = round(channel.output_reference_delay_samples * scale, 6)
+        row["DSP追加Delay合計 [ms]"] = round(channel.total_delay_samples * scale, 6)
+        row["測定到達差 [ms]"] = (f"{terms['speaker_arrival'] * scale:.6f}"
+                                  if terms.get("speaker_arrival") is not None else "—")
+        rows.append(row)
+    return rows

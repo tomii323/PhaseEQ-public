@@ -2599,20 +2599,20 @@
     "ja": "背景帯は入力外への追加範囲です。P0のブレンド等で変化した入力内の点は次の範囲です。",
     "en": "Background bands show additions outside the input range. Points changed inside the input band by P0 blending or related processing are listed below."
   },
-  "ui.f3b48189c4a32a": {
-    "source": "Speaker時間応答：帯域外補完を含む有限長推定。補完の影響を時間区間へ分割して表示するものではありません。",
-    "ja": "Speaker時間応答：帯域外補完を含む有限長推定。補完の影響を時間区間へ分割して表示するものではありません。",
-    "en": "Speaker time response: a finite-length estimate including out-of-band extrapolation. It does not separate extrapolation effects into time intervals."
+  "ui.ccb855538d3c5b": {
+    "source": "Speaker時間応答：帯域外補完を含む有限長の推定波形です。補完した周波数成分も波形全体の計算に含めます。",
+    "ja": "Speaker時間応答：帯域外補完を含む有限長の推定波形です。補完した周波数成分も波形全体の計算に含めます。",
+    "en": "Speaker time response: a finite-length estimated waveform including out-of-band completion. Completed frequency components contribute to the calculation of the whole waveform."
   },
   "ui.e352b72c472910": {
     "source": "このErrorは、IIR適用後のSpeaker/InputとTarget Responseの差です。FIR誤差ではありません。",
     "ja": "このErrorは、IIR適用後のSpeaker/InputとTarget Responseの差です。FIR誤差ではありません。",
     "en": "This error is the difference between Speaker/Input after IIR processing and the Target Response. It is not FIR error."
   },
-  "ui.f980e485e5eea2": {
-    "source": "FIR Filter cofs：現在のFIR係数。Export FIRでは最終出力。dBは係数の絶対値で、周波数応答ではありません。",
-    "ja": "FIR Filter cofs：現在のFIR係数。Export FIRでは最終出力。dBは係数の絶対値で、周波数応答ではありません。",
-    "en": "FIR Filter coefficients: current FIR coefficients, or final output in Export FIR. dB represents coefficient magnitude, not frequency response."
+  "ui.104a0203b38e55": {
+    "source": "FIR Filter cofs：現在のFIR係数です。Export FIRでは最終出力係数を表示します。横軸はタップ位置、dBは係数の絶対値（基準1.0）です。",
+    "ja": "FIR Filter cofs：現在のFIR係数です。Export FIRでは最終出力係数を表示します。横軸はタップ位置、dBは係数の絶対値（基準1.0）です。",
+    "en": "FIR Filter cofs: the current FIR coefficients. Export FIR shows the final output coefficients. The horizontal axis is tap position; dB shows coefficient magnitude relative to 1.0."
   },
   "ui.398878217b45b5": {
     "source": "LR2クロス極性補償: {p0}。SOS・FIR係数には含みません。外部DSPではユーザー極性と別に1回適用してください。Multiwayへ戻す場合はMultiwayが適用します。",
@@ -6149,15 +6149,15 @@
     "ja": "サンプリング周波数÷基準クロス周波数×周期数を生成処理と同じ奇数化で計算。EQ合成・自動クロップ・最終出力タップ長の調整前の目安です。",
     "en": "Calculated as sample rate ÷ reference crossover frequency × cycles, rounded to an odd count as in generation. This is an estimate before EQ composition, automatic cropping, and final output-length adjustment."
   },
-  "ui.cecdffbccd548d": {
-    "source": "周期数と減衰スロープの目安",
-    "ja": "周期数と減衰スロープの目安",
-    "en": "Cycles and attenuation slope guide"
+  "ui.f753e49eab7a4f": {
+    "source": "カイザー窓の使い方",
+    "ja": "カイザー窓の使い方",
+    "en": "Kaiser window guide"
   },
-  "ui.d4c03ac7b71f1d": {
-    "source": "PhaseEQの周期数入力範囲は{p0}〜{p1}です。表には範囲外の参考値も含みます。",
-    "ja": "PhaseEQの周期数入力範囲は{p0}〜{p1}です。表には範囲外の参考値も含みます。",
-    "en": "PhaseEQ accepts cycles from {p0} to {p1}. The table also includes reference values outside this range."
+  "ui.02000caed3f3ee": {
+    "source": "PhaseEQの周期数入力範囲は{p0}〜{p1}です。表を目安に、生成後の特性を確認してください。",
+    "ja": "PhaseEQの周期数入力範囲は{p0}〜{p1}です。表を目安に、生成後の特性を確認してください。",
+    "en": "PhaseEQ accepts cycles from {p0} to {p1}. Use the table as a starting point and inspect the generated response."
   },
   "ui.4a54d8e4b20cab": {
     "source": "Multiwayと同じ数値算出。LP・HPそれぞれ5 Hz〜Nyquistのうち目標応答−{p0} dB以上を評価し、最大誤差0.05 dB以内となる長さです。周期数とβ値は使用しません。必要タップ数の表示だけでは現在の生成長を変更しません。EQ合成・出力調整前の境界FIRの精度です。",
@@ -6239,10 +6239,10 @@
     "ja": "使い方の流れ",
     "en": "Workflow"
   },
-  "ui.036e81f58e864a": {
-    "source": "\n        1. 左サイドバーで分割方式、サンプリング周波数、クロスオーバーを設定します。\n        2. 各クロスを上側から順に、周波数、周期数、β値、重ね代を調整します。\n        3. SUBが必要な場合はFullrange+SUB、2Way+SUB、3Way+SUB、4Way+SUBを選択します。\n        4. 必要に応じてバッフル補正、タップ長、EQファイル、出力形式を設定します。\n        5. グラフの変化を確認し、問題なければ各帯域のFIRをダウンロードします。\n        ",
-    "ja": "\n        1. 左サイドバーで分割方式、サンプリング周波数、クロスオーバーを設定します。\n        2. 各クロスを上側から順に、周波数、周期数、β値、重ね代を調整します。\n        3. SUBが必要な場合はFullrange+SUB、2Way+SUB、3Way+SUB、4Way+SUBを選択します。\n        4. 必要に応じてバッフル補正、タップ長、EQファイル、出力形式を設定します。\n        5. グラフの変化を確認し、問題なければ各帯域のFIRをダウンロードします。\n        ",
-    "en": "1. Set the split layout, sample rate, and crossovers in the left sidebar.\n2. For each crossover, working from the highest down, adjust frequency, cycles, beta, and overlap.\n3. For a subwoofer, select Fullrange+SUB, 2Way+SUB, 3Way+SUB, or 4Way+SUB.\n4. Set baffle correction, tap lengths, EQ files, and output formats as needed.\n5. Inspect the graphs, then download the FIR for each band."
+  "ui.37b928da340994": {
+    "source": "1. 左サイドバーで分割方式を選び、設定内のサンプリング周波数を確認します。SUBが必要な場合は各方式の+SUBを選択します。\n2. 各クロスを上側から順に、分割方式と周波数を設定します。カイザー窓FIRでは周期数、β値、必要に応じて重ね代を調整します。\n3. FIR出力のON／OFFを決め、FIRを使う場合はタップ長や自動クロップを確認します。必要に応じてバッフル補正、EQファイル、出力形式を設定します。\n4. システム構成・PhaseEQ連携でチャンネルと目標特性を設定し、PhaseEQの測定データを各チャンネルに割り当てます。\n5. 必要に応じてPhaseEQへ送信し、各チャンネルのIIR／FIR補正を調整してマルチウェイへ返します。目標やクロスを変更した場合は再送信して補正を更新します。\n6. 再計算してグラフとSystem Sumを確認し、必要に応じてゲイン、極性、位相・時間整合を調整します。\n7. System Libraryと作業バックアップに保存し、問題なければ各帯域のFIRや、互換性を確認した実機DSP用パッケージをダウンロードします。",
+    "ja": "1. 左サイドバーで分割方式を選び、設定内のサンプリング周波数を確認します。SUBが必要な場合は各方式の+SUBを選択します。\n2. 各クロスを上側から順に、分割方式と周波数を設定します。カイザー窓FIRでは周期数、β値、必要に応じて重ね代を調整します。\n3. FIR出力のON／OFFを決め、FIRを使う場合はタップ長や自動クロップを確認します。必要に応じてバッフル補正、EQファイル、出力形式を設定します。\n4. システム構成・PhaseEQ連携でチャンネルと目標特性を設定し、PhaseEQの測定データを各チャンネルに割り当てます。\n5. 必要に応じてPhaseEQへ送信し、各チャンネルのIIR／FIR補正を調整してマルチウェイへ返します。目標やクロスを変更した場合は再送信して補正を更新します。\n6. 再計算してグラフとSystem Sumを確認し、必要に応じてゲイン、極性、位相・時間整合を調整します。\n7. System Libraryと作業バックアップに保存し、問題なければ各帯域のFIRや、互換性を確認した実機DSP用パッケージをダウンロードします。",
+    "en": "1. Select the split layout in the left sidebar and check the sample rate in Settings. Select a +SUB layout if a subwoofer is needed.\n2. Set each crossover type and frequency, working from the highest down. For Kaiser-window FIR, adjust cycles, beta, and overlap as needed.\n3. Choose whether to enable FIR output; when using FIR, check tap lengths or auto crop. Set baffle correction, EQ files, and output formats as needed.\n4. Set channels and targets in System Configuration / PhaseEQ Integration, then assign PhaseEQ measurement data to each channel.\n5. Send to PhaseEQ as needed, adjust each channel's IIR/FIR correction, and return the results to Multiway. After changing targets or crossovers, resend and update the correction.\n6. Recalculate and inspect the graphs and System Sum; adjust gain, polarity, and phase/time alignment as needed.\n7. Save to System Library and a work backup, then download the FIR files or a hardware DSP package after checking compatibility."
   },
   "ui.4ed43f6a263b49": {
     "source": "設定をレジュームしました: {p0}",
@@ -6529,10 +6529,10 @@
     "ja": "補助出力：帯域分割FIR係数だけを保存",
     "en": "Auxiliary export: crossover FIR coefficients only"
   },
-  "ui.7ef69576f39670": {
-    "source": "帯域別FIR係数だけが必要な場合に使用します。Systemの編集状態、PhaseEQ、IIR、Delayを含む最終DSPパッケージではありません。",
-    "ja": "帯域別FIR係数だけが必要な場合に使用します。Systemの編集状態、PhaseEQ、IIR、Delayを含む最終DSPパッケージではありません。",
-    "en": "Use when only per-band FIR coefficients are needed. This is not a final DSP package containing System edits, PhaseEQ, IIR, and delay."
+  "ui.03bdda677f6e49": {
+    "source": "帯域別FIR係数だけが必要な場合に使います。設計の再開用には作業バックアップ、実機への適用には実機DSP用パッケージを保存します。",
+    "ja": "帯域別FIR係数だけが必要な場合に使います。設計の再開用には作業バックアップ、実機への適用には実機DSP用パッケージを保存します。",
+    "en": "Use this when only the per-band FIR coefficients are needed. Save a working backup to resume the design, or a DSP device package to apply it to hardware."
   },
   "ui.96028ebbcd7e1c": {
     "source": "現在の出力形式: {p0} / 最長タップへ整列: {p1}",
@@ -6839,10 +6839,10 @@
     "ja": "複製",
     "en": "Duplicate"
   },
-  "ui.980090d64fdf82": {
-    "source": "編集を続けるための設計状態をSystem Libraryへ保存します。FIR係数や実機DSP用ファイルの出力ではありません。",
-    "ja": "編集を続けるための設計状態をSystem Libraryへ保存します。FIR係数や実機DSP用ファイルの出力ではありません。",
-    "en": "Save the design state to System Library for further editing. Does not export FIR coefficients or hardware DSP files."
+  "ui.6943392fcc2551": {
+    "source": "編集を続けるための設計状態をSystem Libraryへ保存します。係数や実機用ファイルは「保存・出力」の各操作で保存します。",
+    "ja": "編集を続けるための設計状態をSystem Libraryへ保存します。係数や実機用ファイルは「保存・出力」の各操作で保存します。",
+    "en": "Save the design state to System Library to continue editing. Save coefficients or hardware files using the relevant Save / Export operation."
   },
   "ui.03857f0c1902b8": {
     "source": "System名",
@@ -7119,10 +7119,10 @@
     "ja": "#### 1. 解析用Group応答を保存",
     "en": "#### 1. Save group responses for analysis"
   },
-  "ui.5030f55faa4563": {
-    "source": "各Groupの合成応答、IR、レポートをZIPへ保存します。実機DSPへ直接投入するパッケージではありません。",
-    "ja": "各Groupの合成応答、IR、レポートをZIPへ保存します。実機DSPへ直接投入するパッケージではありません。",
-    "en": "Save each group's summed response, IR, and reports to a ZIP. This is not a package for direct hardware DSP deployment."
+  "ui.b6e2bccf1a3116": {
+    "source": "各Groupの合成応答、IR、レポートを解析用ZIPへ保存します。実機への適用には実機DSP用パッケージを保存します。",
+    "ja": "各Groupの合成応答、IR、レポートを解析用ZIPへ保存します。実機への適用には実機DSP用パッケージを保存します。",
+    "en": "Save each Group’s summed response, IR and report in a ZIP for analysis. Save a DSP device package to apply the design to hardware."
   },
   "ui.be36fc8da8ee9e": {
     "source": "解析用Group応答ZIPをダウンロード",
@@ -7169,10 +7169,10 @@
     "ja": "{p0} 音響ターゲット補正の使い方",
     "en": "{p0} acoustic target correction guide"
   },
-  "ui.d83ea615703db4": {
-    "source": "**スピーカーから出る音の特性を、LRカーブに近づけたいときに使います。**\n\n例えばHigh / Lowでは、Highは低域を落とすHP、Lowは高域を落とすLPを目標にします。選択中の共通TargetにこのLRカーブを合成し、各Wayの測定との差から補正FIRを作ります。\n\n- **ON**：PhaseEQのTargetへ反映。この境界の分割FIR／IIRは重ねて出力しません。補正FIRと位相・時間整合は出力します。\n- **OFF**：この境界をTargetへ反映せず、通常の分割FIR／IIRを出力します。他の境界はそれぞれのON／OFF設定に従います。\n\n**操作手順**\n\n1. 分割方式とクロス周波数を設定し、ONにして「PhaseEQへ送信（全チャンネル）」を押します。\n2. PhaseEQで各Wayの振幅・位相を含む測定データを適用します。外部ネットワークを使う場合は、その適用後の測定を使います。\n3. Response Processingの「レベル合わせ」で入力をTargetへ合わせ、Targetと最終特性を確認します。\n4. 各Wayの補正FIRを「マルチウェイへ送信」で返し、Multiwayで合成特性と位相・時間整合を確認します。\n\nリニアフェーズLRはIIRの振幅カーブを使い、目標位相を0°にします。LR IIRはIIRの振幅・位相を使います（共通Targetの特性には合成されます）。\n\n補正範囲は実測帯域内・最低5 Hz、最大ブースト+6 dB／最大カット120 dBです。タップ数や測定特性により目標へ完全には一致しません。方式・周波数・ON／OFFを変えたら、再送信して各Wayの補正FIRを更新してください。",
-    "ja": "**スピーカーから出る音の特性を、LRカーブに近づけたいときに使います。**\n\n例えばHigh / Lowでは、Highは低域を落とすHP、Lowは高域を落とすLPを目標にします。選択中の共通TargetにこのLRカーブを合成し、各Wayの測定との差から補正FIRを作ります。\n\n- **ON**：PhaseEQのTargetへ反映。この境界の分割FIR／IIRは重ねて出力しません。補正FIRと位相・時間整合は出力します。\n- **OFF**：この境界をTargetへ反映せず、通常の分割FIR／IIRを出力します。他の境界はそれぞれのON／OFF設定に従います。\n\n**操作手順**\n\n1. 分割方式とクロス周波数を設定し、ONにして「PhaseEQへ送信（全チャンネル）」を押します。\n2. PhaseEQで各Wayの振幅・位相を含む測定データを適用します。外部ネットワークを使う場合は、その適用後の測定を使います。\n3. Response Processingの「レベル合わせ」で入力をTargetへ合わせ、Targetと最終特性を確認します。\n4. 各Wayの補正FIRを「マルチウェイへ送信」で返し、Multiwayで合成特性と位相・時間整合を確認します。\n\nリニアフェーズLRはIIRの振幅カーブを使い、目標位相を0°にします。LR IIRはIIRの振幅・位相を使います（共通Targetの特性には合成されます）。\n\n補正範囲は実測帯域内・最低5 Hz、最大ブースト+6 dB／最大カット120 dBです。タップ数や測定特性により目標へ完全には一致しません。方式・周波数・ON／OFFを変えたら、再送信して各Wayの補正FIRを更新してください。",
-    "en": "**Use this to bring the speaker's acoustic response toward an LR curve.**\n\nFor High/Low, High targets an HP curve that attenuates bass, and Low targets an LP curve that attenuates treble. This LR curve is combined with the selected common Target, and a correction FIR is created from each Way's measured difference.\n\n- **ON**: reflected in the PhaseEQ Target. This boundary's crossover FIR/IIR is not output again. Correction FIR and phase/time alignment are output.\n- **OFF**: this boundary is not added to the Target; normal crossover FIR/IIR is output. Other boundaries follow their own ON/OFF settings.\n\n**Procedure**\n\n1. Set crossover method/frequency, turn ON, and click Send to PhaseEQ (all channels).\n2. Apply gain-and-phase measurements for each Way in PhaseEQ. With an external crossover, use measurements made after it.\n3. Match Input to Target under Response Processing > Level matching, then inspect the Target and final response.\n4. Return each Way's correction FIR using Send to Multiway, then inspect the sum and phase/time alignment in Multiway.\n\nLinear-phase LR uses the IIR magnitude curve with target phase set to 0°. LR IIR uses IIR magnitude and phase, combined with the common Target.\n\nCorrection is limited to the measured band, no lower than 5 Hz, with maximum boost +6 dB and cut 120 dB. Finite tap counts and measurement characteristics may prevent an exact match. After changing method, frequency, or ON/OFF, resend and update each Way's correction FIR."
+  "ui.f316df0f81421e": {
+    "source": "**スピーカーから出る音の特性を、LRカーブに近づけたいときに使います。**\n\n例えばHigh / Lowでは、Highは低域を落とすHP、Lowは高域を落とすLPを目標にします。選択中の共通TargetにこのLRカーブを合成し、各Wayの測定との差を、PhaseEQで設定したIIR／FIR EQで補正します。\n\n- **ON**：PhaseEQのTargetへ反映。この境界の分割FIR／IIRは重ねて出力しません。設定したIIR／FIR補正と位相・時間整合は出力します。\n- **OFF**：この境界をTargetへ反映せず、通常の分割FIR／IIRを出力します。他の境界はそれぞれのON／OFF設定に従います。\n\n**操作手順**\n\n1. 分割方式とクロス周波数を設定し、ONにして「PhaseEQへ送信（全チャンネル）」を押します。\n2. PhaseEQで各Wayの振幅・位相を含む測定データを適用します。外部ネットワークを使う場合は、その適用後の測定を使います。\n3. Response Processingの「レベル合わせ」で入力をTargetへ合わせます。手動EQまたはAuto Gain／Auto Phaseで必要な補正を設定し、Targetと最終特性を確認します。FIR OFFの場合はIIRイコライザーで補正します。\n4. 各WayのIIR／FIR補正を「マルチウェイへ送信」で返し、Multiwayで再計算して合成特性と位相・時間整合を確認します。\n\nリニアフェーズLRはIIRの振幅カーブを使い、目標位相を0°にします。LR IIRはIIRの振幅・位相を使います（共通Targetの特性には合成されます）。\n\n補正範囲は実測帯域内・最低5 Hz、最大ブースト+6 dB／最大カット120 dBです。タップ数や測定特性により目標へ完全には一致しません。方式・周波数・ON／OFFを変えたら、再送信して各Wayの補正を更新してください。",
+    "ja": "**スピーカーから出る音の特性を、LRカーブに近づけたいときに使います。**\n\n例えばHigh / Lowでは、Highは低域を落とすHP、Lowは高域を落とすLPを目標にします。選択中の共通TargetにこのLRカーブを合成し、各Wayの測定との差を、PhaseEQで設定したIIR／FIR EQで補正します。\n\n- **ON**：PhaseEQのTargetへ反映。この境界の分割FIR／IIRは重ねて出力しません。設定したIIR／FIR補正と位相・時間整合は出力します。\n- **OFF**：この境界をTargetへ反映せず、通常の分割FIR／IIRを出力します。他の境界はそれぞれのON／OFF設定に従います。\n\n**操作手順**\n\n1. 分割方式とクロス周波数を設定し、ONにして「PhaseEQへ送信（全チャンネル）」を押します。\n2. PhaseEQで各Wayの振幅・位相を含む測定データを適用します。外部ネットワークを使う場合は、その適用後の測定を使います。\n3. Response Processingの「レベル合わせ」で入力をTargetへ合わせます。手動EQまたはAuto Gain／Auto Phaseで必要な補正を設定し、Targetと最終特性を確認します。FIR OFFの場合はIIRイコライザーで補正します。\n4. 各WayのIIR／FIR補正を「マルチウェイへ送信」で返し、Multiwayで再計算して合成特性と位相・時間整合を確認します。\n\nリニアフェーズLRはIIRの振幅カーブを使い、目標位相を0°にします。LR IIRはIIRの振幅・位相を使います（共通Targetの特性には合成されます）。\n\n補正範囲は実測帯域内・最低5 Hz、最大ブースト+6 dB／最大カット120 dBです。タップ数や測定特性により目標へ完全には一致しません。方式・周波数・ON／OFFを変えたら、再送信して各Wayの補正を更新してください。",
+    "en": "**Use this to bring the speaker's acoustic response toward an LR curve.**\n\nFor High/Low, High targets an HP curve that attenuates bass, and Low targets an LP curve that attenuates treble. This LR curve is combined with the selected common Target. Correct each Way's measured difference using IIR/FIR EQ configured in PhaseEQ.\n\n- **ON**: reflected in the PhaseEQ Target. This boundary's crossover FIR/IIR is not output again. Configured IIR/FIR correction and phase/time alignment are output.\n- **OFF**: this boundary is not added to the Target; normal crossover FIR/IIR is output. Other boundaries follow their own ON/OFF settings.\n\n**Procedure**\n\n1. Set crossover method/frequency, turn ON, and click Send to PhaseEQ (all channels).\n2. Apply gain-and-phase measurements for each Way in PhaseEQ. With an external crossover, use measurements made after it.\n3. Match Input to Target under Response Processing > Level matching. Set the required correction using manual EQ or Auto Gain / Auto Phase, then inspect Target and final response. With FIR OFF, use IIR EQ.\n4. Return each Way's IIR/FIR correction using Send to Multiway, then recalculate and inspect the sum and phase/time alignment in Multiway.\n\nLinear-phase LR uses the IIR magnitude curve with target phase set to 0°. LR IIR uses IIR magnitude and phase, combined with the common Target.\n\nCorrection is limited to the measured band, no lower than 5 Hz, with maximum boost +6 dB and cut 120 dB. Finite tap counts and measurement characteristics may prevent an exact match. After changing method, frequency, or ON/OFF, resend and update each Way's correction."
   },
   "ui.84b18256a3c4a5": {
     "source": "Revision to restore",
@@ -13139,10 +13139,10 @@
     "ja": "FIR周期数 (Cycles)",
     "en": "FIR cycles"
   },
-  "ui.1b911b58f117e7": {
-    "source": "クロス周波数を基準に、何周期分の長さを使うかを決めます。初期値5.3はクロスの切れを優先した値です。",
-    "ja": "クロス周波数を基準に、何周期分の長さを使うかを決めます。初期値5.3はクロスの切れを優先した値です。",
-    "en": "Length in cycles at the crossover frequency. The default 5.3 prioritizes a sharp crossover."
+  "ui.751f17f2585c2c": {
+    "source": "クロス周波数を基準に、何周期分の長さを使うかを決めます。初期値5.30はクロスの切れを優先した値です。",
+    "ja": "クロス周波数を基準に、何周期分の長さを使うかを決めます。初期値5.30はクロスの切れを優先した値です。",
+    "en": "Length in cycles at the crossover frequency. The default 5.30 prioritizes a sharp crossover."
   },
   "ui.b9adc18c131e99": {
     "source": "カイザー窓β値",
@@ -13174,10 +13174,10 @@
     "ja": "High/Mid側 FIR周期数",
     "en": "High/Mid FIR cycles"
   },
-  "ui.a87567900297c7": {
-    "source": "HighとMid上側の基準になる長さです。初期値5.3はクロスの切れを優先した値です。",
-    "ja": "HighとMid上側の基準になる長さです。初期値5.3はクロスの切れを優先した値です。",
-    "en": "Reference length for High and the upper side of Mid. The default 5.3 prioritizes a sharp crossover."
+  "ui.58589c536da4d6": {
+    "source": "HighとMid上側の基準になる長さです。初期値5.30はクロスの切れを優先した値です。",
+    "ja": "HighとMid上側の基準になる長さです。初期値5.30はクロスの切れを優先した値です。",
+    "en": "Reference length for High and the upper side of Mid. The default 5.30 prioritizes a sharp crossover."
   },
   "ui.e529de8f4249e0": {
     "source": "High/Mid側 カイザー窓β値",
@@ -14144,10 +14144,10 @@
     "ja": "目標減衰 約{p0}dB（設計目安）｜{p1}｜カイザー窓FIR 約{p2} taps",
     "en": "Target attenuation approx. {p0} dB (design guide) | {p1} | Kaiser-window FIR approx. {p2} taps"
   },
-  "ui.ea4e8f695d4905": {
-    "source": "### 周期数と減衰スロープの目安\n\nカイザーHPの周期数だけを調整した比較です。**96 kHz・クロス1 kHz・重ね合わせなし**で、\n**−20〜−100 dB間の平均減衰スロープ**を評価しました。表の数値は設定周期数です。\n\n| 目標減衰 | β＝8 | β＝10 | β＝12 | β＝14 | β＝15 | β＝16 |\n|---|---:|---:|---:|---:|---:|---:|\n| −24 dB/oct | 2.7292 | 3.4167 | 4.0000 | 4.5000 | 4.7292 | 4.9583 |\n| −48 dB/oct | 3.2083 | 4.1042 | 4.7917 | 5.4375 | 5.7292 | 6.0000 |\n| −72 dB/oct | 3.8542 | 4.8542 | 5.7292 | 6.5000 | 6.8750 | 7.2083 |\n| −96 dB/oct | 4.4792 | 5.6250 | 6.6875 | 7.6250 | 8.0417 | 8.4583 |\n| −192 dB/oct | 6.8750 | 8.8958 | 10.6458 | 12.2083 | 12.8958 | 13.5625 |\n\n周期数は2.7〜15.0、小数4桁で直接入力できます。キーボードと±ボタンの増減ステップは0.1です。表のすべての値を設定できます。\n\n- 平均の傾きの目安であり、途中の傾きが一定になることや、LRの振幅曲線との一致を意味しません。\n- −100 dBは傾きを測る端点です。阻止帯域全体が−100 dB以下になる保証ではありません。\n- 平均傾きの誤差は、−24 dB/octのβ＝8・10・12で約1.26・1.05・1.27%、その他は1%以内でした。\n- 別のサンプルレートやクロス周波数では同じ精度を保証しません。周期数を細かく変えても、奇数化後のタップ数が同じなら特性は変わりません。\n",
-    "ja": "### 周期数と減衰スロープの目安\n\nカイザーHPの周期数だけを調整した比較です。**96 kHz・クロス1 kHz・重ね合わせなし**で、\n**−20〜−100 dB間の平均減衰スロープ**を評価しました。表の数値は設定周期数です。\n\n| 目標減衰 | β＝8 | β＝10 | β＝12 | β＝14 | β＝15 | β＝16 |\n|---|---:|---:|---:|---:|---:|---:|\n| −24 dB/oct | 2.7292 | 3.4167 | 4.0000 | 4.5000 | 4.7292 | 4.9583 |\n| −48 dB/oct | 3.2083 | 4.1042 | 4.7917 | 5.4375 | 5.7292 | 6.0000 |\n| −72 dB/oct | 3.8542 | 4.8542 | 5.7292 | 6.5000 | 6.8750 | 7.2083 |\n| −96 dB/oct | 4.4792 | 5.6250 | 6.6875 | 7.6250 | 8.0417 | 8.4583 |\n| −192 dB/oct | 6.8750 | 8.8958 | 10.6458 | 12.2083 | 12.8958 | 13.5625 |\n\n周期数は2.7〜15.0、小数4桁で直接入力できます。キーボードと±ボタンの増減ステップは0.1です。表のすべての値を設定できます。\n\n- 平均の傾きの目安であり、途中の傾きが一定になることや、LRの振幅曲線との一致を意味しません。\n- −100 dBは傾きを測る端点です。阻止帯域全体が−100 dB以下になる保証ではありません。\n- 平均傾きの誤差は、−24 dB/octのβ＝8・10・12で約1.26・1.05・1.27%、その他は1%以内でした。\n- 別のサンプルレートやクロス周波数では同じ精度を保証しません。周期数を細かく変えても、奇数化後のタップ数が同じなら特性は変わりません。\n",
-    "en": "### Cycles and roll-off guide\n\nComparison using only the cycle count of a Kaiser HP filter. Conditions: **96 kHz, 1 kHz crossover, no overlap**. Evaluated the **average roll-off between −20 and −100 dB**. Table values are cycle counts.\n\n| Target slope | β＝8 | β＝10 | β＝12 | β＝14 | β＝15 | β＝16 |\n|---|---:|---:|---:|---:|---:|---:|\n| −24 dB/oct | 2.7292 | 3.4167 | 4.0000 | 4.5000 | 4.7292 | 4.9583 |\n| −48 dB/oct | 3.2083 | 4.1042 | 4.7917 | 5.4375 | 5.7292 | 6.0000 |\n| −72 dB/oct | 3.8542 | 4.8542 | 5.7292 | 6.5000 | 6.8750 | 7.2083 |\n| −96 dB/oct | 4.4792 | 5.6250 | 6.6875 | 7.6250 | 8.0417 | 8.4583 |\n| −192 dB/oct | 6.8750 | 8.8958 | 10.6458 | 12.2083 | 12.8958 | 13.5625 |\n\nCycles accept direct entry from 2.7 to 15.0 with four decimal places. Keyboard and +/- steps are 0.1. All table values can be entered.\n\n- These are average slopes, not a guarantee of constant slope or a match to an LR amplitude curve.\n- −100 dB is the slope measurement endpoint, not a guarantee that the entire stopband stays below −100 dB.\n- Average slope errors at −24 dB/oct were approximately 1.26%, 1.05%, and 1.27% for β=8, 10, and 12; all other cases were within 1%.\n- Accuracy is not guaranteed at other sample rates or crossover frequencies. Small cycle changes do not change the response if rounding to an odd tap count gives the same length.\n"
+  "ui.38b5a9b2a2d593": {
+    "source": "**クロス付近のつながりと帯域外の減衰を、カイザー窓のリニアフェーズFIRで調整するときに使います。**\n\nβ値は帯域外減衰の設計目安、周期数はFIRの生成長を決める基準です。β値の「目標減衰」はdB、表の「減衰スロープ」はdB/octで、異なる指標です。\n\n**操作手順**\n\n1. 分割方式をカイザー窓リニアフェーズFIRにし、クロス周波数を設定します。\n2. 目標減衰の表示を参考にβ値を選び、下の表で希望する減衰スロープの行とβ値の列から周期数を選びます。例えばβ＝10で−48 dB/octを目安にする場合は4.10周期です。\n3. 周期数を入力し、必要な場合だけ重ね代を調整して再計算します。PhaseEQでは自動表示更新がOFFなら「更新」を押します。\n4. 各帯域と合成応答でクロス付近のつながり、帯域外の減衰、最終タップ数と遅延を確認します。長いFIRは計算負荷と遅延が増えるため、出力先DSPの上限に合わせて調整します。\n\n### 周期数と減衰スロープの目安\n\nカイザーHPの周期数だけを調整した比較です。**96 kHz・クロス1 kHz・重ね合わせなし**で、\n**−20〜−100 dB間の平均減衰スロープ**を評価しました。表の数値は設定周期数です。\n\n| 減衰スロープの目安 | β＝8 | β＝10 | β＝12 | β＝14 | β＝15 | β＝16 |\n|---|---:|---:|---:|---:|---:|---:|\n| −24 dB/oct | 2.73 | 3.42 | 4.00 | 4.50 | 4.73 | 4.96 |\n| −48 dB/oct | 3.21 | 4.10 | 4.79 | 5.44 | 5.73 | 6.00 |\n| −72 dB/oct | 3.85 | 4.85 | 5.73 | 6.50 | 6.88 | 7.21 |\n| −96 dB/oct | 4.48 | 5.62 | 6.69 | 7.62 | 8.04 | 8.46 |\n| −192 dB/oct | 6.88 | 8.90 | 10.65 | 12.21 | 12.90 | 13.56 |\n\n周期数は2.70〜15.00、小数点以下2桁で表示します。キーボードと±ボタンの増減ステップは0.1です。表のすべての値を設定できます。\n\n- 平均の傾きの目安であり、途中の傾きが一定になることや、LRの振幅曲線との一致を意味しません。\n- −100 dBは傾きを測る端点です。生成後は阻止帯域全体の減衰も確認してください。\n- 掲載値は小数点以下2桁に丸めています。丸め前の値で測定した平均傾きの誤差は、−24 dB/octのβ＝8・10・12で約1.26・1.05・1.27%、その他は1%以内でした。\n- 別のサンプルレートやクロス周波数では、生成後の減衰スロープを確認してください。周期数を細かく変えても、奇数化後のタップ数が同じなら特性は変わりません。\n",
+    "ja": "**クロス付近のつながりと帯域外の減衰を、カイザー窓のリニアフェーズFIRで調整するときに使います。**\n\nβ値は帯域外減衰の設計目安、周期数はFIRの生成長を決める基準です。β値の「目標減衰」はdB、表の「減衰スロープ」はdB/octで、異なる指標です。\n\n**操作手順**\n\n1. 分割方式をカイザー窓リニアフェーズFIRにし、クロス周波数を設定します。\n2. 目標減衰の表示を参考にβ値を選び、下の表で希望する減衰スロープの行とβ値の列から周期数を選びます。例えばβ＝10で−48 dB/octを目安にする場合は4.10周期です。\n3. 周期数を入力し、必要な場合だけ重ね代を調整して再計算します。PhaseEQでは自動表示更新がOFFなら「更新」を押します。\n4. 各帯域と合成応答でクロス付近のつながり、帯域外の減衰、最終タップ数と遅延を確認します。長いFIRは計算負荷と遅延が増えるため、出力先DSPの上限に合わせて調整します。\n\n### 周期数と減衰スロープの目安\n\nカイザーHPの周期数だけを調整した比較です。**96 kHz・クロス1 kHz・重ね合わせなし**で、\n**−20〜−100 dB間の平均減衰スロープ**を評価しました。表の数値は設定周期数です。\n\n| 減衰スロープの目安 | β＝8 | β＝10 | β＝12 | β＝14 | β＝15 | β＝16 |\n|---|---:|---:|---:|---:|---:|---:|\n| −24 dB/oct | 2.73 | 3.42 | 4.00 | 4.50 | 4.73 | 4.96 |\n| −48 dB/oct | 3.21 | 4.10 | 4.79 | 5.44 | 5.73 | 6.00 |\n| −72 dB/oct | 3.85 | 4.85 | 5.73 | 6.50 | 6.88 | 7.21 |\n| −96 dB/oct | 4.48 | 5.62 | 6.69 | 7.62 | 8.04 | 8.46 |\n| −192 dB/oct | 6.88 | 8.90 | 10.65 | 12.21 | 12.90 | 13.56 |\n\n周期数は2.70〜15.00、小数点以下2桁で表示します。キーボードと±ボタンの増減ステップは0.1です。表のすべての値を設定できます。\n\n- 平均の傾きの目安であり、途中の傾きが一定になることや、LRの振幅曲線との一致を意味しません。\n- −100 dBは傾きを測る端点です。生成後は阻止帯域全体の減衰も確認してください。\n- 掲載値は小数点以下2桁に丸めています。丸め前の値で測定した平均傾きの誤差は、−24 dB/octのβ＝8・10・12で約1.26・1.05・1.27%、その他は1%以内でした。\n- 別のサンプルレートやクロス周波数では、生成後の減衰スロープを確認してください。周期数を細かく変えても、奇数化後のタップ数が同じなら特性は変わりません。\n",
+    "en": "**Use Kaiser-window linear-phase FIR to adjust the crossover transition and out-of-band attenuation.**\n\nBeta sets the design target for out-of-band attenuation; cycles determine the nominal FIR length. The beta-based target attenuation is in dB, while the table's roll-off slope is in dB/oct. These are different measures.\n\n**Procedure**\n\n1. Select Kaiser-window linear-phase FIR and set the crossover frequency.\n2. Choose beta using the target attenuation display, then select cycles from the desired slope row and beta column in the table. For example, beta 10 and a target of −48 dB/oct give 4.10 cycles.\n3. Enter the cycles, adjust overlap only if needed, and recalculate. In PhaseEQ, click Update if automatic display updates are off.\n4. Inspect the crossover transition, out-of-band attenuation, final tap count, and delay in the band and summed responses. Longer FIR filters increase processing load and delay; adjust them to fit the target DSP limits.\n\n### Cycles and roll-off guide\n\nComparison using only the cycle count of a Kaiser HP filter. Conditions: **96 kHz, 1 kHz crossover, no overlap**. Evaluated the **average roll-off between −20 and −100 dB**. Table values are cycle counts.\n\n| Target slope | β＝8 | β＝10 | β＝12 | β＝14 | β＝15 | β＝16 |\n|---|---:|---:|---:|---:|---:|---:|\n| −24 dB/oct | 2.73 | 3.42 | 4.00 | 4.50 | 4.73 | 4.96 |\n| −48 dB/oct | 3.21 | 4.10 | 4.79 | 5.44 | 5.73 | 6.00 |\n| −72 dB/oct | 3.85 | 4.85 | 5.73 | 6.50 | 6.88 | 7.21 |\n| −96 dB/oct | 4.48 | 5.62 | 6.69 | 7.62 | 8.04 | 8.46 |\n| −192 dB/oct | 6.88 | 8.90 | 10.65 | 12.21 | 12.90 | 13.56 |\n\nCycles are displayed from 2.70 to 15.00 with two decimal places. Keyboard and +/- steps are 0.1. All table values can be entered.\n\n- These are average slopes, not a guarantee of constant slope or a match to an LR amplitude curve.\n- −100 dB is the slope measurement endpoint. Check attenuation across the entire stopband after generation.\n- Table values are rounded to two decimal places. Average slope errors measured before rounding at −24 dB/oct were approximately 1.26%, 1.05%, and 1.27% for β=8, 10, and 12; all other cases were within 1%.\n- At other sample rates or crossover frequencies, check the generated roll-off slope. Small cycle changes do not change the response if rounding to an odd tap count gives the same length.\n"
   },
   "ui.4c67a9fc596438": {
     "source": "PhaseEQはStandaloneで開いています。このChannelには未接続です。",
@@ -15819,10 +15819,10 @@
     "ja": "**Streamlit共有キャッシュ・アップロード・配信ファイル**",
     "en": "**Streamlit shared caches, uploads, and served files**"
   },
-  "ui.8fc7fb879885e1": {
-    "source": "共有キャッシュと復元後のデータは別に保持されます。上表の保持量とRSSは同じ尺度ではありません。",
-    "ja": "共有キャッシュと復元後のデータは別に保持されます。上表の保持量とRSSは同じ尺度ではありません。",
-    "en": "Shared caches and restored data are held separately. Retained sizes above and RSS measure different things."
+  "ui.ecf2b281dd314a": {
+    "source": "共有キャッシュと復元後のデータは別に保持されます。保持量は調査対象データの推定サイズ、RSSはプロセス全体の常駐メモリです。",
+    "ja": "共有キャッシュと復元後のデータは別に保持されます。保持量は調査対象データの推定サイズ、RSSはプロセス全体の常駐メモリです。",
+    "en": "Shared cache and restored data are retained separately. Retained size estimates the data being inspected; RSS is resident memory for the whole process."
   },
   "ui.be2b8fcd9e991d": {
     "source": "**計測履歴（直近30回）**",
@@ -16533,5 +16533,210 @@
     "source": "クロップ補償Delay：{p0} samples（{p1} ms）。係数単体の利用時も設定してください。",
     "ja": "クロップ補償Delay：{p0} samples（{p1} ms）。係数単体の利用時も設定してください。",
     "en": "Crop compensation delay: {p0} samples ({p1} ms). Apply this delay when using the coefficients separately."
+  },
+  "ui.576d20c0dd04a4": {
+    "source": "現在の最終FIRタップ数：再計算待ち。「再計算」を押してください。",
+    "ja": "現在の最終FIRタップ数：再計算待ち。「再計算」を押してください。",
+    "en": "Current final FIR taps: waiting for recalculation. Click Recalculate."
+  },
+  "ui.ad792f64e8bf28": {
+    "source": "現在の最終FIRタップ数：復元した補正の返却待ち。PhaseEQで再生成して返却してください。",
+    "ja": "現在の最終FIRタップ数：復元した補正の返却待ち。PhaseEQで再生成して返却してください。",
+    "en": "Current final FIR taps: waiting for the restored correction. Regenerate in PhaseEQ and return it."
+  },
+  "ui.1286baaf5538fb": {
+    "source": "現在の最終FIRタップ数：設定の確認が必要です。画面のエラーを修正し、再計算してください。",
+    "ja": "現在の最終FIRタップ数：設定の確認が必要です。画面のエラーを修正し、再計算してください。",
+    "en": "Current final FIR taps: settings need attention. Correct the on-screen errors, then recalculate."
+  },
+  "ui.459023d7a2ab8c": {
+    "source": "現在の最終FIRタップ数：生成できません。画面のエラーを確認し、原因を解消して再計算してください。",
+    "ja": "現在の最終FIRタップ数：生成できません。画面のエラーを確認し、原因を解消して再計算してください。",
+    "en": "Current final FIR taps: generation failed. Resolve the on-screen errors, then recalculate."
+  },
+  "ui.d09375e8d51a0a": {
+    "source": "補正結果待ち：{channels}。現在の処理で計算・出力します。位相目標への補正には、PhaseEQで測定を適用し、補正を設定・更新して返却してください。",
+    "ja": "補正結果待ち：{channels}。現在の処理で計算・出力します。位相目標への補正には、PhaseEQで測定を適用し、補正を設定・更新して返却してください。",
+    "en": "Correction return pending: {channels}. Calculation and output use the current processing. To correct toward the phase target, apply a measurement in PhaseEQ, set and update the correction, then return it."
+  },
+  "ui.47e007bbab7bc5": {
+    "source": "補正更新待ち：{channels}。現在の処理で計算・出力します。新しい条件への補正には、PhaseEQへ再送信し、補正を更新して返却してください。",
+    "ja": "補正更新待ち：{channels}。現在の処理で計算・出力します。新しい条件への補正には、PhaseEQへ再送信し、補正を更新して返却してください。",
+    "en": "Correction update pending: {channels}. Calculation and output use the current processing. To correct for the new conditions, resend to PhaseEQ, update the correction, then return it."
+  },
+  "ui.2ad4de7885b818": {
+    "source": "ON：All Passを音響ターゲットに含め、直接出力から除外します。LR2自動極性は帯域分割の設定に従い、手動Polarityは独立して直接適用します。Delayはマルチウェイで適用します。 補正結果が未返却でも現在の処理で計算・出力します。目標への補正はPhaseEQで設定・更新して返却してください。",
+    "ja": "ON：All Passを音響ターゲットに含め、直接出力から除外します。LR2自動極性は帯域分割の設定に従い、手動Polarityは独立して直接適用します。Delayはマルチウェイで適用します。 補正結果が未返却でも現在の処理で計算・出力します。目標への補正はPhaseEQで設定・更新して返却してください。",
+    "en": "ON includes All Pass in the acoustic target and excludes it from direct output. LR2 automatic polarity follows the crossover setting; manual polarity remains independent and direct. Delay is applied in Multiway. Calculation and output use the current processing even before the correction is returned. Set and update the correction in PhaseEQ, then return it to correct toward the target."
+  },
+  "ui.c428b70d9800f8": {
+    "source": "時間基準：理論値（最終FIRと設定Delay）。測定ディレイがない場合も表示できます。スピーカーの到達差は実測で確認してください。",
+    "ja": "時間基準：理論値（最終FIRと設定Delay）。測定ディレイがない場合も表示できます。スピーカーの到達差は実測で確認してください。",
+    "en": "Time reference: theoretical (final FIR and configured Delay). Graphs are available without measured delay. Verify speaker arrival differences by measurement."
+  },
+  "ui.d29690bcfe90f8": {
+    "source": "FIRの遅延は最終係数から計算し、手動・整合・DSP追加Delayを一度だけ反映します。共通基準の測定ディレイがある場合は、スピーカーの到達差も反映します。",
+    "ja": "FIRの遅延は最終係数から計算し、手動・整合・DSP追加Delayを一度だけ反映します。共通基準の測定ディレイがある場合は、スピーカーの到達差も反映します。",
+    "en": "FIR latency is calculated from the final coefficients; manual, alignment and additional DSP delay are applied once. Measured delay with a shared reference also contributes speaker arrival differences."
+  },
+  "ui.1f4910cb461735": {
+    "source": "補正結果待ち：{channels}。FIRの理論遅延差を補償して計算・出力します。位相目標への補正には、PhaseEQで測定を適用し、補正を設定・更新して返却してください。",
+    "ja": "補正結果待ち：{channels}。FIRの理論遅延差を補償して計算・出力します。位相目標への補正には、PhaseEQで測定を適用し、補正を設定・更新して返却してください。",
+    "en": "Correction return pending: {channels}. Calculation and output compensate theoretical FIR latency differences. To correct toward the phase target, apply a measurement in PhaseEQ, set and update the correction, then return it."
+  },
+  "ui.a87ec1ed652223": {
+    "source": "補正更新待ち：{channels}。FIRの理論遅延差を補償して計算・出力します。新しい条件への補正には、PhaseEQへ再送信し、補正を更新して返却してください。",
+    "ja": "補正更新待ち：{channels}。FIRの理論遅延差を補償して計算・出力します。新しい条件への補正には、PhaseEQへ再送信し、補正を更新して返却してください。",
+    "en": "Correction update pending: {channels}. Calculation and output compensate theoretical FIR latency differences. To correct for the new conditions, resend to PhaseEQ, update the correction, then return it."
+  },
+  "ui.270b18d61c2fcf": {
+    "source": "FIRの理論遅延差を自動補償し、手動・整合・DSP追加Delayを一度だけ反映します。共通基準の測定ディレイがある場合は、スピーカーの到達差も反映します。",
+    "ja": "FIRの理論遅延差を自動補償し、手動・整合・DSP追加Delayを一度だけ反映します。共通基準の測定ディレイがある場合は、スピーカーの到達差も反映します。",
+    "en": "Theoretical FIR latency differences are compensated automatically; manual, alignment and additional DSP delay are applied once. Measured delay with a shared reference also contributes speaker arrival differences."
+  },
+  "ui.240f47f800b028": {
+    "source": "FIR理論差補償 [samples]",
+    "ja": "FIR理論差補償 [samples]",
+    "en": "Nominal FIR difference [samples]"
+  },
+  "ui.f0e1bf60931061": {
+    "source": "Delayの内訳：FIR起点補償＋FIR理論差補償＋測定補正＋Way相対Delay＋整合Delay残り＋共通オフセット。測定到達差は補正前の相対値です。",
+    "ja": "Delayの内訳：FIR起点補償＋FIR理論差補償＋測定補正＋Way相対Delay＋整合Delay残り＋共通オフセット。測定到達差は補正前の相対値です。",
+    "en": "Delay components: FIR origin compensation + nominal FIR difference + measured arrival correction + relative Way Delay + remaining alignment Delay + common offset. Measured arrival is the relative value before correction."
+  },
+  "ui.5b5bac57494539": {
+    "source": "旧設定の整合Delayに測定補正が含まれるか確認が必要です。値を維持しています。「位相・時間整合」を再適用して内訳を確定してください。",
+    "ja": "旧設定の整合Delayに測定補正が含まれるか確認が必要です。値を維持しています。「位相・時間整合」を再適用して内訳を確定してください。",
+    "en": "The measurement contribution in legacy alignment Delay needs confirmation. The existing value is retained. Reapply phase/time alignment to establish the breakdown."
+  },
+  "ui.b12098eb61e7af": {
+    "source": "共通基準の測定到達差が揃わないため、保存済みの測定補正を維持しています。測定を更新した場合は、全チャンネルの測定基準を確認して再計算してください。",
+    "ja": "共通基準の測定到達差が揃わないため、保存済みの測定補正を維持しています。測定を更新した場合は、全チャンネルの測定基準を確認して再計算してください。",
+    "en": "A common measured arrival reference is unavailable; saved measurement corrections are retained. After updating measurements, check the reference for all channels and recalculate."
+  },
+  "ui.aab60aa39d1272": {
+    "source": "最終FIRタップ数は保存・出力するFIRと同じです。DSP追加Delayは下記の補正を積算した値です。msかsamplesのどちらかで入力し、FIR自体の遅延を重ねて加えないでください。",
+    "ja": "最終FIRタップ数は保存・出力するFIRと同じです。DSP追加Delayは下記の補正を積算した値です。msかsamplesのどちらかで入力し、FIR自体の遅延を重ねて加えないでください。",
+    "en": "Final FIR tap counts match the saved/exported coefficients. DSP additional Delay sums the corrections below. Enter either ms or samples; do not add the FIR intrinsic latency again."
+  },
+  "ui.8c73f8a9a9c4b4": {
+    "source": "FIRの理論遅延差を補償し、測定補正・Way相対Delay・整合Delayを積算します。共通基準の測定到達差がある場合は、早いスピーカーへ補正を追加します。内訳と合計は「最終FIRタップ数・DSP追加Delay」で確認できます。",
+    "ja": "FIRの理論遅延差を補償し、測定補正・Way相対Delay・整合Delayを積算します。共通基準の測定到達差がある場合は、早いスピーカーへ補正を追加します。内訳と合計は「最終FIRタップ数・DSP追加Delay」で確認できます。",
+    "en": "Nominal FIR delay differences are compensated; measurement correction, relative Way Delay and alignment Delay are accumulated. With a common arrival reference, earlier speakers receive additional correction. Check components and totals in Final FIR taps / DSP additional Delay."
+  },
+  "ui.9582e2397868dc": {
+    "source": "FIR起点補償 [ms]",
+    "ja": "FIR起点補償 [ms]",
+    "en": "FIR origin compensation [ms]"
+  },
+  "ui.4ff12ca76a19c8": {
+    "source": "FIR起点補償 [samples]",
+    "ja": "FIR起点補償 [samples]",
+    "en": "FIR origin compensation [samples]"
+  },
+  "ui.061f1292892564": {
+    "source": "FIR理論差補償 [ms]",
+    "ja": "FIR理論差補償 [ms]",
+    "en": "Nominal FIR difference [ms]"
+  },
+  "ui.6695819eabdf79": {
+    "source": "測定補正 [ms]",
+    "ja": "測定補正 [ms]",
+    "en": "Measurement correction [ms]"
+  },
+  "ui.5651836725de8f": {
+    "source": "測定補正 [samples]",
+    "ja": "測定補正 [samples]",
+    "en": "Measurement correction [samples]"
+  },
+  "ui.825dc411901d66": {
+    "source": "Way相対Delay [ms]",
+    "ja": "Way相対Delay [ms]",
+    "en": "Relative Way Delay [ms]"
+  },
+  "ui.410a190cd2d7d6": {
+    "source": "Way相対Delay [samples]",
+    "ja": "Way相対Delay [samples]",
+    "en": "Relative Way Delay [samples]"
+  },
+  "ui.75dacf2a836c7d": {
+    "source": "整合Delay残り [ms]",
+    "ja": "整合Delay残り [ms]",
+    "en": "Remaining alignment Delay [ms]"
+  },
+  "ui.421c51008e9316": {
+    "source": "整合Delay残り [samples]",
+    "ja": "整合Delay残り [samples]",
+    "en": "Remaining alignment Delay [samples]"
+  },
+  "ui.d0b2cc888bda01": {
+    "source": "共通オフセット [ms]",
+    "ja": "共通オフセット [ms]",
+    "en": "Common offset [ms]"
+  },
+  "ui.a33c0f18febccc": {
+    "source": "共通オフセット [samples]",
+    "ja": "共通オフセット [samples]",
+    "en": "Common offset [samples]"
+  },
+  "ui.e912b4b3acb95f": {
+    "source": "DSP追加Delay合計 [ms]",
+    "ja": "DSP追加Delay合計 [ms]",
+    "en": "DSP additional Delay total [ms]"
+  },
+  "ui.bb18c63aeedf6a": {
+    "source": "DSP追加Delay合計 [samples]",
+    "ja": "DSP追加Delay合計 [samples]",
+    "en": "DSP additional Delay total [samples]"
+  },
+  "ui.ccf00f5e0adcb5": {
+    "source": "測定到達差 [ms]",
+    "ja": "測定到達差 [ms]",
+    "en": "Measured relative arrival [ms]"
+  },
+  "ui.c7b30b8e5adb7a": {
+    "source": "測定到達差 [samples]",
+    "ja": "測定到達差 [samples]",
+    "en": "Measured relative arrival [samples]"
+  },
+  "ui.5002b2ead0da40": {
+    "source": "FIRの理論遅延差を補償し、測定補正・Way相対Delay・整合Delayを積算します。共通基準の測定到達差がある場合は、早いスピーカーへ補正を追加します。内訳と合計は「タップ長とディレイ目安」で確認できます。",
+    "ja": "FIRの理論遅延差を補償し、測定補正・Way相対Delay・整合Delayを積算します。共通基準の測定到達差がある場合は、早いスピーカーへ補正を追加します。内訳と合計は「タップ長とディレイ目安」で確認できます。",
+    "en": "Nominal FIR delay differences are compensated; measurement correction, relative Way Delay and alignment Delay are accumulated. With a common arrival reference, earlier speakers receive additional correction. Check components and totals in Tap length and delay estimates."
+  },
+  "ui.d2d3f44a6fa45b": {
+    "source": "共通基準差引 [samples]",
+    "ja": "共通基準差引 [samples]",
+    "en": "Common reference reduction [samples]"
+  },
+  "ui.c4e398a3837d8f": {
+    "source": "共通基準差引 [ms]",
+    "ja": "共通基準差引 [ms]",
+    "en": "Common reference reduction [ms]"
+  },
+  "ui.66ab453861022d": {
+    "source": "最終FIRタップ数は保存・出力するFIRと同じです。FIR使用時のDSP追加Delayは、積算した追加Delayの最小値を全出力から差し引いた相対値です。msかsamplesのどちらかで入力し、FIR自体の遅延を重ねて加えないでください。",
+    "ja": "最終FIRタップ数は保存・出力するFIRと同じです。FIR使用時のDSP追加Delayは、積算した追加Delayの最小値を全出力から差し引いた相対値です。msかsamplesのどちらかで入力し、FIR自体の遅延を重ねて加えないでください。",
+    "en": "Final FIR taps match the saved/exported FIR. With FIR enabled, DSP additional Delay is relative to the minimum accumulated additional Delay across all outputs. Enter either ms or samples; do not add FIR intrinsic latency again."
+  },
+  "ui.1f04aed47d5922": {
+    "source": "Delayの内訳：FIR起点補償＋FIR理論差補償＋測定補正＋Way相対Delay＋整合Delay残り＋共通オフセット−共通基準差引。測定到達差は補正前の相対値です。",
+    "ja": "Delayの内訳：FIR起点補償＋FIR理論差補償＋測定補正＋Way相対Delay＋整合Delay残り＋共通オフセット−共通基準差引。測定到達差は補正前の相対値です。",
+    "en": "Delay breakdown: FIR origin + nominal FIR difference + measurement correction + relative Way Delay + remaining alignment Delay + common offset minus common reference reduction. Measured arrival is the relative value before correction."
+  },
+  "ui.085839ac917028": {
+    "source": "共通基準差引はFIR自体の遅延を含みません。FIRの時間差補償を維持し、最小のDSP追加Delayを0にします。最小値が既に0の場合は減りません。機種別のDelay上限は出力前に確認してください。",
+    "ja": "共通基準差引はFIR自体の遅延を含みません。FIRの時間差補償を維持し、最小のDSP追加Delayを0にします。最小値が既に0の場合は減りません。機種別のDelay上限は出力前に確認してください。",
+    "en": "Common reference reduction excludes intrinsic FIR latency. FIR timing compensation is preserved and the minimum DSP additional Delay becomes zero. An existing zero minimum cannot be reduced further. Check your DSP delay limit before export."
+  },
+  "ui.50a480cea9a913": {
+    "source": "FIRの理論遅延差を補償し、測定補正・Way相対Delay・整合Delayを積算します。共通基準の測定到達差がある場合は、早いスピーカーへ補正を追加します。内訳と合計は「タップ長とディレイ目安」で確認できます。グラフは共通のFIR遅延を差し引いた0 ms基準で表示し、各Wayの相対Delayは維持します。",
+    "ja": "FIRの理論遅延差を補償し、測定補正・Way相対Delay・整合Delayを積算します。共通基準の測定到達差がある場合は、早いスピーカーへ補正を追加します。内訳と合計は「タップ長とディレイ目安」で確認できます。グラフは共通のFIR遅延を差し引いた0 ms基準で表示し、各Wayの相対Delayは維持します。",
+    "en": "Theoretical FIR delay differences are compensated, then measurement correction, Way-relative Delay and alignment Delay are accumulated. With a shared measured arrival reference, earlier speakers receive additional correction. See Tap length and delay estimate for the breakdown and total. Graphs use a 0 ms reference after removing shared FIR latency; relative Way delays are preserved."
+  },
+  "ui.90e6285971fe36": {
+    "source": "ONではWay・分割方式・分割周波数に合わせて理論配置を更新します。適用ボタンは時間整合だけを実行します。ONからOFFへ切り替えると自動補償を解除し、Delayと極性は維持します。",
+    "ja": "ONではWay・分割方式・分割周波数に合わせて理論配置を更新します。適用ボタンは時間整合だけを実行します。ONからOFFへ切り替えると自動補償を解除し、Delayと極性は維持します。",
+    "en": "When ON, theoretical phase compensation follows the Ways, crossover methods and frequencies. Apply updates time alignment only. Switching from ON to OFF removes automatic phase compensation while preserving Delay and polarity."
   }
 }

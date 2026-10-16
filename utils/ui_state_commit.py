@@ -14,6 +14,26 @@ OUTPUT_POSTPROCESS_DEFAULTS = {
 }
 
 
+def clear_input_context_for_restore(state) -> None:
+    """Release input auxiliaries not reconstructed by DesignConfig.
+
+    Invoke inside the caller's restore transaction, before projecting saved UI
+    fields. Channel-owned input preservation remains the caller's responsibility.
+    """
+    for key in (
+        '_restored_near_field_response_raw', '_restored_near_field_source_name',
+        '_restored_port_response_raw', '_restored_port_source_name',
+        '_speaker_calibration_state', '_speaker_auto_iir_metadata',
+        '_current_speaker_timing_provenance', '_iir_auto_diagnostics',
+        '_speaker_phase_center_search_start_ms', '_speaker_phase_center_search_end_ms',
+        '_settings_asset_warning', '_response_asset_refs',
+    ):
+        state.pop(key, None)
+    for source in ('speaker_measurement', 'mic_calibration', 'near_field_measurement', 'port_measurement'):
+        for field in ('id', 'label'):
+            state.pop(f'current_{source}_{field}', None)
+
+
 def clear_restored_setting_widgets(state, setting_keys) -> None:
     """Discard source projections, including custom aliases and new settings.
 

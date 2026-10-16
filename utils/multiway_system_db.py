@@ -50,6 +50,7 @@ class MultiwayChannelReference:
     target_preset_id: str = ""
     sort_order: int = 0
     dc_gain_normalize: bool = False
+    auto_alignment_measurement_delay_samples: float | None = None
 
     def validate(self) -> None:
         if not self.channel_id.strip():
@@ -234,6 +235,7 @@ def ensure_multiway_system_db(path: Path) -> None:
             ("dc_gain_normalize", "INTEGER NOT NULL DEFAULT 0"),
             ("delay_samples", "REAL NOT NULL DEFAULT 0.0"),
             ("auto_alignment_delay_samples", "REAL NOT NULL DEFAULT 0.0"),
+            ("auto_alignment_measurement_delay_samples", "REAL"),
             ("auto_alignment_allpass_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("target_preset_id", "TEXT NOT NULL DEFAULT ''"),
         ):
@@ -346,7 +348,7 @@ def ensure_multiway_system_db(path: Path) -> None:
                 """SELECT channel_id,name,way,group_name,band,enabled,gain_db,
                 polarity,delay_samples,speaker_package_id,latest_assignment_id,
                 target_preset_id,sort_order,auto_alignment_delay_samples,
-                auto_alignment_allpass_json,dc_gain_normalize FROM multiway_system_channels
+                auto_alignment_allpass_json,dc_gain_normalize,auto_alignment_measurement_delay_samples FROM multiway_system_channels
                 WHERE system_id=? ORDER BY sort_order,group_name,name""",
                 (str(row[0]),),
             ).fetchall()
@@ -364,6 +366,7 @@ def ensure_multiway_system_db(path: Path) -> None:
                         auto_alignment_delay_samples=float(item[13]),
                         auto_alignment_allpass=tuple(json.loads(str(item[14]))),
                         dc_gain_normalize=bool(item[15]),
+                        auto_alignment_measurement_delay_samples=(float(item[16]) if item[16] is not None else None),
                     )
                     for item in channel_rows
                 ),
@@ -565,6 +568,8 @@ def _system_snapshot(
                 "delay_samples": float(item.delay_samples),
                 "auto_alignment_delay_samples": float(item.auto_alignment_delay_samples),
                 "auto_alignment_allpass": [dict(section) for section in item.auto_alignment_allpass],
+                **({"auto_alignment_measurement_delay_samples": float(item.auto_alignment_measurement_delay_samples)}
+                   if item.auto_alignment_measurement_delay_samples is not None else {}),
                 "speaker_package_id": item.speaker_package_id,
                 "latest_assignment_id": item.latest_assignment_id,
                 "target_preset_id": item.target_preset_id,
@@ -749,8 +754,8 @@ def save_multiway_system(
             """INSERT INTO multiway_system_channels(
             system_id,channel_id,name,way,group_name,band,enabled,gain_db,polarity,
             delay_samples,speaker_package_id,latest_assignment_id,target_preset_id,sort_order,
-            auto_alignment_delay_samples,auto_alignment_allpass_json,dc_gain_normalize)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            auto_alignment_delay_samples,auto_alignment_allpass_json,dc_gain_normalize,auto_alignment_measurement_delay_samples)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             [
                 (
                     saved.id, item.channel_id, item.name, item.way, item.group,
@@ -760,6 +765,7 @@ def save_multiway_system(
                     float(item.auto_alignment_delay_samples),
                     canonical_json(list(item.auto_alignment_allpass)),
                     int(item.dc_gain_normalize),
+                    item.auto_alignment_measurement_delay_samples,
                 )
                 for item in saved.channels
             ],
@@ -844,7 +850,7 @@ def get_multiway_system(path: Path, system_id: str) -> MultiwaySystemRecord | No
         channel_rows = connection.execute(
             """SELECT channel_id,name,way,group_name,band,enabled,gain_db,polarity,
             delay_samples,speaker_package_id,latest_assignment_id,target_preset_id,sort_order,
-            auto_alignment_delay_samples,auto_alignment_allpass_json,dc_gain_normalize
+            auto_alignment_delay_samples,auto_alignment_allpass_json,dc_gain_normalize,auto_alignment_measurement_delay_samples
             FROM multiway_system_channels
             WHERE system_id=? ORDER BY sort_order,group_name,name""",
             (str(system_id),),
@@ -859,6 +865,7 @@ def get_multiway_system(path: Path, system_id: str) -> MultiwaySystemRecord | No
             auto_alignment_delay_samples=float(item[13]),
             auto_alignment_allpass=tuple(json.loads(str(item[14]))),
             dc_gain_normalize=bool(item[15]),
+            auto_alignment_measurement_delay_samples=(float(item[16]) if item[16] is not None else None),
         )
         for item in channel_rows
     )
@@ -946,6 +953,8 @@ def restore_multiway_system_revision(
             gain_db=float(item.get("gain_db", 0.0)),
             polarity=int(item.get("polarity", 1)),
             dc_gain_normalize=bool(item.get("dc_gain_normalize", False)),
+            auto_alignment_measurement_delay_samples=(float(item["auto_alignment_measurement_delay_samples"])
+                if item.get("auto_alignment_measurement_delay_samples") is not None else None),
             delay_samples=float(item.get("delay_samples", 0.0)),
             auto_alignment_delay_samples=float(item.get("auto_alignment_delay_samples", 0.0)),
             auto_alignment_allpass=tuple(

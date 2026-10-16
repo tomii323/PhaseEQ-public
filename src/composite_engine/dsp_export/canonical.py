@@ -55,6 +55,7 @@ def canonical_from_export_inputs(
             fir_alignment_delay_samples=channel.dsp_additional_delay_samples + crop_delay,
             manual_delay_samples=channel.channel_relative_delay_samples,
             phase_alignment_delay_samples=channel.auto_alignment_delay_samples,
+            output_reference_delay_samples=channel.output_reference_delay_samples,
             timing_provenance=(
                 dict(channel.timing_provenance)
                 if isinstance(channel.timing_provenance, dict) else None

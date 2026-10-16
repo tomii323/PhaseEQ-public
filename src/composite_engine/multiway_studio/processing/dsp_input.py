@@ -67,6 +67,7 @@ def _channel_payload(row: dict[str, Any]) -> dict[str, Any]:
         "alignment_target_return": row.get("phaseeq_alignment_definition"),
         "alignment_target_applied": bool(row.get("phaseeq_alignment_target_applied", False)),
         "alignment_delay_samples": float(row.get("auto_alignment_delay_samples", 0.0)),
+        "alignment_measurement_delay_samples": row.get("auto_alignment_measurement_delay_samples"),
         "alignment_allpass": [
             item.to_dict() if hasattr(item, "to_dict") else dict(item)
             for item in row.get("auto_alignment_allpass", ())

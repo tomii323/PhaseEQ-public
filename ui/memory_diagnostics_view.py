@@ -61,7 +61,7 @@ def render_memory_diagnostics(namespace=None):
     for item in report['streamlit']['rows'][:5]:
         st.caption(f"{item['category']} / {item['key']}: {item['bytes'] / 2**20:.3f} MiB")
     st.dataframe(_table(report['streamlit']['rows']), hide_index=True, width='stretch')
-    st.caption(display_text('共有キャッシュと復元後のデータは別に保持されます。上表の保持量とRSSは同じ尺度ではありません。'))
+    st.caption(display_text('共有キャッシュと復元後のデータは別に保持されます。保持量は調査対象データの推定サイズ、RSSはプロセス全体の常駐メモリです。'))
     history = st.session_state.get('_memory_diagnostic_history', [])
     st.markdown(display_text('**計測履歴（直近30回）**'))
     st.dataframe(pd.DataFrame(history), hide_index=True, width='stretch')

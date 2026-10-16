@@ -18,7 +18,6 @@ import pandas as pd
 from scipy.signal import freqz
 # 旧互換APIは削除。新ui_index.pyに合わせてインポートを整理
 from composite_engine.multiway_studio.utils.ui_index import radio_indexed, selectbox_indexed, number_input_stateful_safe
-from composite_engine.kaiser_help import KAISER_SLOPE_GUIDE
 from composite_engine.multiway_studio.utils.kaiser import (
     kaiser_attenuation_usage_hint,
     kaiser_beta_to_attenuation_db,
@@ -1075,8 +1074,6 @@ def _show_fir_design_guide(beta, *, method, sample_rate_hz, crossover_hz, cycles
         text,
         help=ui_message('ui.ca1db9e3e7b836'),
     )
-    with st.popover(ui_message('ui.cecdffbccd548d')):
-        st.markdown(display_text(KAISER_SLOPE_GUIDE))
 
 
 def _sidebar_section_header(number, title, caption=None, *, tag=None):
@@ -1911,7 +1908,7 @@ def _build_filter_specification(mode_key, settings, output_rows, generated_at):
         lines.extend([
             "■ クロスオーバー",
             f"周波数: {int(conf['cross_freqs'][0])} Hz",
-            f"FIR周期数: {float(conf['cycles']):g}",
+            f"FIR周期数: {float(conf['cycles']):.2f}",
             f"カイザー窓β値: {float(conf['beta']):g}",
             f"Kaiser overlap: {float(conf.get('kaiser_overlap_oct', 0.0)):+.2f} oct",
             "",
@@ -1920,13 +1917,13 @@ def _build_filter_specification(mode_key, settings, output_rows, generated_at):
         lines.extend([
             "■ 上側クロス High/Mid",
             f"クロスオーバー: {int(conf['cross_freqs'][1])} Hz",
-            f"FIR周期数: {float(conf['cycles_high']):g}",
+            f"FIR周期数: {float(conf['cycles_high']):.2f}",
             f"カイザー窓β値: {float(conf['beta_high']):g}",
             f"Kaiser overlap: {float(conf.get('kaiser_overlap_mid_high_oct', 0.0)):+.2f} oct",
             "",
             "■ 下側クロス Mid/Low",
             f"クロスオーバー: {int(conf['cross_freqs'][0])} Hz",
-            f"FIR周期数: {float(conf['cycles_low']):g}",
+            f"FIR周期数: {float(conf['cycles_low']):.2f}",
             f"カイザー窓β値: {float(conf['beta_low']):g}",
             f"Kaiser overlap: {float(conf.get('kaiser_overlap_low_mid_oct', 0.0)):+.2f} oct",
             "",
@@ -1941,7 +1938,7 @@ def _build_filter_specification(mode_key, settings, output_rows, generated_at):
             lines.extend([
                 f"■ {label}",
                 f"クロスオーバー: {int(conf['cross_freqs'][index])} Hz",
-                f"FIR周期数: {float(conf[cycles_key]):g}",
+                f"FIR周期数: {float(conf[cycles_key]):.2f}",
                 f"カイザー窓β値: {float(conf[beta_key]):g}",
                 f"Kaiser overlap: {float(conf.get(overlap_key, 0.0)):+.2f} oct",
                 "",
@@ -1956,7 +1953,7 @@ def _build_filter_specification(mode_key, settings, output_rows, generated_at):
             lines.extend([
                 f"■ クロス {label}",
                 f"クロスオーバー: {int(conf['cross_freqs'][index])} Hz",
-                f"FIR周期数: {boundary_cycles[index]:g}",
+                f"FIR周期数: {boundary_cycles[index]:.2f}",
                 f"カイザー窓β値: {boundary_betas[index]:g}",
                 f"Kaiser overlap: {boundary_overlaps[index]:+.2f} oct",
                 "",
@@ -2089,7 +2086,7 @@ def _render_filter_downloads(
     }
     with st.expander(ui_message('ui.96acdaf7b4f091'), expanded=False):
         st.caption(
-            ui_message('ui.7ef69576f39670')
+            ui_message('ui.03bdda677f6e49')
         )
         if not active_firs:
             st.caption(ui_message('ui.795bf002abf122'))
@@ -2429,14 +2426,19 @@ if visualization.jp_font is None:
         ui_message('ui.78dd8f858a0ebb')
     )
 
+from ui.app_update import render_shutdown_notice
+
 st.markdown(
     ui_message('ui.e4ce44c3205188', p0=PHASEEQ_INTEGRATION_VERSION, p1=APP_VERSION)
 )
+render_shutdown_notice()
 
 with st.expander(ui_message('ui.8a794eb49f96f4'), expanded=False):
     st.markdown(
-        ui_message('ui.036e81f58e864a')
+        ui_message('ui.37b928da340994')
     )
+from ui.crossover_help import render_filter_comparison
+render_filter_comparison(expandable=True)
 
 # ------------------------ セッション初期化 ------------------------
 
@@ -2725,11 +2727,11 @@ with st.sidebar:
         )
         cycles = _number_input_with_session_default(
             ui_message('ui.2c548f58e181f3'), min_value=FIR_CYCLES_MIN, max_value=FIR_CYCLES_MAX, step=0.1,
-            value=float(mode_conf.get('cycles', DEFAULT_FIR_CYCLES)), format="%.4f",
+            value=float(mode_conf.get('cycles', DEFAULT_FIR_CYCLES)), format="%.2f",
             key=KEY_CYCLES,
             on_change=clear_results,
             disabled=boundary_method != "Kaiser FIR",
-            help=ui_message('ui.1b911b58f117e7')
+            help=ui_message('ui.751f17f2585c2c')
         )
         beta = _number_input_with_session_default(
             ui_message('ui.b9adc18c131e99'), min_value=FIR_BETA_MIN, max_value=FIR_BETA_MAX,
@@ -2781,11 +2783,11 @@ with st.sidebar:
         )
         cycles_high = _number_input_with_session_default(
             ui_message('ui.b9a07498d1a75f'), min_value=FIR_CYCLES_MIN, max_value=FIR_CYCLES_MAX, step=0.1,
-            value=float(mode_conf.get('cycles_high', mode_conf.get('cycles', DEFAULT_FIR_CYCLES))), format="%.4f",
+            value=float(mode_conf.get('cycles_high', mode_conf.get('cycles', DEFAULT_FIR_CYCLES))), format="%.2f",
             key=KEY_CYCLES_HIGH,
             on_change=clear_results,
             disabled=high_method != "Kaiser FIR",
-            help=ui_message('ui.a87567900297c7')
+            help=ui_message('ui.58589c536da4d6')
         )
         beta_high = _number_input_with_session_default(
             ui_message('ui.e529de8f4249e0'), min_value=FIR_BETA_MIN, max_value=FIR_BETA_MAX,
@@ -2825,7 +2827,7 @@ with st.sidebar:
         )
         cycles_low = _number_input_with_session_default(
             ui_message('ui.b669fae1e0eb8f'), min_value=FIR_CYCLES_MIN, max_value=FIR_CYCLES_MAX, step=0.1,
-            value=float(mode_conf.get('cycles_low', mode_conf.get('cycles', DEFAULT_FIR_CYCLES))), format="%.4f",
+            value=float(mode_conf.get('cycles_low', mode_conf.get('cycles', DEFAULT_FIR_CYCLES))), format="%.2f",
             key=KEY_CYCLES_LOW,
             on_change=clear_results,
             disabled=low_method != "Kaiser FIR",
@@ -2885,7 +2887,7 @@ with st.sidebar:
                 min_value=FIR_CYCLES_MIN, max_value=FIR_CYCLES_MAX,
                 step=0.1,
                 value=float(mode_conf.get(cycles_key, mode_conf.get("cycles", DEFAULT_FIR_CYCLES))),
-                format="%.4f",
+                format="%.2f",
                 key=cycles_key,
                 on_change=clear_results,
                 disabled=crossover_method != "Kaiser FIR",
@@ -2995,7 +2997,7 @@ with st.sidebar:
             ))
             edited_cycles[index] = float(_number_input_with_session_default(
                 ui_message('ui.36ca1e5162ff27', p0=f'{boundary_label}'), min_value=FIR_CYCLES_MIN, max_value=FIR_CYCLES_MAX, step=0.1,
-                value=float(boundary_cycles[index]), format="%.4f",
+                value=float(boundary_cycles[index]), format="%.2f",
                 key=f"boundary_cycles_{mode_key}_{index}", on_change=clear_results,
                 disabled=boundary_method != "Kaiser FIR",
             ))
@@ -3150,6 +3152,7 @@ with st.sidebar:
         st.caption(ui_message('ui.09e51be597a938'))
     user_crop_lengths = {}
     band_tap_count_hosts = {}
+    from composite_engine.multiway_studio.ui.output_timing import render_waiting_band_tap_counts
     crop_lens_conf = mode_conf.get("crop_lens", {})
     application_max_fir_taps = max(ir_length_for_frequency_resolution(int(fs)), 262143)
     st.caption(
@@ -3169,7 +3172,7 @@ with st.sidebar:
             ),
         )
         band_tap_count_hosts[band] = st.empty()
-        band_tap_count_hosts[band].caption(display_text("現在の最終FIRタップ数：再計算待ち"))
+        render_waiting_band_tap_counts({band: band_tap_count_hosts[band]}, "recalculate")
     st.caption(
         ui_message('ui.6d2408f7090298', p0=f'{application_max_fir_taps:,}')
     )
@@ -3602,6 +3605,7 @@ if not fir_configuration_valid:
         ui_message('ui.5531f87fbc78dd')
     )
 if not cross_order_valid:
+    render_waiting_band_tap_counts(band_tap_count_hosts, "invalid_settings")
     if not fir_configuration_valid:
         pass
     elif mode_key == "3Way":

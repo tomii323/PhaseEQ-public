@@ -2037,7 +2037,7 @@ initialize_language()
 from utils.ui_help import initialize_help, render_help_setting
 initialize_help()
 _apply_app_theme()
-from ui.app_update import initialize_updates, render_update_notice, render_update_settings
+from ui.app_update import initialize_updates, render_shutdown_notice, render_update_notice, render_update_settings
 initialize_updates(APP_ROOT, APP_VERSION)
 render_update_notice()
 
@@ -4175,6 +4175,8 @@ def _apply_ui_payload_to_state(payload: dict[str, Any]) -> None:
         ("current_port_measurement", "current_port_measurement_id", "current_port_measurement_label"),
     ):
         if key not in ui:
+            st.session_state.pop(id_key, None)
+            st.session_state.pop(label_key, None)
             continue
         ref = ui.get(key)
         if isinstance(ref, dict):
@@ -4298,12 +4300,16 @@ def _apply_ui_payload_to_state(payload: dict[str, Any]) -> None:
         st.session_state["auto_iir_max_filters"] = int(ui["auto_iir_max_filters"])
     if isinstance(ui.get("speaker_auto_iir_metadata"), dict):
         st.session_state["_speaker_auto_iir_metadata"] = dict(ui["speaker_auto_iir_metadata"])
+    else:
+        st.session_state.pop("_speaker_auto_iir_metadata", None)
     if isinstance(ui.get("auto_iir_last_diagnostics"), dict):
         restored_diagnostics = dict(ui["auto_iir_last_diagnostics"])
         if restored_diagnostics:
             st.session_state["_iir_auto_diagnostics"] = restored_diagnostics
         else:
             st.session_state.pop("_iir_auto_diagnostics", None)
+    else:
+        st.session_state.pop("_iir_auto_diagnostics", None)
     if "result_detail_view" in ui:
         detail_view = str(ui["result_detail_view"])
         if detail_view in RESULT_DETAIL_VIEWS:
@@ -4444,8 +4450,7 @@ def _apply_response_payload_to_state(payload: dict[str, Any], config: DesignConf
             complete_response(
                 response.frequency, response.gain_db, response.phase_deg, response.frequency,
             )
-    if response_refs:
-        st.session_state["_response_asset_refs"] = resolved_refs
+    st.session_state["_response_asset_refs"] = resolved_refs
     if speaker_response is None:
         st.session_state.pop("_restored_speaker_response_raw", None)
         st.session_state.pop("_restored_speaker_source_name", None)
@@ -4503,6 +4508,7 @@ def _apply_response_payload_to_state(payload: dict[str, Any], config: DesignConf
         st.session_state["_restored_mic_cal_response_raw"] = mic_cal_response
         st.session_state["_restored_mic_cal_source_name"] = mic_cal_source_name or "settings.json"
     elif mic_cal_source_name:
+        st.session_state.pop("_restored_mic_cal_response_raw", None)
         st.session_state["_restored_mic_cal_source_name"] = mic_cal_source_name
     else:
         st.session_state.pop("_restored_mic_cal_response_raw", None)
@@ -4556,6 +4562,8 @@ def _apply_config_payload_to_state(
     try:
         _clear_project_profile_widget_state(payload)
         _reset_transient_ui_state_for_config_load()
+        from utils.ui_state_commit import clear_input_context_for_restore
+        clear_input_context_for_restore(st.session_state)
         _apply_ui_payload_to_state(payload)
         _apply_config_to_state(config)
         if assignment is None and saved_output_taps == 0:
@@ -4701,6 +4709,8 @@ def _clear_project_profile_widget_state(payload: dict[str, Any] | None = None) -
 
 def _reset_project_state_to_defaults() -> None:
     _clear_project_profile_widget_state()
+    from utils.ui_state_commit import clear_input_context_for_restore
+    clear_input_context_for_restore(st.session_state)
     _apply_config_to_state(DEFAULT_CONFIG)
     st.session_state["project_name"] = ""
     st.session_state["driver_band_enabled"] = False
@@ -5539,7 +5549,7 @@ def _render_design_condition_bar(active_page: str = "") -> None:
     ) or display_text("未設定")
     overview_full = str(_current_text_setting("project_db_note", "") or "").strip()
     with st.container(key="compact_context", gap="small"):
-        summary_col, detail_col = st.columns([0.93, 0.07], gap="small", vertical_alignment="center")
+        summary_col, shutdown_col, detail_col = st.columns([0.57, 0.36, 0.07], gap="small", vertical_alignment="center")
         with summary_col:
             compact_line = f"{project_name_value} | {display_text('入力')}: {input_full} | {speaker_summary}"
             st.markdown(
@@ -5547,6 +5557,8 @@ def _render_design_condition_bar(active_page: str = "") -> None:
                 f'<span title="{html.escape(compact_line, quote=True)}">{html.escape(compact_line)}</span></div>',
                 unsafe_allow_html=True,
             )
+        with shutdown_col:
+            render_shutdown_notice()
         with detail_col:
             with st.popover(display_text("詳細"), width="stretch"):
                 st.text(f"{mode}\n{display_text('画面ID')}: {globals().get('_browser_session_id', '')}")
@@ -7177,7 +7189,7 @@ def _fir_eq_item_detail(item: dict[str, Any]) -> str:
         smoothing = float(item.get("smoothing_fraction", 0.0) or 0.0)
         return NO_SMOOTHING_LABEL if smoothing == 0.0 else f"1/{int(smoothing)} oct"
     if "cycles" in item:
-        return f"{float(item.get('cycles', 0.0) or 0.0):g} cycles"
+        return f"{float(item.get('cycles', 0.0) or 0.0):.2f} cycles"
     return "-"
 
 
@@ -9733,6 +9745,8 @@ def _render_linear_fir_filters(nyquist: float) -> None:
     _enforce_standalone_fir_capability()
     from ui.band_split_guide import render_band_split_guide
     from utils.band_split_capability import acoustic_target_editable
+    from ui.crossover_help import render_acoustic_target_guide, render_filter_comparison
+    render_filter_comparison(expandable=True)
     composite_locked = globals().get("active_composite_assignment") is not None
     stored_recipe = st.session_state.get("band_split_recipe")
     if stored_recipe is not None:
@@ -9753,6 +9767,8 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                 st.caption(ui_message('ui.2e29a3e5b6f7f9', p0=f'{role}'))
                 continue
             st.checkbox(ui_message('ui.6af081827d6a12', p0=f'{role}'), value=bool(detail.get("acoustic_target", False)), disabled=True, key=f"recipe_acoustic_{boundary_index}_{bool(detail.get('acoustic_target', False))}", help=ui_message('ui.5c45791034edae'))
+            if detail["method"] in {"Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4"}:
+                render_acoustic_target_guide(role, studio=True, method=detail["method"])
             cutoff = detail["highpass_cutoff_hz" if role == "HP" else "lowpass_cutoff_hz"]
             st.caption(ui_message('ui.79157e7b373068', p0=f'{role}', p1=f"{detail['method']}", p2=f"{detail['base_crossover_hz']:,.3f}", p3=f"{detail['overlap_oct']:+.3f}", p4=f'{cutoff:,.3f}')
                        + (ui_message('ui.ea5173bcc61c62', p0=f"{detail['natural_taps']}") if detail['natural_taps'] else ui_message('ui.bcf4235e3ce307')))
@@ -9890,6 +9906,8 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                         disabled=not acoustic_target_editable(hp_response, inherited=composite_locked),
                         help=ui_message('ui.a11bebb9ea97e2'),
                         on_change=_commit_linear_fir_boundary_edit)
+            if hp_response in {"linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4"}:
+                render_acoustic_target_guide("HP", studio=False)
             if hp_response in ("kaiser", "linear_phase_lr2", "linear_phase_lr4"):
                 from phase_fir_designer.linear_fir import multiway_kaiser_taps
                 current_taps = (
@@ -9967,6 +9985,8 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                         disabled=not acoustic_target_editable(lp_response, inherited=composite_locked),
                         help=ui_message('ui.a11bebb9ea97e2'),
                         on_change=_commit_linear_fir_boundary_edit)
+            if lp_response in {"linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4"}:
+                render_acoustic_target_guide("LP", studio=False)
             if lp_response in ("kaiser", "linear_phase_lr2", "linear_phase_lr4"):
                 from phase_fir_designer.linear_fir import multiway_kaiser_taps
                 current_taps = (
@@ -21769,7 +21789,7 @@ with live_result_body_window:
         detail_available = fir_preview.detail_available(detail_view)
         if detail_available and detail_view in {"Wavelet", "Response Advisor", "Impulse", "Step", "Group Delay"}:
             if active_context.get("processed_range_hz") is not None:
-                st.caption(ui_message('ui.f3b48189c4a32a'))
+                st.caption(ui_message('ui.ccb855538d3c5b'))
             try:
                 analysis_responses = _display_response_bundles(
                     result, speaker_response_before_iir if fir_preview.analysis_uses_input_before_iir else speaker_response,
@@ -21824,7 +21844,7 @@ with live_result_body_window:
         elif detail_view == "FIR Filter cofs":
             from response_display.fir_coefficients import coefficient_figure
             from response_display.plotly_charts import PLOTLY_CONFIG
-            st.caption(ui_message('ui.f980e485e5eea2'))
+            st.caption(ui_message('ui.104a0203b38e55'))
             st.plotly_chart(coefficient_figure(
                 result.fir, window_enabled=bool(output_fir_cosine_taper_enabled) and preview_stage == "Export FIR",
                 protected_center_taps=result.output_window_protected_center_taps,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 from composite_engine.distance_timing import external_distance_timing
@@ -15,6 +15,7 @@ class SpeakerTimingProjection:
     samples_by_channel: dict[str, float]
     complete: bool
     warning: str = ""
+    arrivals_by_channel: dict[str, float] = field(default_factory=dict)
 
 
 def _channel_id(row: Mapping[str, Any]) -> str:
@@ -122,6 +123,8 @@ def resolve_speaker_timing_projection(
                 for channel_id, arrival in timing.arrival_samples.items()
             },
             True,
+            arrivals_by_channel={key: float(value - earliest)
+                                 for key, value in timing.arrival_samples.items()},
         )
 
     provenance = {_channel_id(row): row.get("timing_provenance") for row in rows}
@@ -142,7 +145,8 @@ def resolve_speaker_timing_projection(
         if samples is None:
             return SpeakerTimingProjection("none", {}, False)
         restored[channel_id] = float(samples)
-    return SpeakerTimingProjection("phaseeq_tweeter_reference", restored, True)
+    return SpeakerTimingProjection("phaseeq_tweeter_reference", restored, True,
+                                   arrivals_by_channel=trusted)
 
 
 def speaker_timing_samples_for_row(

@@ -249,7 +249,8 @@ from composite_engine.multiway_studio.processing.speaker_source import (
 )
 from composite_engine.multiway_studio.processing.dsp_input import studio_dsp_input_signature
 from composite_engine.multiway_studio.processing.delay import (
-    resolve_output_timing,
+    output_display_reference_samples,
+    defer_output_timing, align_final_output_timing, accumulate_output_delays, relativize_output_delays,
 )
 from composite_engine.multiway_studio.components.visualization import (
     DEFAULT_GAIN_Y_MAX_DB,
@@ -375,8 +376,11 @@ def normalize_crossover_method(value: object) -> str:
 def _clear_applied_phase_alignment() -> None:
     """Invalidate automatic alignment when the realized crossover changes."""
     st.session_state["_alignment_refresh_requested"] = True
+    st.session_state.pop(alignment_structure.AUTOMATIC_OWNERS_KEY, None)
     for key in list(st.session_state):
         if key.endswith("_auto_alignment_delay"):
+            st.session_state[key] = 0.0
+        elif key.endswith("_auto_alignment_measurement_delay_samples"):
             st.session_state[key] = 0.0
         elif key.endswith("_auto_alignment_allpass"):
             st.session_state[key] = []
@@ -479,6 +483,8 @@ def render_crossover_method_control(
 
     from utils.band_split_capability import convert_studio_methods, studio_method_options
     methods = studio_method_options(fir_enabled=fir_enabled)
+    from composite_engine.crossover_help import method_selector_help, method_usage_text
+    from utils.ui_language import current_language
     st.session_state[method_key] = convert_studio_methods(
         [st.session_state[method_key]], fir_enabled=fir_enabled,
     )[0]
@@ -486,6 +492,7 @@ def render_crossover_method_control(
         ui_message('ui.b47dba7d9b82bd', p0=f'{label}'), methods,
         format_func=localized_formatter(lambda value: CROSSOVER_METHOD_LABELS[value]),
         key=method_key, width="stretch", required=True, on_change=_on_change,
+        help=method_selector_help(methods, current_language()),
     ) or "Kaiser FIR"
     target_allowed = acoustic_target_allowed(method)
     initial_targets = st.session_state.get("settings", {}).get(mode_key, {}).get("boundary_acoustic_targets", [])
@@ -498,14 +505,16 @@ def render_crossover_method_control(
                 help=(
                     ui_message('ui.a45fc68c20a621')
                 ))
-    if target_allowed:
-        with st.expander(ui_message('ui.2bbd78a88b6990', p0=f'{label}'), expanded=False):
-            st.markdown(
-                ui_message('ui.d83ea615703db4')
-            )
+    if method == "Kaiser FIR":
+        from ui.crossover_help import render_kaiser_usage_guide
+        render_kaiser_usage_guide()
+    elif target_allowed:
+        from ui.crossover_help import render_acoustic_target_guide
+        render_acoustic_target_guide(label, studio=True, method=method)
     if method == "Through":
         st.caption(
-            ui_message('ui.df06f2d052f642')
+            ui_message('ui.df06f2d052f642'),
+            help=method_usage_text(method, current_language()),
         )
     return method
 
@@ -606,6 +615,8 @@ def _channel_state_prefix(band: str, group: str, *, stereo: bool) -> str:
 
 def _alignment_state_prefix(row: dict[str, object]) -> str:
     """Resolve the same state owner used when the Channel row was rendered."""
+    if row.get('_state_prefix'):
+        return str(row['_state_prefix'])
     return _channel_state_prefix(
         str(row.get("band", "")),
         str(row.get("group", "")),
@@ -772,6 +783,7 @@ def _apply_library_system(system: MultiwaySystem) -> None:
         st.session_state[f"{prefix}_auto_alignment_delay"] = float(
             item.auto_alignment_delay_samples
         )
+        st.session_state[f"{prefix}_auto_alignment_measurement_delay_samples"] = item.auto_alignment_measurement_delay_samples
         st.session_state[f"{prefix}_auto_alignment_allpass"] = [
             dict(section) for section in item.auto_alignment_allpass
         ]
@@ -1141,7 +1153,7 @@ def _render_system_library_save(
     default_name = current.name if current is not None else f"{mode_key} System"
     st.session_state.setdefault("composite_studio_system_name", default_name)
     st.caption(
-        ui_message('ui.980090d64fdf82')
+        ui_message('ui.6943392fcc2551')
     )
     name = st.text_input(ui_message('ui.03857f0c1902b8'), key="composite_studio_system_name")
     references = tuple(
@@ -1159,6 +1171,7 @@ def _render_system_library_save(
             auto_alignment_delay_samples=float(
                 row.get("auto_alignment_delay_samples", 0.0)
             ),
+            auto_alignment_measurement_delay_samples=row.get("auto_alignment_measurement_delay_samples"),
             auto_alignment_allpass=tuple(
                 section.to_dict() if isinstance(section, AllPassSection) else dict(section)
                 for section in row.get("auto_alignment_allpass", ())
@@ -1366,7 +1379,7 @@ def _restore_fir_off_assignment_result(
     ):
         return False
 
-    from composite_engine.assignment_snapshot import validated_speaker_asset, timing_for_asset
+    from composite_engine.assignment_snapshot import validated_speaker_asset, commit_speaker_snapshot
     try:
         validated_speaker = validated_speaker_asset(result, _exchange_root(), status.revision)
         from utils.composite_exchange import assignment_working_session_path
@@ -1385,15 +1398,10 @@ def _restore_fir_off_assignment_result(
         tuple(float(value) for value in section)
         for section in result.get("phaseeq_iir_sos", [])
     )
-    if validated_speaker is not None:
-        row["phaseeq_speaker_response"] = validated_speaker
+    commit_speaker_snapshot(row, result, validated_speaker)
     alignment_target.receive(row, result)
     row["phaseeq_assignment_id"] = assignment_id
     row["phaseeq_assignment_revision"] = status.revision
-    if isinstance(result.get("timing_provenance"), dict):
-        row["timing_provenance"] = timing_for_asset(result, validated_speaker)
-    else:
-        row.pop("timing_provenance", None)
     row["phaseeq_status_state"] = status.state
     row["phaseeq_working_session"] = working_path
     _cache_phaseeq_bundle(row, assignment_id)
@@ -1578,6 +1586,8 @@ def _restore_cached_phaseeq_bundle(row: dict[str, object]) -> None:
     ):
         if key in cached:
             row[key] = cached[key]
+        else:
+            row.pop(key, None)
 
 
 def _cache_phaseeq_bundle(row: dict[str, object], assignment_id: str) -> None:
@@ -1755,6 +1765,7 @@ def render_composite_sidebar(
                             ("enabled", "enabled"), ("gain_db", "gain"),
                             ("delay_samples", "delay"), ("iir_xover_enabled", "iir_xover_enabled"),
                             ("auto_alignment_delay_samples", "auto_alignment_delay"),
+                            ("auto_alignment_measurement_delay_samples", "auto_alignment_measurement_delay_samples"),
                             ("auto_alignment_allpass", "auto_alignment_allpass"),
                             ("iir_xover_family", "iir_xover_family"), ("iir_xover_order", "iir_xover_order"),
                             ("iir_xover_hp", "iir_xover_hp"), ("iir_xover_lp", "iir_xover_lp"),
@@ -1764,6 +1775,7 @@ def render_composite_sidebar(
                         ):
                             if saved_key in saved:
                                 st.session_state[f"{prefix}_{state_suffix}"] = saved[saved_key]
+                        st.session_state[f"{prefix}_auto_alignment_measurement_delay_samples"] = saved.get("auto_alignment_measurement_delay_samples")
                         st.session_state[f"{prefix}_dc_gain_normalize"] = bool(saved.get("dc_gain_normalize", False))
                         if "polarity" in saved:
                             st.session_state[f"{prefix}_polarity"] = (
@@ -1958,14 +1970,10 @@ def render_composite_sidebar(
             st.session_state.setdefault(f"{prefix}_polarity", "Normal (+)")
             st.session_state.setdefault(f"{prefix}_delay", 0.0)
             st.session_state.setdefault(f"{prefix}_auto_alignment_delay", 0.0)
-            st.session_state.setdefault(f"{prefix}_auto_alignment_allpass", [])
-            if structural_sections is not None:
-                next_sections = [
-                    section.to_dict() for section in structural_sections[band]
-                ]
-                if st.session_state[f"{prefix}_auto_alignment_allpass"] != next_sections:
-                    st.session_state[f"{prefix}_auto_alignment_allpass"] = next_sections
-                    st.session_state["_alignment_refresh_requested"] = True
+            alignment_structure.refresh_automatic_channel(
+                st.session_state, prefix,
+                structural_sections[band] if structural_sections is not None else None,
+            )
             st.session_state.setdefault(f"{prefix}_enabled", True)
             st.session_state.setdefault(f"{prefix}_speaker_package_id", "")
             missing_package_id = (
@@ -2027,6 +2035,7 @@ def render_composite_sidebar(
             )
             channel_rows.append({
                 "band": band,
+                "_state_prefix": prefix,
                 "source": "generated_band",
                 "dc_gain_normalize": bool(dc_gain_normalize),
                 "phase_alignment_acoustic_target": bool(st.session_state.get("settings", {}).get(mode_key, {}).get("phase_alignment_acoustic_target", False)),
@@ -2040,6 +2049,7 @@ def render_composite_sidebar(
                 "auto_alignment_delay_samples": float(
                     st.session_state[f"{prefix}_auto_alignment_delay"]
                 ),
+                "auto_alignment_measurement_delay_samples": st.session_state.get(f"{prefix}_auto_alignment_measurement_delay_samples"),
                 "auto_alignment_allpass": tuple(
                     AllPassSection(
                         float(item["frequency_hz"]), float(item.get("q", 0.0)),
@@ -2202,7 +2212,7 @@ def render_composite_sidebar(
                                 published_channel = result_payload.get('exchange_channel') or {}
                                 if published_channel.get('wav') != channel.wav:
                                     continue
-                            from composite_engine.assignment_snapshot import validated_speaker_asset, timing_for_asset
+                            from composite_engine.assignment_snapshot import validated_speaker_asset, commit_speaker_snapshot
                             try:
                                 validated_speaker = validated_speaker_asset(
                                     result_payload, _exchange_root(),
@@ -2307,17 +2317,12 @@ def render_composite_sidebar(
                                     ui_message('ui.e17de5d5aa6b2e', p0=f'{channel.name}')
                                 )
                                 result_payload = {}
-                            if validated_speaker is not None:
-                                attached_row["phaseeq_speaker_response"] = validated_speaker
+                            commit_speaker_snapshot(attached_row, result_payload, validated_speaker)
                             alignment_target.receive(attached_row, result_payload)
                             attached_row["phaseeq_assignment_id"] = attached_assignment_id or ""
                             attached_row["phaseeq_assignment_revision"] = (
                                 attached_status.revision if attached_status is not None else 0
                             )
-                            if isinstance(result_payload.get("timing_provenance"), dict):
-                                attached_row["timing_provenance"] = timing_for_asset(result_payload, validated_speaker)
-                            else:
-                                attached_row.pop("timing_provenance", None)
                             attached_row["phaseeq_status_state"] = (
                                 attached_status.state if attached_status is not None else "Published"
                             )
@@ -2740,7 +2745,7 @@ def _prepare_studio_output_firs(state, final_firs, sample_rate_hz, *, output_tap
     taper_protection_taps = {}
     framed_taps = assigned_taps
     # Alignment is represented as delay; finalized FIRs are never padded.
-    output_timing = resolve_output_timing(assigned_taps, align_output_taps=False)
+    output_timing = defer_output_timing(assigned_taps)
     for row in configured:
         if not isinstance(row, dict) or row.get("source") != "generated_band" or not bool(row.get("enabled", True)):
             continue
@@ -2925,9 +2930,15 @@ def _prepare_studio_output_firs(state, final_firs, sample_rate_hz, *, output_tap
                 "評価基準": crop_result.target_kind,
                 "採用": "○" if crop_result.adopted else crop_result.reason,
             })
-        # Absolute crop origins are already included in each channel's DSP
-        # delay. Do not re-center Ways or pad their finalized coefficients.
-        dsp_channels = prepared_channels
+        aligned = align_final_output_timing(prepared_channels)
+        ids = {(channel.group, channel.name): channel.channel_id for channel in aligned}
+        timing_rows = [dict(row, channel_id=ids[(str(row.get("group")), str(row.get("name")))])
+                       for row in configured if isinstance(row, dict)
+                       and (str(row.get("group")), str(row.get("name"))) in ids]
+        timing = resolve_speaker_timing_projection(
+            timing_rows, st.session_state.get("settings", {}), sample_rate_hz=int(sample_rate_hz),
+        )
+        dsp_channels = list(relativize_output_delays(accumulate_output_delays(aligned, timing_rows, timing)))
 
     return {
         "channels": dsp_channels, "crop_rows": crop_rows,
@@ -2939,8 +2950,10 @@ def _prepare_studio_output_firs(state, final_firs, sample_rate_hz, *, output_tap
 
 def _build_studio_pipelines(
     final_firs: dict[str, object], sample_rate_hz: int,
-    *, final_channels=None,
+    *, final_channels=None, include_fir_latency: bool = False,
+    center_display: bool = False,
 ) -> MultichannelCompositeResult:
+    """Evaluate output timing with an optional shared display origin."""
     configured = st.session_state.get("composite_studio_channels", [])
     band_fir_states = st.session_state.get("composite_studio_band_fir_states", {})
     pending = [str(row.get("name", "")) for row in configured
@@ -3008,7 +3021,8 @@ def _build_studio_pipelines(
             original_taps = (confirmed.adaptive_crop_metadata or {}).get("original_taps", len(coefficients)) if confirmed else len(coefficients)
             stages.append(ResponseStage("Final FIR" if confirmed else "Band FIR",
                 f"studio_{band}.wav", buffer.getvalue(),
-                reference_center_samples=(int(original_taps)-1)/2.0 if confirmed else None))
+                reference_center_samples=(0.0 if include_fir_latency else
+                    (int(original_taps)-1)/2.0 if confirmed else None)))
         additional_fir = row.get("additional_fir")
         if confirmed is None and fir_enabled and additional_fir is not None:
             stages.append(_fir_stage_from_upload("Additional FIR", additional_fir, sample_rate_hz))
@@ -3024,11 +3038,13 @@ def _build_studio_pipelines(
                 speaker_relative_timing_samples
             ),
             gain_db=confirmed.gain_db if confirmed else float(row["gain_db"]), polarity=output_polarity,
-            delay_samples=float(row["delay_samples"]),
+            delay_samples=(confirmed.channel_relative_delay_samples if confirmed else float(row["delay_samples"])),
             iir_crossover=output_iir,
             dsp_additional_delay_samples=(confirmed.dsp_additional_delay_samples if confirmed
                                           else float(row.get("dsp_additional_delay_samples", 0.0))),
-            auto_alignment_delay_samples=float(row.get("auto_alignment_delay_samples", 0.0)),
+            auto_alignment_delay_samples=(confirmed.auto_alignment_delay_samples if confirmed
+                                          else float(row.get("auto_alignment_delay_samples", 0.0))),
+            output_reference_delay_samples=(confirmed.output_reference_delay_samples if confirmed else 0.0),
             auto_alignment_allpass=output_allpass,
             iir_sos=(
                 *tuple(row.get("phaseeq_iir_sos", ())),
@@ -3060,6 +3076,11 @@ def _build_studio_pipelines(
     )
     expected_groups = ("Left", "Right") if stereo_layout else ("Main",)
     if inputs:
+        if center_display:
+            reference_samples = output_display_reference_samples(finals.values())
+            inputs = [replace(channel, output_reference_delay_samples=
+                channel.output_reference_delay_samples + reference_samples)
+                for channel in inputs]
         multichannel = build_channel_pipelines(int(sample_rate_hz), inputs)
         groups = dict(multichannel.groups)
         sample_rate = int(multichannel.sample_rate_hz)
@@ -3258,6 +3279,7 @@ def _render_phase_alignment_controls(
                     "delay": st.session_state.get(
                         f"{prefix}_auto_alignment_delay", 0.0,
                     ),
+                    "measurement": st.session_state.get(f"{prefix}_auto_alignment_measurement_delay_samples"),
                     "allpass": st.session_state.get(
                         f"{prefix}_auto_alignment_allpass", [],
                     ),
@@ -3266,6 +3288,7 @@ def _render_phase_alignment_controls(
                 st.session_state[f"{prefix}_auto_alignment_delay"] = (
                     item.dsp_delay_samples
                 )
+                st.session_state[f"{prefix}_auto_alignment_measurement_delay_samples"] = 0.0
                 st.session_state[f"{prefix}_auto_alignment_allpass"] = [
                     section.to_dict() for section in item.allpass_sections
                 ]
@@ -3353,6 +3376,7 @@ def _render_phase_alignment_controls(
             ):
                 for prefix, values in undo.items():
                     st.session_state[f"{prefix}_auto_alignment_delay"] = values["delay"]
+                    st.session_state[f"{prefix}_auto_alignment_measurement_delay_samples"] = values.get("measurement")
                     st.session_state[f"{prefix}_auto_alignment_allpass"] = values["allpass"]
                 st.session_state.pop(f"composite_alignment_undo_{group}", None)
                 st.session_state.pop(f"composite_alignment_undo_applied_{group}", None)
@@ -3486,10 +3510,12 @@ def _render_phase_alignment_controls(
                     prefix = _alignment_state_prefix(row)
                     previous[prefix] = {
                         "delay": st.session_state.get(f"{prefix}_auto_alignment_delay", 0.0),
+                        "measurement": st.session_state.get(f"{prefix}_auto_alignment_measurement_delay_samples"),
                         "allpass": st.session_state.get(f"{prefix}_auto_alignment_allpass", []),
                     }
                     item = by_name[str(row["name"])]
                     st.session_state[f"{prefix}_auto_alignment_delay"] = item.dsp_delay_samples
+                    st.session_state[f"{prefix}_auto_alignment_measurement_delay_samples"] = 0.0
                     st.session_state[f"{prefix}_auto_alignment_allpass"] = [
                         section.to_dict() for section in item.allpass_sections
                     ]
@@ -3523,6 +3549,7 @@ def _render_phase_alignment_controls(
             ):
                 for prefix, values in undo.items():
                     st.session_state[f"{prefix}_auto_alignment_delay"] = values["delay"]
+                    st.session_state[f"{prefix}_auto_alignment_measurement_delay_samples"] = values.get("measurement")
                     st.session_state[f"{prefix}_auto_alignment_allpass"] = values["allpass"]
                 st.session_state.pop(f"composite_alignment_undo_{group}", None)
                 st.session_state.pop(f"composite_alignment_undo_applied_{group}", None)
@@ -3609,13 +3636,17 @@ def _render_alignment_target_control(mode):
     automatic_key = "composite_alignment_auto_structure"
     st.session_state[automatic_key] = bool(settings.get("phase_alignment_auto_structure", False))
     def automatic_changed():
-        current = dict(st.session_state.get("settings", {}))
-        current["phase_alignment_auto_structure"] = bool(st.session_state[automatic_key])
-        st.session_state["settings"] = current
-        st.session_state["_alignment_refresh_requested"] = True
+        prefixes = {
+            _alignment_state_prefix(row)
+            for row in st.session_state.get("composite_studio_channels", ())
+            if isinstance(row, dict) and row.get("source") == "generated_band"
+        }
+        alignment_structure.commit_automatic_mode(
+            st.session_state, bool(st.session_state[automatic_key]), prefixes,
+        )
     st.checkbox(display_text("位相構造補償を自動適用"), key=automatic_key,
                 on_change=automatic_changed,
-                help=display_text("ONではWay・分割方式・分割周波数に合わせて理論配置を更新します。適用ボタンは時間整合だけを実行します。"))
+                help=display_text("ONではWay・分割方式・分割周波数に合わせて理論配置を更新します。適用ボタンは時間整合だけを実行します。ONからOFFへ切り替えると自動補償を解除し、Delayと極性は維持します。"))
     selected = bool(settings.get(mode, {}).get("phase_alignment_acoustic_target", False))
     key = f"composite_alignment_target_{mode}"
     st.session_state[key] = selected
@@ -3627,7 +3658,7 @@ def _render_alignment_target_control(mode):
             st.session_state[f"fir_output_enabled_{mode}"] = True
         st.session_state["settings"] = current
     st.checkbox(ui_message('ui.f0531283f6c414'), key=key, on_change=changed,
-                help=ui_message('ui.051c94b46a54d8'))
+                help=ui_message('ui.2ad4de7885b818'))
 
 
 def _render_system_phase_alignment_controls(
@@ -3974,6 +4005,7 @@ def _render_system_phase_alignment_controls(
                     item = by_id[channel_id]
                     alignment_structure.apply_channel(
                         st.session_state, prefix, item, time_only=automatic_structure,
+                        timing_source=proposal.timing_source,
                     )
                 st.session_state["composite_alignment_system_undo"] = previous
                 st.session_state["composite_alignment_system_applied"] = proposal
@@ -4130,8 +4162,12 @@ def render_composite_results(
     band_tap_count_hosts: dict | None = None, align_output_taps: bool,
 ) -> None:
     """Build Composite Groups only from the Studio's realized final FIRs."""
+    from composite_engine.multiway_studio.ui.output_timing import (
+        render_pending_corrections, render_waiting_band_tap_counts,
+    )
     if st.session_state.get("_history_pending_phaseeq") or st.session_state.get("_history_awaiting_return"):
         st.caption(display_text("復元したEQ設定をPhaseEQへ送り、再生成したフィルターを返却してください。"))
+        render_waiting_band_tap_counts(band_tap_count_hosts, "restore")
         return
     failures = st.session_state.get('_exchange_receive_failures', {})
     if failures:
@@ -4158,8 +4194,9 @@ def render_composite_results(
         st.caption(ui_message('ui.bc43359ff85fb8'))
     elif timing_status.source == "external_distance":
         st.caption(ui_message('ui.223bba3646c328') if timing_status.complete else timing_status.warning)
-    elif not timing_status.complete:
-        st.caption(ui_message('ui.7b4c77986c2dea'))
+    else:
+        st.caption(display_text("時間基準：理論値（最終FIRと設定Delay）。測定ディレイがない場合も表示できます。スピーカーの到達差は実測で確認してください。"))
+    st.caption(display_text("FIRの理論遅延差を補償し、測定補正・Way相対Delay・整合Delayを積算します。共通基準の測定到達差がある場合は、早いスピーカーへ補正を追加します。内訳と合計は「タップ長とディレイ目安」で確認できます。グラフは共通のFIR遅延を差し引いた0 ms基準で表示し、各Wayの相対Delayは維持します。"))
     st.caption(
         ui_message('ui.9090da477e73c4')
     )
@@ -4169,9 +4206,11 @@ def render_composite_results(
             output_taper=bool(st.session_state.get("composite_output_cosine_taper", False)))
         st.session_state[ADAPTIVE_AUTO_CROP_ROWS_KEY] = final_snapshot["crop_rows"]
         multichannel = _build_studio_pipelines(final_firs, int(sample_rate_hz),
-                                              final_channels=final_snapshot["channels"])
+                                              final_channels=final_snapshot["channels"],
+                                              include_fir_latency=True, center_display=True)
     except (CompositeValidationError, ValueError, OSError) as exc:
         st.error(ui_message('ui.572d7b3cffb4c9', p0=f'{exc}'))
+        render_waiting_band_tap_counts(band_tap_count_hosts, "generation_error")
         return
 
     group_names = list(multichannel.group_names)
@@ -4314,6 +4353,7 @@ def render_composite_results(
             multichannel = attach_group_targets(multichannel, tuple(target_inputs))
         except (CompositeValidationError, ValueError, OSError) as exc:
             st.error(ui_message('ui.224357c813a4f5', p0=f'{exc}'))
+            render_waiting_band_tap_counts(band_tap_count_hosts, "generation_error")
             return
     try:
         display_projection = resolve_display_projection(
@@ -4321,6 +4361,7 @@ def render_composite_results(
         )
     except (CompositeValidationError, ValueError) as exc:
         st.error(ui_message('ui.b68e863ed37b07', p0=f'{exc}'))
+        render_waiting_band_tap_counts(band_tap_count_hosts, "generation_error")
         return
     result = display_projection.primary_result
     st.session_state["composite_studio_display_projection_signature"] = (
@@ -4565,10 +4606,7 @@ def render_composite_results(
         if isinstance(row, dict) and bool(row.get("enabled", True))
     ]), hide_index=True, width="stretch")
 
-    if any(alignment_target.pending(row) for row in configured
-           if row.get("source") == "generated_band" and row.get("enabled", True)):
-        st.warning(ui_message('ui.54ebb6913ed3a6'))
-        return
+    render_pending_corrections(configured)
 
     st.markdown(ui_message('ui.8b1e5296a1e9f3'))
     st.caption(
@@ -4577,7 +4615,7 @@ def render_composite_results(
     with st.container(border=True):
         st.markdown(ui_message('ui.c9f90144b7c873'))
         st.caption(
-            ui_message('ui.5030f55faa4563')
+            ui_message('ui.b6e2bccf1a3116')
         )
         st.download_button(
             ui_message('ui.be36fc8da8ee9e'), deferred_call(_build_multichannel_export_zip, multichannel),
@@ -4685,6 +4723,7 @@ def render_composite_results(
                     "dc_gain_normalize": bool(row.get("dc_gain_normalize", False)),
                     "delay_samples": float(row.get("delay_samples", 0.0)),
                     "auto_alignment_delay_samples": float(row.get("auto_alignment_delay_samples", 0.0)),
+                    "auto_alignment_measurement_delay_samples": row.get("auto_alignment_measurement_delay_samples"),
                     "auto_alignment_allpass": [
                         section.to_dict() for section in row.get("auto_alignment_allpass", ())
                     ],

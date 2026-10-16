@@ -10,6 +10,8 @@ from runtime.app_update import cancel_pending, latest_release, register_running_
 from utils.ui_language import current_language
 
 TEXT = {
+    'shutdown': ('終了：保存して、起動元のターミナルで `Ctrl+C`。',
+                 'Quit: save, then `Ctrl+C` in the launch terminal.'),
     'title': ('PhaseEQ本体の更新', 'Update PhaseEQ'),
     'source': ('更新元: GitHubの公開Release。設定・測定DB・ユーザープリセット・出力データは保持します。',
                'Source: public GitHub Releases. Settings, measurement databases, user presets and outputs are preserved.'),
@@ -19,8 +21,16 @@ TEXT = {
     'available': ('最新版 v{version}があります。設定の「PhaseEQ本体の更新」で更新できます。',
                   'Version {version} is available. Open Update PhaseEQ in Settings to prepare it.'),
     'prepare': ('更新をダウンロードして予約', 'Download and schedule update'),
-    'ready': ('v{version}の更新を予約しました。設定を保存し、PhaseEQとマルチウェイを両方終了して、起動スクリプトから起動し直してください。',
-              'Version {version} is ready. Save your work, close PhaseEQ and Multiway, then restart using the launcher.'),
+    'ready': ('v{version}の更新を予約しました。次の手順で終了・再起動してください。\n\n'
+              '1. PhaseEQとマルチウェイで編集中の内容を保存します。\n'
+              '2. 起動元のターミナル（Windowsはコマンドプロンプト）で `Ctrl+C` を押し、両方終了したことを確認します。別々に起動した場合は、それぞれの起動元で終了します。ブラウザーのタブを閉じるだけでは終了しません。\n'
+              '3. 同じアプリフォルダーの起動スクリプトを実行します。macOS／Linuxは `run_PhaseEQ_mac_linux.sh`、Windowsは `run_PhaseEQ_windows.bat` です。起動前に予約した更新が適用されます。\n'
+              '4. 起動後、PhaseEQのバージョンが v{version}になったことを確認します。',
+              'Version {version} is ready. Follow these steps to stop and restart the applications.\n\n'
+              '1. Save your work in PhaseEQ and Multiway.\n'
+              '2. Press `Ctrl+C` in the terminal used to start the applications (Command Prompt on Windows), and confirm that both have stopped. If started separately, stop each in its own terminal. Closing browser tabs alone does not stop the applications.\n'
+              '3. Run the launcher in the same application folder: `run_PhaseEQ_mac_linux.sh` on macOS/Linux or `run_PhaseEQ_windows.bat` on Windows. The scheduled update is applied before startup.\n'
+              '4. After startup, confirm that PhaseEQ shows version {version}.'),
     'cancel': ('更新予約を取り消す', 'Cancel scheduled update'),
     'current': ('現在のバージョンは v{version}です。新しい正式Releaseはありません。',
                 'Current version: {version}. No newer stable release is available.'),
@@ -60,6 +70,10 @@ def render_update_notice():
     release = st.session_state.get('_app_update_release')
     if release:
         st.info(text('available', version=release['version']))
+
+
+def render_shutdown_notice():
+    st.caption(text('shutdown'))
 
 
 def render_update_settings(root: Path, current: str):

@@ -35,12 +35,15 @@ class CanonicalDSPChannel:
     adaptive_crop_metadata: dict[str, object] | None = None
     pre_alignment_tap_count: int | None = None
 
+    output_reference_delay_samples: float = 0.0
+
     @property
     def total_delay_samples(self) -> float:
         return (
             float(self.fir_alignment_delay_samples)
             + float(self.manual_delay_samples)
             + float(self.phase_alignment_delay_samples)
+            - float(self.output_reference_delay_samples)
         )
 
 

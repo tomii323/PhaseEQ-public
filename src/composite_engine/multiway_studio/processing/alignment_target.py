@@ -62,6 +62,17 @@ def target_enabled(row):
     return bool(row.get("phase_alignment_acoustic_target", False))
 
 
+def pending_reason(row):
+    """Describe correction readiness independently of calculation eligibility."""
+    if not pending(row):
+        return None
+    if (not row.get("phaseeq_alignment_definition") and not row.get("phaseeq_alignment_recipe")) or (
+        target_enabled(row) and not row.get("phaseeq_alignment_target_applied", False)
+    ):
+        return "return_missing"
+    return "settings_changed"
+
+
 def output_settings(row):
     """Return physical stages; user settings remain available for persistence."""
     config = row.get("iir_crossover", IIRCrossoverConfig())

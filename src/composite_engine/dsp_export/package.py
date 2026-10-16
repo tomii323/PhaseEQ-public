@@ -87,6 +87,8 @@ def build_dsp_export_zip(
                 "fir_alignment_samples": channel.fir_alignment_delay_samples,
                 "manual_samples": channel.manual_delay_samples,
                 "phase_alignment_samples": channel.phase_alignment_delay_samples,
+                **({"reference_reduction_samples": channel.output_reference_delay_samples}
+                   if channel.output_reference_delay_samples else {}),
                 "total_samples": channel.total_delay_samples,
                 "total_ms": channel.total_delay_samples / channel.sample_rate_hz * 1000.0,
             },
