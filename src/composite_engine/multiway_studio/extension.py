@@ -75,6 +75,7 @@ from composite_engine.iir_crossover import (
     iir_crossover_sos,
     realized_exclusive_iir_config,
 )
+from composite_engine.display_projection.reverse_null import build_reverse_null_series
 from target_engine import (
     TargetBinding,
     canonical_target_definition,
@@ -4421,6 +4422,8 @@ def render_composite_results(
         ui_message('ui.32ab018fd38a7b'), graph_choices, key=graph_widget_key, width="stretch", required=True,
     ) or "Magnitude"
     st.session_state[graph_state_key] = graph_kind
+    from ui.multiway_reverse_null import render_reverse_null_control
+    reverse_null = render_reverse_null_control(display_projection, graph_kind)
     wrapped_phase = True
     if graph_kind == "Phase":
         wrapped_state_key = "composite_studio_wrapped_phase"
@@ -4480,7 +4483,7 @@ def render_composite_results(
         for row in configured
     ):
         st.caption(
-            ui_message('ui.63d1649e9c1ac0')
+            ui_message('ui.c4a621fa323165')
         )
     if graph_kind == "Wavelet":
         from composite_engine.wavelet.view import render_composite_wavelet
@@ -4502,6 +4505,11 @@ def render_composite_results(
             include_target=bool(show_target),
             wrapped_phase=bool(wrapped_phase),
         )
+        if reverse_null:
+            try:
+                series += build_reverse_null_series(display_projection, configured)
+            except ValueError as exc:
+                st.warning(ui_message('ui.5e826d6cefdb34', reason=str(exc)))
     phase_gain_mask_db = float(
         st.session_state.get("phase_gain_mask_db", DEFAULT_PHASE_GAIN_MASK_DB)
     )
@@ -4550,8 +4558,8 @@ def render_composite_results(
                     series_frame["x"].to_numpy(dtype=float),
                     series_frame["value"].to_numpy(dtype=float),
                     label=str(series_name),
-                    linestyle="--" if role == "Target" else "-",
-                    linewidth=1.8 if role == "Target" else 1.2,
+                    linestyle="--" if role in {"Target", "ReverseNull"} else "-",
+                    linewidth=1.8 if role in {"Target", "ReverseNull"} else 1.2,
                 )
             if is_frequency:
                 axis.set_xscale("log")
