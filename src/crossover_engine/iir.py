@@ -21,6 +21,9 @@ class IIRCrossoverConfig:
     lr2_polarity: int = 1
     highpass_order: int = 0
     lowpass_order: int = 0
+    # Full topology is present only for NTM4 banks; old LR definitions and
+    # their hashes keep the previous serialization unchanged.
+    ntm4_topology: dict | None = None
 
     def validate(self, sample_rate_hz: int) -> None:
         if self.family not in {"Linkwitz-Riley", "Butterworth", "Bessel"}:
@@ -41,9 +44,34 @@ class IIRCrossoverConfig:
             raise ValueError("LR2 crossover polarity must be +1 or -1")
         if int(self.highpass_order) not in {0, 2, 4} or int(self.lowpass_order) not in {0, 2, 4}:
             raise ValueError("exclusive IIR boundary order must be 0, 2 or 4")
+        if self.ntm4_topology is not None:
+            from .ntm4 import validate_lobe_db
+            topology = self.ntm4_topology
+            if not isinstance(topology, dict) or set(topology) != {"way_index", "methods", "frequencies", "overlaps", "lobes"}:
+                raise ValueError("Invalid NTM4 topology")
+            count = len(topology["methods"])
+            if ("NTM4" not in topology["methods"] or type(topology["way_index"]) is not int
+                    or not 0 <= topology["way_index"] <= count
+                    or any(len(topology[key]) != count for key in ("frequencies", "overlaps", "lobes"))):
+                raise ValueError("NTM4 boundary count does not match Ways")
+            from .recipe import METHODS
+            if any(method not in METHODS for method in topology["methods"]):
+                raise ValueError("Invalid NTM4 bank method")
+            previous = 0.0
+            for fc, overlap, lobe in zip(topology["frequencies"], topology["overlaps"], topology["lobes"]):
+                if not previous < float(fc) < nyquist:
+                    raise ValueError("Invalid NTM4 bank crossover frequency")
+                lp, hp = crossover_edges_hz(fc, overlap)
+                if not 0 < min(lp, hp) <= max(lp, hp) < nyquist:
+                    raise ValueError("NTM4 bank cutoff must be within 0..Nyquist")
+                validate_lobe_db(lobe)
+                previous = float(fc)
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        result = asdict(self)
+        if self.ntm4_topology is None:
+            result.pop("ntm4_topology")
+        return result
 
     def definition_hash(self, sample_rate_hz: int) -> str:
         payload = {**self.to_dict(), "coefficient_sample_rate_hz": int(sample_rate_hz)}
@@ -94,13 +122,14 @@ def realized_exclusive_iir_config(
     *, way: str, ordered_ways: tuple[str, ...],
     crossover_frequencies_hz: tuple[float, ...], methods: tuple[str, ...],
     overlap_oct: tuple[float, ...], lr2_auto_polarity: bool = True,
+    lobe_heights_db: tuple[float, ...] = (),
 ) -> IIRCrossoverConfig:
-    """Resolve exclusive per-boundary Kaiser/LR2/LR4 choices for one Way."""
+    """Resolve exclusive boundary choices and optional NTM4 topology for one Way."""
     if way not in ordered_ways:
         raise ValueError(f"unknown crossover Way: {way}")
     if len(methods) != len(ordered_ways) - 1 or len(overlap_oct) != len(methods):
         raise ValueError("exclusive crossover boundary count does not match Ways")
-    if any(method not in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "Through"} for method in methods):
+    if any(method not in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "NTM4", "Through"} for method in methods):
         raise ValueError("unsupported crossover method")
     index = ordered_ways.index(way)
     hp_index = index - 1 if index > 0 else None
@@ -109,12 +138,21 @@ def realized_exclusive_iir_config(
     lp_method = methods[lp_index] if lp_index is not None else "Kaiser FIR"
     hp_common = float(crossover_frequencies_hz[hp_index]) if hp_index is not None else 0.0
     lp_common = float(crossover_frequencies_hz[lp_index]) if lp_index is not None else 0.0
-    hp_order = int(hp_method[2:]) if hp_method.startswith("LR") else 0
-    lp_order = int(lp_method[2:]) if lp_method.startswith("LR") else 0
+    hp_order = 4 if hp_method == "NTM4" else int(hp_method[2:]) if hp_method.startswith("LR") else 0
+    lp_order = 4 if lp_method == "NTM4" else int(lp_method[2:]) if lp_method.startswith("LR") else 0
     hp = crossover_edges_hz(hp_common, overlap_oct[hp_index])[1] if hp_order else 0.0
     lp = crossover_edges_hz(lp_common, overlap_oct[lp_index])[0] if lp_order else 0.0
+    topology = None
+    if "NTM4" in methods:
+        from .ntm4 import DEFAULT_LOBE_DB, validate_lobe_db
+        lobes = lobe_heights_db or (DEFAULT_LOBE_DB,) * len(methods)
+        if len(lobes) != len(methods) or len(crossover_frequencies_hz) != len(methods):
+            raise ValueError("NTM4 boundary count does not match Ways")
+        topology = dict(way_index=index, methods=list(methods),
+                        frequencies=list(crossover_frequencies_hz), overlaps=list(overlap_oct),
+                        lobes=[validate_lobe_db(value) for value in lobes])
     return IIRCrossoverConfig(
-        enabled=bool(hp_order or lp_order), family="Linkwitz-Riley",
+        enabled=bool(hp_order or lp_order or topology), family="Linkwitz-Riley",
         order=max(hp_order, lp_order, 2), highpass_hz=hp, lowpass_hz=lp,
         common_highpass_hz=hp_common, common_lowpass_hz=lp_common,
         overlap_oct=float(overlap_oct[hp_index] if hp_order else overlap_oct[lp_index] if lp_order else 0.0),
@@ -122,6 +160,7 @@ def realized_exclusive_iir_config(
             -1 if lr2_auto_polarity and sum(method == "LR2" for method in methods[:index]) % 2 else 1
         ),
         highpass_order=hp_order, lowpass_order=lp_order,
+        ntm4_topology=topology,
     )
 
 
@@ -129,6 +168,9 @@ def iir_crossover_sos(config: IIRCrossoverConfig, sample_rate_hz: int) -> np.nda
     if not config.enabled:
         return np.empty((0, 6), dtype=float)
     config.validate(sample_rate_hz)
+    if config.ntm4_topology is not None:
+        from .ntm4 import cascaded_way_sos
+        return cascaded_way_sos(**config.ntm4_topology, fs=sample_rate_hz)
     sections: list[np.ndarray] = []
     for kind, cutoff, boundary_order in (
         ("highpass", config.highpass_hz, config.highpass_order),

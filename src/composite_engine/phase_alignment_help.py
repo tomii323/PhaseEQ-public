@@ -25,7 +25,7 @@ STRUCTURAL_PHASE_HELP = {
         'tooltip': 'IIRを含む3Way以上で、クロス由来の位相差と合成Gainの山谷を抑えます。ONではWay・分割方式・周波数に合わせて自動更新します。ONからOFFへ切り替えると自動補償を解除し、Delayと手動極性は維持します。数値例と必要なリソースは、すぐ下の「位相構造補償の使い方」で確認できます。',
         'purpose': '''**クロス付近の位相差と、合成Gainの山谷を抑える機能です。**
 
-主にIIR LR2／LR4を含む3Way以上で使用します。3WayのMidには上下両方のクロスが作用するため、隣接Wayと比べると別のクロスによる位相回転が残ります。不足する位相回転を、各Wayの振幅を保つオールパスで補います。
+主にIIR LR2／LR4／NTM4を含む3Way以上で使用します。3WayのMidには上下両方のクロスが作用するため、隣接Wayと比べると別のクロスによる位相回転が残ります。不足する位相回転を、各Wayの振幅を保つオールパスで補います。
 
 **設定の流れ**
 
@@ -54,7 +54,7 @@ STRUCTURAL_PHASE_HELP = {
 | 3Way＋SUB／4Way | 2段 |
 | 4Way＋SUB | 3段 |
 
-3WayではLowとHighに各1段、Midは追加なしです。FIR・スルーの境界には自動構造補償用の段を生成しません。直接IIRで適用する場合、この機能だけで追加FIRタップは不要です。出力先のバイクアッド枠とオールパスへの対応を確認してください。
+3WayのLR構成ではLowとHighに各1段、Midは追加なしです。NTM4を含む構成では前段HPを共有するため、Lowに後段クロスのAPを追加し、QはそのLobe Heightに連動します。FIR・スルーの境界には自動構造補償用の段を生成しません。直接IIRで適用する場合、この機能だけで追加FIRタップは不要です。出力先のバイクアッド枠とオールパスへの対応を確認してください。
 
 このチェックは設定済みDelayを変更しません。オールパスには周波数ごとの群遅延があり、LR4用1段の中心1 kHz付近では約0.45 ms（96 kHz時）です。一定時間を全周波数へ加えるDelayとは区別して確認します。
 
@@ -94,7 +94,7 @@ For direct IIR output, each added all-pass section uses one SOS/biquad slot. The
 | 3Way+SUB / 4Way | 2 |
 | 4Way+SUB | 3 |
 
-In 3Way, Low and High each receive one section; Mid receives none. FIR and Through boundaries generate no automatic structural-compensation sections. Direct IIR application requires no additional FIR taps for this function. Check the output device's biquad capacity and all-pass support.
+In a 3Way LR bank, Low and High each receive one section; Mid receives none. Banks containing NTM4 share preceding HP stages, so Low receives the later crossover AP with Q derived from its Lobe Height. FIR and Through boundaries generate no automatic structural-compensation sections. Direct IIR application requires no additional FIR taps for this function. Check the output device's biquad capacity and all-pass support.
 
 This checkbox does not change configured Delay. All-pass sections introduce frequency-dependent group delay: approximately 0.45 ms near a 1 kHz center for one LR4 compensation section at 96 kHz. Distinguish this from adding a constant delay to all frequencies.
 

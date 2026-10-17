@@ -196,8 +196,8 @@ class LinearFIRFilter:
     mode: Literal["hp", "lp"]
     # Persisted compatibility name: this record now represents one output
     # band-split boundary.  FIR methods are convolved into the FIR output;
-    # IIR methods are exported separately as Linkwitz-Riley Biquads.
-    response: Literal["kaiser", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "through"] = "kaiser"
+    # IIR methods are exported separately as Biquad coefficients.
+    response: Literal["kaiser", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "iir_ntm4", "through"] = "kaiser"
     fc: float = 500.0
     cycles: float = 4.5
     beta: float = 12.0
@@ -206,6 +206,7 @@ class LinearFIRFilter:
     overlap_oct: float = 0.0
     lr2_auto_taps: bool = False
     acoustic_target: bool = False
+    lobe_height_db: float = -36.0
 
 
 @dataclass(frozen=True)
@@ -533,9 +534,12 @@ class DesignConfig:
             if item.mode not in ("hp", "lp"):
                 raise ValueError("output band-split mode must be hp or lp")
             if item.acoustic_target and item.response in {"kaiser", "through"}:
-                raise ValueError("音響ターゲットにはLR2／LR4を選択してください。")
-            if item.response not in ("kaiser", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "through"):
+                raise ValueError("音響ターゲットにはLR2／LR4／NTM4を選択してください。")
+            if item.response not in ("kaiser", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "iir_ntm4", "through"):
                 raise ValueError("unsupported output band-split method")
+            if item.response == "iir_ntm4":
+                from crossover_engine.ntm4 import validate_lobe_db
+                validate_lobe_db(item.lobe_height_db)
             if item.fc < 0:
                 raise ValueError("linear FIR fc must be >= 0")
             if not kaiser_cycles_in_range(item.cycles):
@@ -802,12 +806,12 @@ def _clip_linear_fir(item: LinearFIRFilter, sample_rate: int) -> LinearFIRFilter
             raise ValueError("Band split base crossover must be in 0..Nyquist")
         edges = kaiser_overlap_edges_hz(item.base_crossover_hz, item.overlap_oct)
         fc = edges[1 if item.mode == "hp" else 0]
-        if item.response in ("iir_lr2", "iir_lr4") and not 0 < fc < sample_rate / 2:
+        if item.response in ("iir_lr2", "iir_lr4", "iir_ntm4") and not 0 < fc < sample_rate / 2:
             raise ValueError("Band split IIR cutoff must be in 0..Nyquist after overlap")
     mode = item.mode if item.mode in ("hp", "lp") else "lp"
     response = (
         item.response
-        if item.response in ("kaiser", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "through")
+        if item.response in ("kaiser", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "iir_ntm4", "through")
         else "kaiser"
     )
     return LinearFIRFilter(
@@ -817,6 +821,7 @@ def _clip_linear_fir(item: LinearFIRFilter, sample_rate: int) -> LinearFIRFilter
         base_crossover_hz=item.base_crossover_hz,
         lr2_auto_taps=bool(item.lr2_auto_taps),
         acoustic_target=bool(item.acoustic_target),
+        lobe_height_db=item.lobe_height_db,
         overlap_oct=item.overlap_oct,
         cycles=clamp_kaiser_cycles(item.cycles),
         beta=clamp_kaiser_beta(item.beta),

@@ -77,8 +77,8 @@ def validate_phaseeq_assignment_request(request: PhaseEQAssignmentRequest) -> No
         raise ValueError("Channel, Way and Composite Group are required")
     if request.iir_crossover is not None:
         payload_iir = request.iir_crossover
-        if str(payload_iir.get("type", "")) not in {"OFF", "LR2", "LR4", "Mixed"}:
-            raise ValueError("Assignment IIR crossover must be OFF, LR2, LR4 or Mixed")
+        if str(payload_iir.get("type", "")) not in {"OFF", "LR2", "LR4", "NTM4", "Mixed"}:
+            raise ValueError("Assignment IIR crossover must be OFF, LR2, LR4, NTM4 or Mixed")
         if str(payload_iir.get("application", "")) != "exclusive_crossover_stage" or not bool(payload_iir.get("exclusive", False)):
             raise ValueError("Assignment crossover must use the exclusive stage contract")
         coefficient_fs = int(payload_iir.get("coefficient_sample_rate_hz", 0))

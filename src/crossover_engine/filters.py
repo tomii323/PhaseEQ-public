@@ -116,7 +116,7 @@ def generate_exclusive_kaiser_firs(
     count = len(ways) - 1
     if not all(len(values) == count for values in (frequencies, methods, overlaps, cycles_values, beta_values)):
         raise ValueError("exclusive crossover boundary count does not match Ways")
-    if any(value not in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "Through"} for value in methods):
+    if any(value not in {"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "NTM4", "Through"} for value in methods):
         raise ValueError("unsupported exclusive crossover method")
     result = {}
     for way_index, way in enumerate(ways):

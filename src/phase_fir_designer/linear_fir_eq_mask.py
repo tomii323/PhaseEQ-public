@@ -15,7 +15,7 @@ from .config import (
     LINEAR_FIR_EQ_MASK_SMOOTHING_DEFAULT,
 )
 from .iir import iir_frequency_response
-from .linear_fir import band_split_iir_filters, design_linear_fir
+from .linear_fir import band_split_iir_filters, band_split_output_sos, design_linear_fir
 from .phase_eq_mask_adaptive import apply_adaptive_phase_eq_mask_low
 
 DEFAULT_EQ_MASK_SMOOTHING_OCT = LINEAR_FIR_EQ_MASK_SMOOTHING_DEFAULT
@@ -55,7 +55,7 @@ def linear_fir_eq_mask(config: DesignConfig, frequency: np.ndarray) -> LinearFIR
         linear_filters = [LinearFIRFilter(**item)
                           for item in adjacent_filter_parameters(config.band_split_recipe)
                           if not item.get("acoustic_target", False) and (config.band_split_recipe.get("fir_enabled", True)
-                          or item["response"] in ("iir_lr2", "iir_lr4"))]
+                          or item["response"] in ("iir_lr2", "iir_lr4", "iir_ntm4"))]
     if not linear_filters:
         return None
     freq = np.asarray(frequency, dtype=float)
@@ -150,18 +150,21 @@ def _boundary_phase_guard_db(item) -> float:
 
 
 def _boundary_gain_db(config: DesignConfig, item, frequency: np.ndarray) -> np.ndarray:
-    if _normalized_method(item) in {"iir_lr2", "iir_lr4"}:
+    if _normalized_method(item) in {"iir_lr2", "iir_lr4", "iir_ntm4"}:
         boundary_config = DesignConfig(
             sample_rate=config.sample_rate,
             taps=config.taps,
             analysis_fft_size=config.analysis_fft_size,
             linear_fir_filters=[item],
         )
-        response = iir_frequency_response(
-            band_split_iir_filters(boundary_config),
-            config.sample_rate,
-            frequency,
-        )
+        if _normalized_method(item) == "iir_ntm4":
+            from scipy.signal import sosfreqz
+            response = sosfreqz(band_split_output_sos(boundary_config), worN=frequency,
+                                fs=config.sample_rate)[1]
+        else:
+            response = iir_frequency_response(
+                band_split_iir_filters(boundary_config), config.sample_rate, frequency,
+            )
     else:
         coefficients = design_linear_fir(config, item)
         fft_size = max(2, (frequency.size - 1) * 2)

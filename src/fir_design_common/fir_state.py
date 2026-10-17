@@ -71,11 +71,13 @@ def acoustic_target_frame_taps(
     *,
     overlap_oct: float = 0.0,
 ) -> int:
-    """Return the shared LR acoustic-target work frame."""
+    """Return the shared acoustic-target work frame."""
     return 2 * automatic_lr_natural_taps(
         sample_rate_hz,
         crossover_hz,
-        method,
+        # This is a provisional correction frame, not an NTM4 FIR prototype.
+        # Reuse the LR4 frame allocation for the fourth-order IIR target.
+        "LR4" if str(method).lower() in {"ntm4", "iir_ntm4"} else method,
         overlap_oct=overlap_oct,
     ) + 1
 

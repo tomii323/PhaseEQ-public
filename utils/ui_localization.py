@@ -161,6 +161,10 @@ def display_notice(message: object) -> str:
 
 
 JAPANESE_UI_LABELS: dict[str, str] = {
+    "NTM4": "NTM4",
+    "iir_ntm4": "NTM4（IIR）",
+    "NTM4 IIR(2 Biquads)": "NTM4 IIR（Biquad 2段）",
+    "Lobe Height (dB)": "Lobe Height (dB)",
     "Display FFT": "表示解析のFFT倍率",
     # Application pages
     "Project": "スピーカーパッケージ管理",

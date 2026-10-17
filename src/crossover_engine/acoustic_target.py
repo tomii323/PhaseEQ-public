@@ -1,4 +1,4 @@
-"""Acoustic LR goals: IIR magnitude, optionally with phase set to zero."""
+"""Acoustic crossover goals: shared digital IIR response or linear-phase magnitude."""
 import numpy as np
 from scipy.signal import butter, sosfreqz
 
@@ -18,7 +18,12 @@ def enabled(recipe):
                for j in (index-1, index) if 0 <= j < len(boundaries))
 
 
-def boundary_response(sample_rate, frequency, cutoff, side, order, linear_phase):
+def boundary_response(sample_rate, frequency, cutoff, side, order, linear_phase,
+                      *, method=None, lobe_height_db=-36.0):
+    if method in {"NTM4", "iir_ntm4"}:
+        from .ntm4 import ntm4_sos
+        return sosfreqz(ntm4_sos(side, cutoff, sample_rate, lobe_height_db),
+                        worN=np.asarray(frequency, float), fs=sample_rate)[1]
     sos = butter(order//2, cutoff, btype=side, fs=sample_rate, output="sos")
     h = sosfreqz(np.concatenate((sos, sos)), worN=np.asarray(frequency, float), fs=sample_rate)[1]
     return np.abs(h).astype(complex) if linear_phase else h
@@ -41,14 +46,15 @@ def response(recipe, frequency):
         if method == "Through":
             continue
         if method == "Kaiser FIR":
-            raise ValueError("音響ターゲットにはLR2／LR4を選択してください。")
+            raise ValueError("音響ターゲットにはLR2／LR4／NTM4を選択してください。")
         order = 4 if "4" in method else 2
         lp, hp = kaiser_overlap_edges_hz(b["base_crossover_hz"], b["overlap_oct"])
         # User-requested construction: take the *digital IIR* magnitude;
         # zero phase is explicit, never a minimum-phase reconstruction.
         result *= boundary_response(recipe["sample_rate_hz"], frequency,
                                     hp if side == "highpass" else lp, side, order,
-                                    method.startswith("Linear-phase"))
+                                    method.startswith("Linear-phase"), method=method,
+                                    lobe_height_db=b.get("lobe_height_db", -36.0))
     from .alignment import alignment_sos, target_enabled, separate_polarity, target_crossover_polarity
     result *= target_crossover_polarity(recipe)
     if target_enabled(recipe):

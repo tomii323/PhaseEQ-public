@@ -2,11 +2,11 @@
 from copy import deepcopy
 
 FIR_TO_IIR = {'linear_phase_lr2': 'iir_lr2', 'linear_phase_lr4': 'iir_lr4', 'kaiser': 'iir_lr4'}
-IIR_METHODS = ('iir_lr2', 'iir_lr4', 'through')
+IIR_METHODS = ('iir_lr2', 'iir_lr4', 'iir_ntm4', 'through')
 STUDIO_METHOD_IDS = {
     'Kaiser FIR': 'kaiser', 'Linear-phase LR2 FIR': 'linear_phase_lr2',
     'Linear-phase LR4 FIR': 'linear_phase_lr4', 'LR2': 'iir_lr2',
-    'LR4': 'iir_lr4', 'Through': 'through',
+    'LR4': 'iir_lr4', 'NTM4': 'iir_ntm4', 'Through': 'through',
 }
 
 
@@ -38,5 +38,5 @@ def convert_standalone_filters(items, *, fir_enabled, inherited):
 def acoustic_target_editable(method, *, inherited=False):
     """IIR matching may use the target even when FIR processing is disabled."""
     return not inherited and method in {
-        'linear_phase_lr2', 'linear_phase_lr4', 'iir_lr2', 'iir_lr4',
+        'linear_phase_lr2', 'linear_phase_lr4', 'iir_lr2', 'iir_lr4', 'iir_ntm4',
     }

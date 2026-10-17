@@ -1548,6 +1548,12 @@ def normalize_settings(raw_settings):
             )
             for index in range(needed)
         ]
+        from crossover_engine.ntm4 import validate_lobe_db
+        raw_lobes = mode_conf.get("boundary_lobe_heights_db", [])
+        mode_conf["boundary_lobe_heights_db"] = [
+            validate_lobe_db(raw_lobes[i] if i < len(raw_lobes) else -36.0)
+            for i in range(needed)
+        ]
         target_flags = mode_conf.get("boundary_acoustic_targets", [])
         mode_conf["boundary_acoustic_targets"] = [
             bool(target_flags[i]) and acoustic_target_allowed(method)
@@ -2389,6 +2395,7 @@ def _apply_imported_config(imported, source_label, resume_filename=None):
         mode,
         mode_conf.get("crossover_methods", ()),
         mode_conf.get("boundary_acoustic_targets", ()),
+        lobe_heights_db=mode_conf.get("boundary_lobe_heights_db", ()),
         overwrite=True,
     )
 
@@ -2534,6 +2541,7 @@ with st.sidebar:
             selected_key,
             selected_conf.get("crossover_methods", ()),
             selected_conf.get("boundary_acoustic_targets", ()),
+            lobe_heights_db=selected_conf.get("boundary_lobe_heights_db", ()),
             overwrite=True,
         )
         settings["last_mode"] = selected_key
@@ -2627,6 +2635,7 @@ with st.sidebar:
             mode_key,
             conf.get("crossover_methods", ()),
             conf.get("boundary_acoustic_targets", ()),
+            lobe_heights_db=conf.get("boundary_lobe_heights_db", ()),
             overwrite=True,
         )
         for index, frequency_key in enumerate(boundary_frequency_keys(mode_key, len(conf["cross_freqs"]))):
@@ -2673,9 +2682,11 @@ with st.sidebar:
             st.session_state, mode_key, method_count,
             fallback_methods=updated_conf.get("crossover_methods", ()),
             fallback_targets=updated_conf.get("boundary_acoustic_targets", ()),
+            fallback_lobes=updated_conf.get("boundary_lobe_heights_db", ()),
         )
         updated_conf["crossover_methods"] = list(controls.methods)
         updated_conf["boundary_acoustic_targets"] = list(controls.acoustic_targets)
+        updated_conf["boundary_lobe_heights_db"] = list(controls.lobe_heights_db)
         return updated, updated_conf, controls
 
     def _commit_crossover_settings(updated) -> None:
@@ -2963,6 +2974,7 @@ with st.sidebar:
                 st.session_state, mode_key, 3,
                 fallback_methods=mode_conf.get("crossover_methods", ()),
                 fallback_targets=mode_conf.get("boundary_acoustic_targets", ()),
+                fallback_lobes=mode_conf.get("boundary_lobe_heights_db", ()),
             ).methods
         ):
             st.caption(ui_message('ui.f18c855684f002'))
@@ -3081,6 +3093,7 @@ with st.sidebar:
                 st.session_state, mode_key, len(cross_freqs),
                 fallback_methods=updated_conf.get("crossover_methods", ()),
                 fallback_targets=updated_conf.get("boundary_acoustic_targets", ()),
+                fallback_lobes=updated_conf.get("boundary_lobe_heights_db", ()),
             )
             current_taps = {
                 band: int(st.session_state.get(f"{band}_crop", 0) or 0)
@@ -3098,6 +3111,7 @@ with st.sidebar:
             mode_key,
             updated[mode_key].get("crossover_methods", ()),
             updated[mode_key].get("boundary_acoustic_targets", ()),
+            lobe_heights_db=updated[mode_key].get("boundary_lobe_heights_db", ()),
             overwrite=True,
         )
         st.session_state["settings"] = updated
@@ -3116,6 +3130,7 @@ with st.sidebar:
         st.session_state, mode_key, len(cross_freqs),
         fallback_methods=mode_conf.get("crossover_methods", ()),
         fallback_targets=mode_conf.get("boundary_acoustic_targets", ()),
+        fallback_lobes=mode_conf.get("boundary_lobe_heights_db", ()),
     )
     _has_fir_split = bool(bands_requiring_split_fir(bands, [
         "Through" if active_controls.acoustic_targets[index] else method
@@ -3252,11 +3267,13 @@ with st.sidebar:
         st.session_state, mode_key, len(cross_freqs),
         fallback_methods=mode_conf.get("crossover_methods", ()),
         fallback_targets=mode_conf.get("boundary_acoustic_targets", ()),
+        fallback_lobes=mode_conf.get("boundary_lobe_heights_db", ()),
     )
     current_conf = {
         'phase_alignment_acoustic_target': bool(st.session_state.get('settings', {}).get(mode_key, {}).get('phase_alignment_acoustic_target', False)),
         'lr2_auto_taps': True,
         'boundary_acoustic_targets': list(boundary_controls.acoustic_targets),
+        'boundary_lobe_heights_db': list(boundary_controls.lobe_heights_db),
         'fs': int(fs),
         'cycles': float(cycles),
         'beta': float(beta),

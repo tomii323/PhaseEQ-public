@@ -608,7 +608,7 @@ LINEAR_FIR_PROFILE_LABELS = {
     "Mid": "Band pass",
     "Lo": "Low band",
 }
-OUTPUT_BAND_SPLIT_METHODS = ("kaiser", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "through")
+OUTPUT_BAND_SPLIT_METHODS = ("kaiser", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "iir_ntm4", "through")
 OUTPUT_BAND_SPLIT_METHOD_LABELS = {
     "kaiser": "Kaiser-window linear-phase FIR",
     "linear_phase_lr2": "LR2 linear-phase FIR",
@@ -616,6 +616,7 @@ OUTPUT_BAND_SPLIT_METHOD_LABELS = {
     "through": "スルー（外部で帯域分割済み）",
     "iir_lr2": "LR2 IIR(Biquad)",
     "iir_lr4": "LR4 IIR(2 Biquads)",
+    "iir_ntm4": "NTM4 IIR(2 Biquads)",
 }
 LINEAR_FIR_DEFAULT_LOW_FC_HZ = 500.0
 LINEAR_FIR_DEFAULT_HIGH_FC_HZ = 2500.0
@@ -3207,6 +3208,7 @@ def _linear_fir_current_ui_state() -> dict[str, dict[str, Any]]:
             "beta": float(st.session_state.get("linear_fir_hp_beta", LINEAR_FIR_DEFAULT_BETA)),
             "overlap_oct": float(st.session_state.get("linear_fir_hp_overlap_oct", 0.0)),
             "acoustic_target": bool(st.session_state.get("linear_fir_hp_acoustic_target", False)),
+            "lobe_height_db": float(st.session_state.get("linear_fir_hp_lobe_height_db", -36.0)),
             "lr2_auto_taps": any(item.get("mode") == "hp" and item.get("lr2_auto_taps", False) for item in _items_for("linear_fir_items")),
             "uses_base_crossover": any(item.get("mode") == "hp" and item.get("base_crossover_hz") is not None for item in _items_for("linear_fir_items")),
         },
@@ -3217,6 +3219,7 @@ def _linear_fir_current_ui_state() -> dict[str, dict[str, Any]]:
             "beta": float(st.session_state.get("linear_fir_lp_beta", LINEAR_FIR_DEFAULT_BETA)),
             "overlap_oct": float(st.session_state.get("linear_fir_lp_overlap_oct", 0.0)),
             "acoustic_target": bool(st.session_state.get("linear_fir_lp_acoustic_target", False)),
+            "lobe_height_db": float(st.session_state.get("linear_fir_lp_lobe_height_db", -36.0)),
             "lr2_auto_taps": any(item.get("mode") == "lp" and item.get("lr2_auto_taps", False) for item in _items_for("linear_fir_items")),
             "uses_base_crossover": any(item.get("mode") == "lp" and item.get("base_crossover_hz") is not None for item in _items_for("linear_fir_items")),
         },
@@ -3234,6 +3237,8 @@ def _clear_linear_fir_parameter_widget_state() -> None:
         "linear_fir_lp_beta",
         "linear_fir_hp_overlap_oct",
         "linear_fir_lp_overlap_oct",
+        "linear_fir_hp_lobe_height_db",
+        "linear_fir_lp_lobe_height_db",
     ):
         st.session_state.pop(safe_widget_key("__num_val_", settings_key), None)
     for settings_key in ("linear_fir_hp_response", "linear_fir_lp_response"):
@@ -3279,6 +3284,7 @@ def _restore_linear_fir_profile_state(profile: str) -> None:
     hp_state = state.get("hp", {})
     lp_state = state.get("lp", {})
     for mode, saved in (("hp", hp_state), ("lp", lp_state)):
+        st.session_state[f"linear_fir_{mode}_lobe_height_db"] = float(saved.get("lobe_height_db", -36.0))
         st.session_state[f"linear_fir_{mode}_overlap_oct"] = float(saved.get("overlap_oct", 0.0))
         st.session_state[f"linear_fir_{mode}_acoustic_target"] = bool(saved.get("acoustic_target", False))
     if hp_state:
@@ -3400,6 +3406,7 @@ def _linear_fir_raw_items_from_profile(profile: str) -> list[dict[str, Any]]:
         overlap = float(st.session_state.get(f"linear_fir_{mode}_overlap_oct", old.get("overlap_oct", 0.0)))
         saved_boundary = _linear_fir_profile_memory().get(profile, {}).get(mode, {})
         raw["acoustic_target"] = bool(st.session_state.get(f"linear_fir_{mode}_acoustic_target", old.get("acoustic_target", False))) and raw["response"] not in {"kaiser", "through"}
+        raw["lobe_height_db"] = float(st.session_state.get(f"linear_fir_{mode}_lobe_height_db", old.get("lobe_height_db", -36.0)))
         raw["lr2_auto_taps"] = raw["response"] == "linear_phase_lr2"
         is_new = not any(item.get("mode") == mode for item in existing) and not saved_boundary
         if old.get("base_crossover_hz") is not None or overlap != 0.0 or is_new or saved_boundary.get("uses_base_crossover", False):
@@ -3440,6 +3447,7 @@ def _linear_fir_items_semantic(items: list[dict[str, Any]]) -> list[tuple]:
                 bool(item.get("lr2_auto_taps", False)),
                 bool(item.get("acoustic_target", False)),
                 float(item.get("overlap_oct", 0.0)),
+                float(item.get("lobe_height_db", -36.0)),
             )
         )
     return compact
@@ -8402,6 +8410,8 @@ def _render_linear_fir_preset_manager() -> None:
             "lp_method": _normalize_output_band_split_method((selected_lp or {}).get("response", "kaiser")),
             "hp_overlap_oct": float((selected_hp or {}).get("overlap_oct", 0.0)),
             "lp_overlap_oct": float((selected_lp or {}).get("overlap_oct", 0.0)),
+            "hp_lobe_height_db": float((selected_hp or {}).get("lobe_height_db", -36.0)),
+            "lp_lobe_height_db": float((selected_lp or {}).get("lobe_height_db", -36.0)),
         },
     )
     _enforce_standalone_fir_capability()
@@ -8423,6 +8433,7 @@ def _render_linear_fir_preset_manager() -> None:
                     == "linear_phase_lr2"
                 ),
                 acoustic_target=bool(item.get("acoustic_target", False)),
+                lobe_height_db=float(item.get("lobe_height_db", -36.0)),
                 overlap_oct=float(item.get("overlap_oct", 0.0)),
             )
             for item in selected.get("filters", [])
@@ -8469,6 +8480,11 @@ def _render_linear_fir_preset_manager() -> None:
         format_func=localized_formatter(lambda value: OUTPUT_BAND_SPLIT_METHOD_LABELS[str(value)]),
         key="linear_fir_preset_lp_method",
     )
+    for side, method in (("hp", hp_method), ("lp", lp_method)):
+        if method == "iir_ntm4":
+            from ui.ntm4_controls import render_lobe_height
+            render_lobe_height(f"linear_fir_preset_{side}_lobe_height_db",
+                               default=float(st.session_state.get(f"linear_fir_preset_{side}_lobe_height_db", -36.0)))
     parameter_cols = st.columns(4, gap="small")
     hp_cycles = parameter_cols[0].number_input(
         ui_message('ui.e8647f7ca1fb3d'),
@@ -8523,6 +8539,7 @@ def _render_linear_fir_preset_manager() -> None:
         )
         from crossover_engine.filters import kaiser_overlap_edges_hz
         for item in filters:
+            item["lobe_height_db"] = float(st.session_state.get(f"linear_fir_preset_{item['mode']}_lobe_height_db", -36.0))
             overlap = hp_overlap_oct if item["mode"] == "hp" else lp_overlap_oct
             item["base_crossover_hz"] = item["fc"]
             item["overlap_oct"] = float(overlap)
@@ -9767,8 +9784,10 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                 st.caption(ui_message('ui.2e29a3e5b6f7f9', p0=f'{role}'))
                 continue
             st.checkbox(ui_message('ui.6af081827d6a12', p0=f'{role}'), value=bool(detail.get("acoustic_target", False)), disabled=True, key=f"recipe_acoustic_{boundary_index}_{bool(detail.get('acoustic_target', False))}", help=ui_message('ui.5c45791034edae'))
-            if detail["method"] in {"Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4"}:
+            if detail["method"] in {"Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "NTM4"}:
                 render_acoustic_target_guide(role, studio=True, method=detail["method"])
+            if detail["method"] == "NTM4":
+                st.caption(f"Lobe Height: {detail.get('lobe_height_db', -36.0):.1f} dB")
             cutoff = detail["highpass_cutoff_hz" if role == "HP" else "lowpass_cutoff_hz"]
             st.caption(ui_message('ui.79157e7b373068', p0=f'{role}', p1=f"{detail['method']}", p2=f"{detail['base_crossover_hz']:,.3f}", p3=f"{detail['overlap_oct']:+.3f}", p4=f'{cutoff:,.3f}')
                        + (ui_message('ui.ea5173bcc61c62', p0=f"{detail['natural_taps']}") if detail['natural_taps'] else ui_message('ui.bcf4235e3ce307')))
@@ -9800,6 +9819,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                         == "linear_phase_lr2"
                     ),
                     acoustic_target=bool(item.get("acoustic_target", False)),
+                    lobe_height_db=float(item.get("lobe_height_db", -36.0)),
                     overlap_oct=item.get("overlap_oct", 0.0), cycles=item["cycles"], beta=item["beta"],
                     enabled=item.get("enabled", True)) for item in existing])
             _invalidate_live_result_cache()
@@ -9833,7 +9853,7 @@ def _render_linear_fir_filters(nyquist: float) -> None:
     st.button(ui_message('ui.a8d5202b595033'), key="reset_linear_fir_profile",
               on_click=_reset_linear_fir_profile,
               disabled=composite_locked or profile not in {"Hi", "Mid", "Lo"},
-              help=ui_message('ui.5deca7c9987c96'))
+              help=ui_message('ui.49c585d962ca7b'))
     use_hp = profile in ("Hi", "Mid")
     use_lp = profile in ("Lo", "Mid")
     is_mid_profile = profile == "Mid"
@@ -9896,6 +9916,12 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     disabled=composite_locked or hp_response != "kaiser",
                     on_change=_commit_linear_fir_boundary_edit,
                 )
+            if hp_response == "iir_ntm4":
+                from ui.ntm4_controls import render_lobe_height
+                render_lobe_height("linear_fir_hp_lobe_height_db",
+                                   default=float(hp_item.get("lobe_height_db", -36.0)),
+                                   on_change=_commit_linear_fir_boundary_edit,
+                                   disabled=composite_locked)
             acoustic_key = "linear_fir_hp_acoustic_target"
             st.session_state.setdefault(acoustic_key, bool(hp_item.get("acoustic_target", False)))
             if hp_response in {"kaiser", "through"}:
@@ -9904,9 +9930,9 @@ def _render_linear_fir_filters(nyquist: float) -> None:
             _set_setting_and_widget(acoustic_key, st.session_state[acoustic_key], "__chk_val_")
             checkbox_stateful(ui_message('ui.651305db13550c'), settings_key=acoustic_key,
                         disabled=not acoustic_target_editable(hp_response, inherited=composite_locked),
-                        help=ui_message('ui.a11bebb9ea97e2'),
+                        help=ui_message('ui.2f7ebf25302338'),
                         on_change=_commit_linear_fir_boundary_edit)
-            if hp_response in {"linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4"}:
+            if hp_response in {"linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "iir_ntm4"}:
                 render_acoustic_target_guide("HP", studio=False)
             if hp_response in ("kaiser", "linear_phase_lr2", "linear_phase_lr4"):
                 from phase_fir_designer.linear_fir import multiway_kaiser_taps
@@ -9975,6 +10001,12 @@ def _render_linear_fir_filters(nyquist: float) -> None:
                     disabled=composite_locked or lp_response != "kaiser",
                     on_change=_commit_linear_fir_boundary_edit,
                 )
+            if lp_response == "iir_ntm4":
+                from ui.ntm4_controls import render_lobe_height
+                render_lobe_height("linear_fir_lp_lobe_height_db",
+                                   default=float(lp_item.get("lobe_height_db", -36.0)),
+                                   on_change=_commit_linear_fir_boundary_edit,
+                                   disabled=composite_locked)
             acoustic_key = "linear_fir_lp_acoustic_target"
             st.session_state.setdefault(acoustic_key, bool(lp_item.get("acoustic_target", False)))
             if lp_response in {"kaiser", "through"}:
@@ -9983,9 +10015,9 @@ def _render_linear_fir_filters(nyquist: float) -> None:
             _set_setting_and_widget(acoustic_key, st.session_state[acoustic_key], "__chk_val_")
             checkbox_stateful(ui_message('ui.651305db13550c'), settings_key=acoustic_key,
                         disabled=not acoustic_target_editable(lp_response, inherited=composite_locked),
-                        help=ui_message('ui.a11bebb9ea97e2'),
+                        help=ui_message('ui.2f7ebf25302338'),
                         on_change=_commit_linear_fir_boundary_edit)
-            if lp_response in {"linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4"}:
+            if lp_response in {"linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "iir_ntm4"}:
                 render_acoustic_target_guide("LP", studio=False)
             if lp_response in ("kaiser", "linear_phase_lr2", "linear_phase_lr4"):
                 from phase_fir_designer.linear_fir import multiway_kaiser_taps
@@ -11364,6 +11396,7 @@ def _collect_linear_fir_state(nyquist: float) -> list[LinearFIRFilter]:
                     == "linear_phase_lr2"
                 ),
                 acoustic_target=bool(item.get("acoustic_target", False)),
+                lobe_height_db=float(item.get("lobe_height_db", -36.0)),
                 overlap_oct=float(item.get("overlap_oct", 0.0)),
                 enabled=True,
             )
@@ -11762,6 +11795,7 @@ def _sync_linear_fir_registry(
                 "lr2_auto_taps": item.lr2_auto_taps,
                 "acoustic_target": item.acoustic_target,
                 "overlap_oct": item.overlap_oct,
+                "lobe_height_db": item.lobe_height_db,
             },
             item_id=f"linear_fir_{idx}",
             enabled=bool(item.enabled),
@@ -11775,7 +11809,7 @@ def _sync_linear_fir_registry(
         settings_key="linear_fir_items",
         item_type="linear_fir",
         label="Linear FIR",
-        fields=("enabled", "mode", "response", "fc", "cycles", "beta", "base_crossover_hz", "overlap_oct"),
+        fields=("enabled", "mode", "response", "fc", "cycles", "beta", "base_crossover_hz", "overlap_oct", "lobe_height_db"),
         path=("Linear FIR",),
     )
     loaded_profile = _normalize_linear_fir_profile(
@@ -11787,6 +11821,7 @@ def _sync_linear_fir_registry(
     hp_item = _linear_fir_first_item([dict(item) for item in items], "hp")
     lp_item = _linear_fir_first_item([dict(item) for item in items], "lp")
     for side, item in (("hp", hp_item), ("lp", lp_item)):
+        _set_setting_and_widget(f"linear_fir_{side}_lobe_height_db", float(item.get("lobe_height_db", -36.0)), "__num_val_")
         st.session_state[f"linear_fir_{side}_acoustic_target"] = bool(item.get("acoustic_target", False))
     _set_setting_and_widget("linear_fir_hp_response", _normalize_output_band_split_method(hp_item.get("response", "kaiser")), "__sel_val_")
     _set_setting_and_widget("linear_fir_lp_response", _normalize_output_band_split_method(lp_item.get("response", "kaiser")), "__sel_val_")
@@ -12640,6 +12675,7 @@ def _apply_composite_linear_fir_assignment(assignment: Any) -> None:
         st.session_state[f"linear_fir_{mode}_fc"] = float(item["fc"])
         st.session_state[f"linear_fir_{mode}_cycles"] = float(item["cycles"])
         st.session_state[f"linear_fir_{mode}_beta"] = float(item["beta"])
+        st.session_state[f"linear_fir_{mode}_lobe_height_db"] = float(item.get("lobe_height_db", -36.0))
     _set_registry_items("linear_fir_items", filters)
     st.session_state["_linear_fir_domain_profile"] = profile
     st.session_state["linear_fir_active_profile"] = profile
@@ -14102,14 +14138,13 @@ def _apply_composite_iir_after_kaiser(result: Any, sample_rate: int) -> Any:
 
 def _apply_output_band_split_iir(result: Any, config: DesignConfig) -> Any:
     """Add Band Split Biquads to prediction without modifying FIR coefficients."""
-    filters = band_split_iir_filters(config)
-    if not filters and config.band_split_recipe is None:
+    from phase_fir_designer.linear_fir import band_split_output_sos
+    from scipy.signal import sosfreqz
+    sos = band_split_output_sos(config)
+    if not sos.size:
         return result
     frequency = np.asarray(result.frequency, dtype=float)
-    crossover = iir_frequency_response(filters, int(config.sample_rate), frequency)
-    if config.band_split_recipe is not None:
-        from crossover_engine.alignment import output_response
-        crossover = output_response(config.band_split_recipe, frequency)
+    crossover = sosfreqz(sos, worN=frequency, fs=config.sample_rate)[1]
     source = 10.0 ** (np.asarray(result.realized_gain_db) / 20.0) * np.exp(
         1j * np.deg2rad(np.asarray(result.realized_phase_unwrapped_deg))
     )
@@ -15549,10 +15584,11 @@ def _display_response_bundles(result, speaker, target, sample_rate, iir_filters=
                 extra = cache.get(display_analysis.digest("recipe_iir", recipe, sample_rate, n), evaluate_recipe)
                 correction = display_analysis.multiply(cache, correction, extra)
             else:
-                filters = band_split_iir_filters(config)
-                if filters:
+                from phase_fir_designer.linear_fir import band_split_output_sos
+                split_sos = band_split_output_sos(config)
+                if split_sos.size:
                     correction = display_analysis.multiply(cache, correction,
-                        display_analysis.sos_response(cache, cascade_iir_sos(filters, sample_rate), sample_rate, n))
+                        display_analysis.sos_response(cache, split_sos, sample_rate, n))
                 payload = active_assignment_crossover(st.session_state)
                 if isinstance(payload, dict) and payload.get("enabled"):
                     if int(payload.get("coefficient_sample_rate_hz", 0)) != sample_rate:

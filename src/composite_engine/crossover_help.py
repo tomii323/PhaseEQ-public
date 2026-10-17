@@ -12,11 +12,14 @@ FILTER_COMPARISON = {
 | LR4 FIR | 平坦性を保つ設計 | 直線位相 | 約24 dB/octで、LR2より帯域を分離 | 強い分離と直線位相のため、タップ数・遅延の余裕が必要 | LR形状で帯域分離を強め、直線位相も保ちたい |
 | LR2 IIR | 極性補償後に平坦 | 周波数に応じて位相回転 | 約12 dB/octの緩やかな分割 | 分割段は1バイクアッド。FIRタップ不要 | 軽い処理で緩やかに分割したい |
 | LR4 IIR | 平坦 | 周波数に応じて位相回転 | 約24 dB/octで、LR2より帯域を分離 | 分割段は2バイクアッド。FIRタップ不要 | 低負荷と帯域分離を両立したい |
+| NTM4 IIR | 平坦 | 周波数に応じて位相回転 | ノッチ後の阻止帯域ピークを−20〜−80 dBで調整 | LP/HP各2バイクアッド。3Way以上は自動適用ONで補償APを追加 | ノッチとLobe Heightで帯域外の特性を調整したい |
 | スルー | 追加分割なし | 追加分割による位相変化なし | 外部ネットワークの分割特性を使用 | 追加の分割用タップ・バイクアッド不要 | 外部で完成した帯域分割を活用したい |
 
 カイザー窓の約24〜192 dB/octは、96 kHz・クロス1 kHz・重ね代0、−20〜−100 dB間の平均減衰スロープの目安です。LRの固定次数による傾きとは異なり、全区間で一定ではありません。
 
 FIRのタップ数は、必要な減衰・再現精度と、DSP容量・許容遅延の釣り合いで選びます。IIRの隣接帯域が同相でつながることは、合成Phaseが直線になることを意味しません。
+
+LR4 IIRは、広い帯域外を単調に減衰させる標準の比較基準です。NTM4 IIRは、ノッチ付近の共振を抑えたい場合に比較します。Lobe Heightを下げるとノッチはクロスから遠ざかり、再上昇が小さくなります。ノッチ後と遠方の減衰、合成特性も確認してください。
 """,
     "en": """### Choosing a crossover filter
 
@@ -29,11 +32,14 @@ This compares the crossover filters themselves. Summed gain assumes zero overlap
 | LR4 FIR | Designed for flat summation | Linear phase | Approx. 24 dB/oct for stronger separation than LR2 | Allow sufficient taps and delay for separation with linear phase | Strengthen separation with an LR shape while keeping linear phase |
 | LR2 IIR | Flat after polarity compensation | Frequency-dependent phase rotation | Approx. 12 dB/oct for gentle separation | One biquad per crossover section; no FIR taps | Obtain gentle separation with low processing load |
 | LR4 IIR | Flat | Frequency-dependent phase rotation | Approx. 24 dB/oct for stronger separation than LR2 | Two biquads per crossover section; no FIR taps | Balance low processing load with band separation |
+| NTM4 IIR | Flat | Frequency-dependent phase rotation | Adjust the post-notch stopband peak from −20 to −80 dB | Two biquads per LP/HP; AP compensation for three or more Ways when automatic application is ON | Tune stopband behavior using notches and Lobe Height |
 | Through | No added crossover | No phase change from an added crossover | Use the external crossover response | No additional crossover taps or biquads | Use a crossover already implemented externally |
 
 The Kaiser estimate of 24–192 dB/oct is the average slope between −20 and −100 dB at 96 kHz, a 1 kHz crossover and zero overlap. Unlike fixed-order LR slopes, it is not constant throughout the response.
 
 Choose FIR length by balancing attenuation and accuracy against DSP capacity and acceptable delay. Adjacent IIR bands adding in phase does not mean the summed phase is linear.
+
+Use LR4 IIR as the reference for monotonic attenuation across a broad stopband. Compare NTM4 IIR when a notch can suppress an unwanted resonance. Lower Lobe Height moves the notch farther from the crossover and reduces the post-notch peak. Check attenuation beyond the notch and in the far stopband, as well as the summed response.
 """,
 }
 
@@ -56,7 +62,7 @@ FIRは、音量の周波数バランスや位相、帯域の分割を調整す�
 > → 必要な箇所を一つだけ変更 → 最終タップ数・遅延を確認して保存
 
 1. **方式を選びます。** FIR非対応、または負荷・遅延を抑えたい場合はIIRを選びます。緩やかにつなぐ場合はLR2 IIR、帯域分離を強める場合はLR4 IIRを選びます。FIRでは、緩やかな接続はLR2 FIR、LR形状で分離を強める場合はLR4 FIR、急峻さ・減衰を調整したい場合はカイザー窓を選びます。外部で帯域分割済みの場合はスルーを使います。
-2. **クロス周波数を設定します。** 各スピーカーの測定で信頼できる帯域と使用可能範囲に合わせます。周期数・β値・タップ数は初期値を使い、重ね代は0で確認します。LR方式で通常の分割を出力する場合は「音響ターゲットに反映」をOFFにします。実測特性をLR目標へ補正する場合はONにし、別の「音響ターゲット補正の使い方」に沿ってEQを設定します。
+2. **クロス周波数を設定します。** 各スピーカーの測定で信頼できる帯域と使用可能範囲に合わせます。周期数・β値・タップ数は初期値を使い、重ね代は0で確認します。LR／NTM4方式で通常の分割を出力する場合は「音響ターゲットに反映」をOFFにします。実測特性を選択した目標へ補正する場合はONにし、別の「音響ターゲット補正の使い方」に沿ってEQを設定します。
 3. **グラフで確認します。** 各帯域の分離・帯域外の減衰、合成のクロス付近の山や谷を確認します。PhaseEQでは自動表示更新がOFFなら「更新」、マルチウェイでは「再計算」を押します。条件は一つずつ変更し、同じ表示条件で比較します。
 4. **出力前に確認します。** 最終FIRタップ数をDSPの上限と比べます。必要タップ数の目安は分割段の長さ、最終FIRタップ数は補正・合成・クロップ後に保存する係数の長さです。映像との同期やリアルタイム用途では、機器側の遅延も含めて確認します。保存した係数を対応DSPへ適用し、実測で最終確認します。
 
@@ -128,11 +134,11 @@ ACOUSTIC_FLOW = {
 > → 手動EQまたはAuto Gain／Auto Phaseを設定\\
 > → マルチウェイへ返却 → 再計算して合成確認
 
-FIR OFFの場合はIIRイコライザーで補正します。方式・クロス周波数・ON／OFFを変更したら、再送信して各Wayの補正を更新します。
+FIR OFFの場合はIIRイコライザーで補正します。方式・クロス周波数・Lobe Height・ON／OFFを変更したら、再送信して各Wayの補正を更新します。
 """,
         "phaseeq": """**ONにするだけでは補正は完了しません。**
 
-> LR方式・クロス周波数を設定してON → 振幅・位相を含む測定を適用\\
+> LR／NTM4方式・クロス周波数・Lobe Heightを設定してON → 振幅・位相を含む測定を適用\\
 > → 入力をTargetへレベル合わせ → 手動EQまたはAuto Gain／Auto Phaseを設定\\
 > → 更新して最終特性を確認 → 保存・出力
 
@@ -146,11 +152,11 @@ FIR OFFの場合はIIRイコライザーで補正します。方式・クロス�
 > → Set manual EQ or Auto Gain / Auto Phase\\
 > → Return to Multiway → Recalculate and inspect the summed response
 
-With FIR OFF, correct using IIR EQ. After changing method, crossover frequency or ON/OFF, resend and update each Way's correction.
+With FIR OFF, correct using IIR EQ. After changing method, crossover frequency, Lobe Height or ON/OFF, resend and update each Way's correction.
 """,
         "phaseeq": """**Turning ON alone does not complete correction.**
 
-> Set LR method and crossover, then turn ON → Apply magnitude and phase measurement\\
+> Set LR or NTM4 method and crossover (and NTM4 Lobe Height), then turn ON → Apply magnitude and phase measurement\\
 > → Match input level to Target → Set manual EQ or Auto Gain / Auto Phase\\
 > → Update and inspect the final response → Save and export
 
@@ -178,7 +184,8 @@ METHOD_USAGE = {
         "Linear-phase LR2 FIR": "LR2 FIR：平坦な合成Gainと直線位相を保つ設計。約12 dB/octで隣接帯域を緩やかにつなぎたい場合に選びます。必要な再現精度とFIR長・遅延の釣り合いを確認します。",
         "Linear-phase LR4 FIR": "LR4 FIR：平坦な合成Gainと直線位相を保つ設計。約24 dB/octでLR2より帯域を分離したい場合に選びます。強い分離と直線位相にはタップ数・遅延の余裕が必要です。",
         "LR2": "LR2 IIR：極性補償後に平坦な合成Gainを得られます。約12 dB/oct、分割段は1バイクアッドで、分割用FIRタップは不要です。軽い処理で緩やかに分割したい場合に選びます。合成Phaseは周波数に応じて回転します。",
-        "LR4": "LR4 IIR：平坦な合成Gainを得られます。約24 dB/oct、分割段は2バイクアッドで、分割用FIRタップは不要です。低負荷と帯域分離を両立したい場合に選びます。合成Phaseは周波数に応じて回転します。",
+        "NTM4": "NTM4 IIR：LP/HP各2バイクアッド。LR4を基準に、ノッチ付近の共振を抑えたい場合に比較します。Lobe Heightでノッチ位置と再上昇ピークを調整し、遠方の減衰も確認します。重ね代0・追加補正なしの相補IIR構成は、必要な構造補償APを含めて0 dBに合成されます。合成位相は回転します。",
+        "LR4": "LR4 IIR：平坦な合成Gainを得られます。約24 dB/oct、分割段は2バイクアッドで、分割用FIRタップは不要です。広い帯域外を単調に減衰させる標準の比較基準です。合成Phaseは周波数に応じて回転します。",
         "Through": "スルー：外部で完成した帯域分割を活用します。追加の分割によるGain・Phaseの変化や、分割用タップ・バイクアッドを避けられます。必要な分割は外部ネットワーク側で実現してください。",
     },
     "en": {
@@ -186,7 +193,8 @@ METHOD_USAGE = {
         "Linear-phase LR2 FIR": "LR2 FIR: designed for flat summed gain and linear phase. Choose its approx. 12 dB/oct shape for a gentle transition between bands. Balance accuracy against FIR length and delay.",
         "Linear-phase LR4 FIR": "LR4 FIR: designed for flat summed gain and linear phase. Choose its approx. 24 dB/oct shape for stronger separation than LR2. Allow sufficient taps and delay.",
         "LR2": "LR2 IIR: flat summed gain after polarity compensation. Approx. 12 dB/oct with one biquad per crossover section and no crossover FIR taps. Choose gentle separation with low processing load. Summed phase rotates with frequency.",
-        "LR4": "LR4 IIR: flat summed gain. Approx. 24 dB/oct with two biquads per crossover section and no crossover FIR taps. Choose low processing load with stronger separation. Summed phase rotates with frequency.",
+        "NTM4": "NTM4 IIR: two biquads per LP/HP. Compare against LR4 when a notch can suppress an unwanted resonance. Lobe Height adjusts notch position and the post-notch peak; also check far-stopband attenuation. Complementary IIR banks with zero overlap and no extra correction sum to 0 dB with the required structural AP compensation. Summed phase rotates.",
+        "LR4": "LR4 IIR: flat summed gain. Approx. 24 dB/oct with two biquads per crossover section and no crossover FIR taps. Use as the reference for monotonic attenuation across a broad stopband. Summed phase rotates with frequency.",
         "Through": "Through: use an external crossover already in place. Avoid gain/phase changes and tap/biquad usage from an added crossover. The required separation must be provided by the external network.",
     },
 }
@@ -202,7 +210,8 @@ METHOD_SELECTOR_SUMMARY = {
         "Linear-phase LR2 FIR": "**LR2 FIR**：平坦な合成Gain・直線位相。約12 dB/octで緩やかにつなぐ場合に選びます。",
         "Linear-phase LR4 FIR": "**LR4 FIR**：平坦な合成Gain・直線位相。約24 dB/octで帯域分離を強める場合に選びます。",
         "LR2": "**LR2 IIR**：極性補償後に平坦な合成Gain。約12 dB/oct・1バイクアッド。軽い処理で緩やかにつなぐ場合に選びます。合成Phaseは周波数に応じて回転します。",
-        "LR4": "**LR4 IIR**：平坦な合成Gain。約24 dB/oct・2バイクアッド。低負荷と帯域分離を両立したい場合に選びます。合成Phaseは周波数に応じて回転します。",
+        "NTM4": "**NTM4 IIR**：LP/HP各2バイクアッド。ノッチ付近の共振抑制をLR4と比較します。Lobe Heightでノッチ位置・再上昇を調整し、遠方の減衰も確認します。3Way以上は自動適用ONで補償APを追加します。",
+        "LR4": "**LR4 IIR**：平坦な合成Gain。約24 dB/oct・2バイクアッド。広い帯域外を単調に減衰させる標準の比較基準です。合成Phaseは周波数に応じて回転します。",
         "Through": "**スルー**：追加分割なし。外部で完成した帯域分割を使用します。",
     },
     "en": {
@@ -210,7 +219,8 @@ METHOD_SELECTOR_SUMMARY = {
         "Linear-phase LR2 FIR": "**LR2 FIR**: flat summed gain and linear phase. Choose approx. 12 dB/oct for gentle transitions.",
         "Linear-phase LR4 FIR": "**LR4 FIR**: flat summed gain and linear phase. Choose approx. 24 dB/oct for stronger separation.",
         "LR2": "**LR2 IIR**: flat summed gain after polarity compensation. Approx. 12 dB/oct, one biquad. Choose gentle transitions with low processing load. Summed phase rotates with frequency.",
-        "LR4": "**LR4 IIR**: flat summed gain. Approx. 24 dB/oct, two biquads. Choose low processing load with stronger separation. Summed phase rotates with frequency.",
+        "NTM4": "**NTM4 IIR**: two biquads per LP/HP. Compare with LR4 to suppress resonance near a notch. Lobe Height adjusts notch position and the post-notch peak; also check far-stopband attenuation. AP compensation for three or more Ways when automatic application is ON.",
+        "LR4": "**LR4 IIR**: flat summed gain. Approx. 24 dB/oct, two biquads. Use as the reference for monotonic attenuation across a broad stopband. Summed phase rotates with frequency.",
         "Through": "**Through**: no added crossover. Use an external crossover already in place.",
     },
 }

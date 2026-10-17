@@ -6809,10 +6809,10 @@
     "ja": "EQファイルを読み込めません: {p0}",
     "en": "Cannot load EQ file: {p0}"
   },
-  "ui.a45fc68c20a621": {
-    "source": "各スピーカーの実測特性を、選んだLRカーブに近づける機能です（LR2／LR4専用）。\n\nON：この境界のLRカーブをPhaseEQのTargetへ反映し、各チャンネルのPhaseEQで設定したEQによって測定との差を補正します。Auto Gain／Auto Phaseを追加しなければ自動補正は行いません。手動EQもなければ補正フィルターはフラットです。この境界の分割FIR／IIRは別途出力せず、PhaseEQから返した補正FIRを使います。位相・時間整合は出力に残ります。\n\nOFF：この境界のLRカーブはTargetへ反映せず、通常の分割FIR／IIRを出力します。\n\nONにするだけでは補正は完了しません。PhaseEQで各Wayの測定を適用し、レベル合わせ・最終特性の確認後にMultiwayへ送信してください。 IIRイコライザーのフィルターでも、音響ターゲットに合わせて調整できます。",
-    "ja": "各スピーカーの実測特性を、選んだLRカーブに近づける機能です（LR2／LR4専用）。\n\nON：この境界のLRカーブをPhaseEQのTargetへ反映し、各チャンネルのPhaseEQで設定したEQによって測定との差を補正します。Auto Gain／Auto Phaseを追加しなければ自動補正は行いません。手動EQもなければ補正フィルターはフラットです。この境界の分割FIR／IIRは別途出力せず、PhaseEQから返した補正FIRを使います。位相・時間整合は出力に残ります。\n\nOFF：この境界のLRカーブはTargetへ反映せず、通常の分割FIR／IIRを出力します。\n\nONにするだけでは補正は完了しません。PhaseEQで各Wayの測定を適用し、レベル合わせ・最終特性の確認後にMultiwayへ送信してください。 IIRイコライザーのフィルターでも、音響ターゲットに合わせて調整できます。",
-    "en": "Brings each speaker's measured response toward the selected LR curve (LR2/LR4 only).\n\nON: reflect this boundary's LR curve in the PhaseEQ Target and correct the measurement using EQ configured in each channel's PhaseEQ. Automatic correction requires explicit Auto Gain/Auto Phase. With no manual EQ either, the correction filter is flat. Do not output this boundary's crossover FIR/IIR separately; use the correction FIR returned from PhaseEQ. Phase/time alignment remains in the output.\n\nOFF: do not add this boundary's LR curve to the Target; output the normal crossover FIR/IIR.\n\nTurning ON alone does not complete correction. Apply each Way's measurement in PhaseEQ, match levels, check the final response, then send to Multiway. You can also use filters in the IIR equalizer to adjust the response toward the acoustic target."
+  "ui.8abe5699daf84b": {
+    "source": "各スピーカーの実測特性を、選んだLR2／LR4／NTM4カーブに近づける機能です。\n\nON：この境界の選択カーブをPhaseEQのTargetへ反映し、各チャンネルのPhaseEQで設定したEQによって測定との差を補正します。Auto Gain／Auto Phaseを追加しなければ自動補正は行いません。手動EQもなければ補正フィルターはフラットです。この境界の分割FIR／IIRは別途出力せず、PhaseEQから返した補正FIRを使います。位相・時間整合は出力に残ります。\n\nOFF：この境界の選択カーブはTargetへ反映せず、通常の分割FIR／IIRを出力します。\n\nONにするだけでは補正は完了しません。PhaseEQで各Wayの測定を適用し、レベル合わせ・最終特性の確認後にMultiwayへ送信してください。 IIRイコライザーのフィルターでも、音響ターゲットに合わせて調整できます。",
+    "ja": "各スピーカーの実測特性を、選んだLR2／LR4／NTM4カーブに近づける機能です。\n\nON：この境界の選択カーブをPhaseEQのTargetへ反映し、各チャンネルのPhaseEQで設定したEQによって測定との差を補正します。Auto Gain／Auto Phaseを追加しなければ自動補正は行いません。手動EQもなければ補正フィルターはフラットです。この境界の分割FIR／IIRは別途出力せず、PhaseEQから返した補正FIRを使います。位相・時間整合は出力に残ります。\n\nOFF：この境界の選択カーブはTargetへ反映せず、通常の分割FIR／IIRを出力します。\n\nONにするだけでは補正は完了しません。PhaseEQで各Wayの測定を適用し、レベル合わせ・最終特性の確認後にMultiwayへ送信してください。 IIRイコライザーのフィルターでも、音響ターゲットに合わせて調整できます。",
+    "en": "Brings each speaker's measured response toward the selected LR2, LR4 or NTM4 curve.\n\nON: reflect this boundary's selected curve in the PhaseEQ Target and correct the measurement using EQ configured in each channel's PhaseEQ. Automatic correction requires explicit Auto Gain/Auto Phase. With no manual EQ either, the correction filter is flat. Do not output this boundary's crossover FIR/IIR separately; use the correction FIR returned from PhaseEQ. Phase/time alignment remains in the output.\n\nOFF: do not add this boundary's selected curve to the Target; output the normal crossover FIR/IIR.\n\nTurning ON alone does not complete correction. Apply each Way's measurement in PhaseEQ, match levels, check the final response, then send to Multiway. You can also use filters in the IIR equalizer to adjust the response toward the acoustic target."
   },
   "ui.2256b5f3fcd9f5": {
     "source": "**保存済みSystem**",
@@ -16104,20 +16104,20 @@
     "ja": "FIR OFF：帯域分割を音響ターゲットに反映しています。直接の帯域分割IIRは出力しません。IIRイコライザーで測定応答をターゲットへ近づけてください。FIRによる自動補正は行いません。",
     "en": "FIR OFF: the crossover is included in the acoustic target, with no direct crossover IIR output. Use the IIR equalizer to bring the measured response toward the target. No automatic FIR correction is applied."
   },
-  "ui.a11bebb9ea97e2": {
-    "source": "ON：この境界を音響ターゲットへ合成し、直接の帯域分割フィルターは出力しません。OFF：通常の帯域分割フィルターを出力します。IIR LR2／LR4はFIR OFFでも変更可能です。マルチウェイ接続中は引き継いだ設定を表示します。 スタンドアローン・マルチウェイともに、目標の設定だけで自動FIR補正は開始しません。補正するEQを別途設定してください。 IIRイコライザーのフィルターでも、音響ターゲットに合わせて調整できます。",
-    "ja": "ON：この境界を音響ターゲットへ合成し、直接の帯域分割フィルターは出力しません。OFF：通常の帯域分割フィルターを出力します。IIR LR2／LR4はFIR OFFでも変更可能です。マルチウェイ接続中は引き継いだ設定を表示します。 スタンドアローン・マルチウェイともに、目標の設定だけで自動FIR補正は開始しません。補正するEQを別途設定してください。 IIRイコライザーのフィルターでも、音響ターゲットに合わせて調整できます。",
-    "en": "ON: include this boundary in the acoustic target without a direct crossover filter. OFF: output the normal crossover filter. IIR LR2/LR4 remain editable with FIR OFF. Multiway connections display inherited settings. In standalone and Multiway modes, setting a target does not start automatic FIR correction. Configure EQ separately. You can also use filters in the IIR equalizer to adjust the response toward the acoustic target."
+  "ui.2f7ebf25302338": {
+    "source": "ON：この境界を音響ターゲットへ合成し、直接の帯域分割フィルターは出力しません。OFF：通常の帯域分割フィルターを出力します。IIR LR2／LR4／NTM4はFIR OFFでも変更可能です。マルチウェイ接続中は引き継いだ設定を表示します。 スタンドアローン・マルチウェイともに、目標の設定だけで自動FIR補正は開始しません。補正するEQを別途設定してください。 IIRイコライザーのフィルターでも、音響ターゲットに合わせて調整できます。",
+    "ja": "ON：この境界を音響ターゲットへ合成し、直接の帯域分割フィルターは出力しません。OFF：通常の帯域分割フィルターを出力します。IIR LR2／LR4／NTM4はFIR OFFでも変更可能です。マルチウェイ接続中は引き継いだ設定を表示します。 スタンドアローン・マルチウェイともに、目標の設定だけで自動FIR補正は開始しません。補正するEQを別途設定してください。 IIRイコライザーのフィルターでも、音響ターゲットに合わせて調整できます。",
+    "en": "ON: include this boundary in the acoustic target without a direct crossover filter. OFF: output the normal crossover filter. IIR LR2/LR4/NTM4 remain editable with FIR OFF. Multiway connections display inherited settings. In standalone and Multiway modes, setting a target does not start automatic FIR correction. Configure EQ separately. You can also use filters in the IIR equalizer to adjust the response toward the acoustic target."
   },
   "ui.a8d5202b595033": {
     "source": "選択中の出力帯域を初期値に戻す",
     "ja": "選択中の出力帯域を初期値に戻す",
     "en": "Reset selected output band to defaults"
   },
-  "ui.5deca7c9987c96": {
-    "source": "現在のHi／BP／Lowの方式・周波数・Cycles・β・Overlap・音響ターゲット設定を初期化します。FIR OFFではIIR LR4になります。他の帯域プロファイルとEQは保持します。",
-    "ja": "現在のHi／BP／Lowの方式・周波数・Cycles・β・Overlap・音響ターゲット設定を初期化します。FIR OFFではIIR LR4になります。他の帯域プロファイルとEQは保持します。",
-    "en": "Reset the selected Hi/BP/Low method, frequencies, cycles, beta, overlap and acoustic target settings. FIR OFF uses IIR LR4. Other profiles and EQ settings are retained."
+  "ui.49c585d962ca7b": {
+    "source": "現在のHi／BP／Lowの方式・周波数・Cycles・β・Overlap・Lobe Height・音響ターゲット設定を初期化します。FIR OFFではIIR LR4になります。他の帯域プロファイルとEQは保持します。",
+    "ja": "現在のHi／BP／Lowの方式・周波数・Cycles・β・Overlap・Lobe Height・音響ターゲット設定を初期化します。FIR OFFではIIR LR4になります。他の帯域プロファイルとEQは保持します。",
+    "en": "Reset the selected Hi/BP/Low method, frequencies, cycles, beta, overlap, Lobe Height and acoustic target settings. FIR OFF uses IIR LR4. Other profiles and EQ settings are retained."
   },
   "ui.6d363dc1e29dd7": {
     "source": "選択中の分割構成のWay設定を初期値に戻す",

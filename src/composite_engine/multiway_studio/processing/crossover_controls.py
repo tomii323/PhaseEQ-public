@@ -8,7 +8,7 @@ from crossover_engine.recipe import METHODS
 
 
 TARGET_METHODS = frozenset({
-    "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4",
+    "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "NTM4",
 })
 
 
@@ -16,6 +16,7 @@ TARGET_METHODS = frozenset({
 class BoundaryControlSnapshot:
     methods: tuple[str, ...]
     acoustic_targets: tuple[bool, ...]
+    lobe_heights_db: tuple[float, ...] = ()
 
 
 def normalize_method(value: object, fallback: str = "Kaiser FIR") -> str:
@@ -31,6 +32,10 @@ def target_state_key(mode_key: str, index: int) -> str:
     return f"composite_studio_{mode_key}_acoustic_target_{index}"
 
 
+def lobe_state_key(mode_key: str, index: int) -> str:
+    return f"composite_studio_{mode_key}_lobe_height_db_{index}"
+
+
 def acoustic_target_allowed(method: object) -> bool:
     return normalize_method(method) in TARGET_METHODS
 
@@ -42,10 +47,12 @@ def boundary_control_snapshot(
     *,
     fallback_methods: Sequence[object] = (),
     fallback_targets: Sequence[object] = (),
+    fallback_lobes: Sequence[object] = (),
 ) -> BoundaryControlSnapshot:
     """Read and validate all boundary controls as one immutable snapshot."""
     methods: list[str] = []
     targets: list[bool] = []
+    lobes: list[float] = []
     for index in range(max(0, int(boundary_count))):
         fallback_method = normalize_method(
             fallback_methods[index] if index < len(fallback_methods) else "Kaiser FIR"
@@ -62,7 +69,11 @@ def boundary_control_snapshot(
         ) and acoustic_target_allowed(method)
         methods.append(method)
         targets.append(target)
-    return BoundaryControlSnapshot(tuple(methods), tuple(targets))
+        from crossover_engine.ntm4 import validate_lobe_db
+        lobes.append(validate_lobe_db(state.get(
+            lobe_state_key(mode_key, index),
+            fallback_lobes[index] if index < len(fallback_lobes) else -36.0)))
+    return BoundaryControlSnapshot(tuple(methods), tuple(targets), tuple(lobes))
 
 
 def seed_boundary_controls(
@@ -72,6 +83,7 @@ def seed_boundary_controls(
     acoustic_targets: Sequence[object],
     *,
     overwrite: bool,
+    lobe_heights_db: Sequence[object] = (),
 ) -> BoundaryControlSnapshot:
     """Seed widget state from persisted state without mixing mode ownership."""
     normalized_methods = tuple(normalize_method(value) for value in methods)
@@ -88,6 +100,11 @@ def seed_boundary_controls(
             state[method_key] = method
         if overwrite or target_key not in state:
             state[target_key] = normalized_targets[index]
+        lobe_key = lobe_state_key(mode_key, index)
+        if overwrite or lobe_key not in state:
+            from crossover_engine.ntm4 import validate_lobe_db
+            state[lobe_key] = validate_lobe_db(
+                lobe_heights_db[index] if index < len(lobe_heights_db) else -36.0)
     return boundary_control_snapshot(
         state, mode_key, len(normalized_methods),
         fallback_methods=normalized_methods,

@@ -15,7 +15,7 @@ from timing_provenance import (
 
 
 FIR_CROSSOVER_METHODS = frozenset({"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"})
-IIR_CROSSOVER_METHODS = frozenset({"LR2", "LR4"})
+IIR_CROSSOVER_METHODS = frozenset({"LR2", "LR4", "NTM4"})
 
 
 from crossover_engine.alignment import AllPassSection, allpass_sos, allpass_response
@@ -105,6 +105,7 @@ def analyze_system_phase_alignment(
     window_oct: float = 0.5,
     allpass_limit: int = 1,
     crossover_methods: tuple[str, ...] | None = None,
+    lobe_heights_db: tuple[float, ...] = (),
     timing_provenance_by_channel: dict[str, object] | None = None,
     external_distances_m_by_channel: dict[str, float] | None = None,
 ) -> SystemPhaseAlignmentProposal:
@@ -146,6 +147,7 @@ def analyze_system_phase_alignment(
                 window_oct=window_oct,
                 allpass_limit=allpass_limit,
                 crossover_methods=crossover_methods,
+                lobe_heights_db=lobe_heights_db,
                 fit_delays=not authoritative_timing,
             ),
         ))
@@ -299,6 +301,7 @@ def analyze_phase_alignment(
     window_oct: float = 0.5,
     allpass_limit: int = 1,
     crossover_methods: tuple[str, ...] | None = None,
+    lobe_heights_db: tuple[float, ...] = (),
     fit_delays: bool = True,
 ) -> PhaseAlignmentProposal:
     """Fit upward from the lowest-frequency Channel, adding delay to higher Ways."""
@@ -316,6 +319,7 @@ def analyze_phase_alignment(
     frequency = np.asarray(frequency_hz, dtype=float)
     sections, compensation_channels = _structural_allpass_topology(
         ordered_channels, crossover_frequencies_hz, methods, allpass_limit,
+        lobe_heights_db=lobe_heights_db,
     )
     assessments: list[BoundaryAssessment] = []
     warnings: list[str] = []
@@ -516,7 +520,7 @@ def analyze_phase_alignment(
     )
 
 
-def structural_allpass_sections(ordered_channels, crossover_frequencies_hz, methods):
+def structural_allpass_sections(ordered_channels, crossover_frequencies_hz, methods, *, lobe_heights_db=()):
     """Calculate theoretical phase compensation without measurements or delay fitting."""
     if len(crossover_frequencies_hz) != len(ordered_channels) - 1 or len(methods) != len(crossover_frequencies_hz):
         raise ValueError("Channel and crossover boundary counts do not match")
@@ -526,6 +530,7 @@ def structural_allpass_sections(ordered_channels, crossover_frequencies_hz, meth
         raise ValueError("Crossover frequencies must be positive and finite")
     sections, _ = _structural_allpass_topology(
         ordered_channels, crossover_frequencies_hz, methods, max(0, len(ordered_channels) - 2),
+        lobe_heights_db=lobe_heights_db,
     )
     return sections
 
@@ -535,8 +540,13 @@ def _structural_allpass_topology(
     crossover_frequencies_hz: tuple[float, ...],
     methods: tuple[str, ...],
     block_limit: int,
+    *, lobe_heights_db=(),
 ) -> tuple[dict[str, tuple[AllPassSection, ...]], tuple[tuple[str, ...], ...]]:
     sections: dict[str, list[AllPassSection]] = {name: [] for name in ordered_channels}
+    if "NTM4" in methods:
+        from crossover_engine.ntm4 import cascaded_allpass_sections
+        return cascaded_allpass_sections(ordered_channels, crossover_frequencies_hz,
+                                        methods, lobe_heights_db, block_limit=block_limit)
     blocks_used = {name: 0 for name in ordered_channels}
     recipients: list[tuple[str, ...]] = []
     for boundary_index, (frequency, method) in enumerate(zip(crossover_frequencies_hz, methods)):

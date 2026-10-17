@@ -7,10 +7,11 @@ from .alignment_target import output_settings
 AUTOMATIC_OWNERS_KEY = '_composite_automatic_structure_owners'
 
 
-def automatic_sections(settings, ways, crossovers, methods):
+def automatic_sections(settings, ways, crossovers, methods, *, lobe_heights_db=()):
     if not settings.get("phase_alignment_auto_structure", False):
         return None
-    return structural_allpass_sections(tuple(ways), tuple(crossovers), tuple(methods))
+    return structural_allpass_sections(tuple(ways), tuple(crossovers), tuple(methods),
+                                      lobe_heights_db=lobe_heights_db)
 
 
 def commit_automatic_mode(state, enabled, prefixes):

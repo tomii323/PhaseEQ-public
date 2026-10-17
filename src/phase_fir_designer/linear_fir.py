@@ -9,7 +9,7 @@ from .config import DesignConfig, IIRFilter, LinearFIRFilter
 
 
 FIR_BAND_SPLIT_METHODS = frozenset({"kaiser", "linear_phase_lr2", "linear_phase_lr4"})
-IIR_BAND_SPLIT_METHODS = frozenset({"iir_lr2", "iir_lr4"})
+IIR_BAND_SPLIT_METHODS = frozenset({"iir_lr2", "iir_lr4", "iir_ntm4"})
 
 
 def multiway_kaiser_taps(sample_rate: float, fc: float, cycles: float) -> int:
@@ -165,6 +165,8 @@ def band_split_iir_filters(config: DesignConfig) -> tuple[IIRFilter, ...]:
     if config.band_split_recipe is not None:
         from crossover_engine.recipe import iir_config
         realized = iir_config(config.band_split_recipe)
+        if realized.ntm4_topology is not None:
+            return ()  # Complete bank SOS are emitted by the auxiliary route.
         return tuple(IIRFilter(kind=kind, fc=fc, family="linkwitz_riley", order=order)
                      for kind, fc, order in (
                          ("high_pass", realized.highpass_hz, realized.highpass_order),
@@ -174,7 +176,7 @@ def band_split_iir_filters(config: DesignConfig) -> tuple[IIRFilter, ...]:
         (item for item in config.linear_fir_filters if item.enabled),
         key=lambda value: 0 if value.mode == "hp" else 1,
     ):
-        if item.acoustic_target or item.response not in IIR_BAND_SPLIT_METHODS:
+        if item.acoustic_target or item.response not in {"iir_lr2", "iir_lr4"}:
             continue
         filters.append(
             IIRFilter(
@@ -284,7 +286,21 @@ def band_split_alignment_sos(config: DesignConfig) -> np.ndarray:
 
 def band_split_output_auxiliary_sos(config: DesignConfig) -> np.ndarray:
     from crossover_engine.alignment import output_auxiliary_sos
-    return output_auxiliary_sos(config.band_split_recipe)
+    rows = []
+    if config.band_split_recipe is not None:
+        from crossover_engine.recipe import iir_config
+        from crossover_engine.iir import iir_crossover_sos
+        realized = iir_config(config.band_split_recipe)
+        if realized.ntm4_topology is not None:
+            rows.append(iir_crossover_sos(realized, config.sample_rate))
+    else:
+        from crossover_engine.ntm4 import ntm4_sos
+        rows.extend(ntm4_sos("highpass" if item.mode == "hp" else "lowpass",
+                             item.fc, config.sample_rate, item.lobe_height_db)
+                    for item in config.linear_fir_filters
+                    if item.enabled and item.response == "iir_ntm4" and not item.acoustic_target)
+    rows.append(output_auxiliary_sos(config.band_split_recipe))
+    return np.concatenate(rows)
 
 
 def band_split_output_sos(config: DesignConfig) -> np.ndarray:

@@ -14,7 +14,7 @@ LR4_TARGET_ALGORITHM_VERSION = "multiway-v3-lr4-acoustic-target"
 ALIGNMENT_ALGORITHM_VERSION = "multiway-v4-phase-alignment"
 POLARITY_ALGORITHM_VERSION = "multiway-v5-crossover-polarity"
 
-METHODS = ("Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "Through")
+METHODS = ("Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "NTM4", "Through")
 
 
 def recipe_hash(recipe):
@@ -57,6 +57,10 @@ def from_studio(mode, sample_rate, conf, way, *, fir_enabled=True, phase_alignme
                               for i, fc in enumerate(frequencies)])
     if phase_alignment is not None:
         recipe["phase_alignment"] = dict(phase_alignment)
+    for i, boundary in enumerate(recipe["boundaries"]):
+        if boundary["method"] == "NTM4":
+            lobes = conf.get("boundary_lobe_heights_db", [])
+            boundary["lobe_height_db"] = float(lobes[i]) if i < len(lobes) else -36.0
     validate(recipe)
     return recipe
 
@@ -101,12 +105,15 @@ def validate(recipe):
             raise ValueError("Invalid band split boundary")
         if b.get("method") not in METHODS:
             raise ValueError("Unknown band split method")
+        if b["method"] == "NTM4":
+            from .ntm4 import validate_lobe_db
+            validate_lobe_db(b.get("lobe_height_db", -36.0))
         if (b.get("acoustic_target", False) or b["method"] == "Linear-phase LR4 FIR") and recipe["algorithm_version"] not in {LR4_TARGET_ALGORITHM_VERSION, ALIGNMENT_ALGORITHM_VERSION, POLARITY_ALGORITHM_VERSION}:
             raise ValueError("LR4／音響ターゲットには新しい帯域分割Recipeが必要です。")
         if not isinstance(b.get("acoustic_target", False), bool):
             raise ValueError("音響ターゲットの指定はON/OFFです。")
         if b.get("acoustic_target", False) and b["method"] in {"Kaiser FIR", "Through"}:
-            raise ValueError("音響ターゲットにはLR2／LR4を選択してください。")
+            raise ValueError("音響ターゲットにはLR2／LR4／NTM4を選択してください。")
         previous = fc
 
 
@@ -119,6 +126,7 @@ def studio_config(recipe):
                 boundary_betas=[v["beta"] for v in b],
                 boundary_overlaps_oct=[v["overlap_oct"] for v in b])
     conf["boundary_acoustic_targets"] = [v.get("acoustic_target", False) for v in b]
+    conf["boundary_lobe_heights_db"] = [v.get("lobe_height_db", -36.0) for v in b]
     if b:
         conf.update(cycles=b[0]["cycles"], beta=b[0]["beta"], kaiser_overlap_oct=b[0]["overlap_oct"])
     suffixes = ("low", "high") if recipe["layout"] == "3Way" else ("sub_low", "low_mid", "mid_high")
@@ -146,6 +154,7 @@ def iir_config(recipe):
         methods=tuple("Through" if v.get("acoustic_target", False) else v["method"] for v in b),
         overlap_oct=tuple(v["overlap_oct"] for v in b),
         lr2_auto_polarity=recipe["lr2_auto_polarity"],
+        lobe_heights_db=tuple(v.get("lobe_height_db", -36.0) for v in b),
     )
 
 
@@ -168,12 +177,13 @@ def adjacent_filter_parameters(recipe):
     """Editable single-channel projection; never substitutes for the full bank."""
     details = boundary_details(recipe)
     index = recipe["ordered_ways"].index(recipe["way"])
-    names = dict(zip(METHODS[:-1], ("kaiser", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4")))
+    names = dict(zip(METHODS[:-1], ("kaiser", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "iir_ntm4")))
     return [dict(mode=mode, response=names[d["method"]],
                  fc=d["highpass_cutoff_hz" if mode == "hp" else "lowpass_cutoff_hz"],
                  cycles=d["cycles"], beta=d["beta"], acoustic_target=d.get("acoustic_target", False),
                  base_crossover_hz=d["base_crossover_hz"], overlap_oct=d["overlap_oct"],
                  lr2_auto_taps=recipe["algorithm_version"] != "multiway-v1")
+                 | ({"lobe_height_db": d.get("lobe_height_db", -36.0)} if d["method"] == "NTM4" else {})
             for mode, j in (("hp", index-1), ("lp", index))
             if 0 <= j < len(details) for d in [details[j]] if d["method"] != "Through"]
 

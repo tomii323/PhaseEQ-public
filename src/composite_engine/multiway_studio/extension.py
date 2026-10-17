@@ -267,7 +267,7 @@ from composite_engine.multiway_studio.components.visualization import (
 )
 
 
-CROSSOVER_METHODS = ("Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "Through")
+CROSSOVER_METHODS = ("Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "NTM4", "Through")
 CROSSOVER_METHOD_LABELS = {
     "Through": "スルー（外部で帯域分割済み）",
     "Kaiser FIR": "Kaiser-window linear-phase FIR",
@@ -275,6 +275,7 @@ CROSSOVER_METHOD_LABELS = {
     "Linear-phase LR2 FIR": "LR2 linear-phase FIR",
     "LR2": "LR2 IIR(Biquad)",
     "LR4": "LR4 IIR(2 Biquads)",
+    "NTM4": "NTM4 IIR(2 Biquads)",
 }
 
 
@@ -494,6 +495,17 @@ def render_crossover_method_control(
         key=method_key, width="stretch", required=True, on_change=_on_change,
         help=method_selector_help(methods, current_language()),
     ) or "Kaiser FIR"
+    if method == "NTM4":
+        from .processing.crossover_controls import lobe_state_key
+        from ui.ntm4_controls import render_lobe_height
+        def _on_lobe_change() -> None:
+            _clear_applied_phase_alignment()
+            if on_method_change is not None:
+                on_method_change()
+        saved_lobes = st.session_state.get("settings", {}).get(mode_key, {}).get("boundary_lobe_heights_db", [])
+        render_lobe_height(lobe_state_key(mode_key, index),
+                           default=float(saved_lobes[index]) if index < len(saved_lobes) else -36.0,
+                           on_change=_on_lobe_change)
     target_allowed = acoustic_target_allowed(method)
     initial_targets = st.session_state.get("settings", {}).get(mode_key, {}).get("boundary_acoustic_targets", [])
     if target_key not in st.session_state:
@@ -503,7 +515,7 @@ def render_crossover_method_control(
     st.checkbox(ui_message('ui.6af081827d6a12', p0=f'{label}'), key=target_key, disabled=not target_allowed,
                 on_change=on_acoustic_target_change or on_method_change,
                 help=(
-                    ui_message('ui.a45fc68c20a621')
+                    ui_message('ui.8abe5699daf84b')
                 ))
     if method == "Kaiser FIR":
         from ui.crossover_help import render_kaiser_usage_guide
@@ -540,6 +552,7 @@ def _shared_iir_configs(
         st.session_state, mode_key, len(crossover_frequencies_hz),
         fallback_methods=mode_settings.get("crossover_methods", ()),
         fallback_targets=mode_settings.get("boundary_acoustic_targets", ()),
+        fallback_lobes=mode_settings.get("boundary_lobe_heights_db", ()),
     )
     methods = tuple(
         "Through" if controls.acoustic_targets[index] else method
@@ -554,6 +567,7 @@ def _shared_iir_configs(
             way=way, ordered_ways=ordered_ways,
             crossover_frequencies_hz=tuple(float(value) for value in crossover_frequencies_hz),
             methods=methods, overlap_oct=overlaps,
+            lobe_heights_db=controls.lobe_heights_db,
             lr2_auto_polarity=bool(st.session_state.get(f"{prefix}_lr2_auto_polarity", True)),
         )
         for way in ordered_ways
@@ -1895,10 +1909,12 @@ def render_composite_sidebar(
             st.session_state, mode_key, len(crossover_frequencies_hz),
             fallback_methods=mode_settings.get("crossover_methods", ()),
             fallback_targets=mode_settings.get("boundary_acoustic_targets", ()),
+            fallback_lobes=mode_settings.get("boundary_lobe_heights_db", ()),
         )
         structural_sections = alignment_structure.automatic_sections(
             st.session_state.get("settings", {}), MODE_WAYS[mode_key], crossover_frequencies_hz,
             boundary_controls.methods,
+            lobe_heights_db=boundary_controls.lobe_heights_db,
         )
         st.markdown(ui_message('ui.e5f113fdc5fdf7'))
         layout_key = "composite_studio_output_layout"
@@ -2537,9 +2553,13 @@ def render_composite_sidebar(
                     assignment_iir = assignment_row.get("iir_crossover", IIRCrossoverConfig())
                     assignment_iir_payload = {
                         **assignment_iir.to_dict(),
-                        "type": "OFF" if not assignment_iir.enabled else "Mixed" if assignment_iir.highpass_order and assignment_iir.lowpass_order and assignment_iir.highpass_order != assignment_iir.lowpass_order else f"LR{int(assignment_iir.order)}",
-                        "highpass_type": f"LR{assignment_iir.highpass_order}" if assignment_iir.highpass_order else "OFF",
-                        "lowpass_type": f"LR{assignment_iir.lowpass_order}" if assignment_iir.lowpass_order else "OFF",
+                        "type": "NTM4" if assignment_iir.ntm4_topology is not None else "OFF" if not assignment_iir.enabled else "Mixed" if assignment_iir.highpass_order and assignment_iir.lowpass_order and assignment_iir.highpass_order != assignment_iir.lowpass_order else f"LR{int(assignment_iir.order)}",
+                        "highpass_type": (assignment_iir.ntm4_topology["methods"][assignment_iir.ntm4_topology["way_index"]-1]
+                                          if assignment_iir.ntm4_topology and assignment_iir.ntm4_topology["way_index"] > 0
+                                          else f"LR{assignment_iir.highpass_order}" if assignment_iir.highpass_order else "OFF"),
+                        "lowpass_type": (assignment_iir.ntm4_topology["methods"][assignment_iir.ntm4_topology["way_index"]]
+                                         if assignment_iir.ntm4_topology and assignment_iir.ntm4_topology["way_index"] < len(assignment_iir.ntm4_topology["methods"])
+                                         else f"LR{assignment_iir.lowpass_order}" if assignment_iir.lowpass_order else "OFF"),
                         "application": "exclusive_crossover_stage",
                         "exclusive": True,
                         "coefficient_sample_rate_hz": int(sample_rate_hz),
@@ -3117,6 +3137,7 @@ def _render_phase_alignment_controls(
         st.session_state, mode, len(crossovers),
         fallback_methods=mode_settings.get("crossover_methods", ()),
         fallback_targets=mode_settings.get("boundary_acoustic_targets", ()),
+        fallback_lobes=mode_settings.get("boundary_lobe_heights_db", ()),
     )
     crossover_methods = controls.methods
     rows = {
@@ -3240,6 +3261,7 @@ def _render_phase_alignment_controls(
                     0 if disable_allpass else max(1, len(ways) - 2)
                 ),
                 crossover_methods=crossover_methods,
+                lobe_heights_db=controls.lobe_heights_db,
             )
             proposal = residual_proposal
             by_channel_name = {
@@ -3702,6 +3724,7 @@ def _render_system_phase_alignment_controls(
             st.session_state, mode, len(crossovers),
             fallback_methods=mode_settings.get("crossover_methods", ()),
             fallback_targets=mode_settings.get("boundary_acoustic_targets", ()),
+            fallback_lobes=mode_settings.get("boundary_lobe_heights_db", ()),
         )
         crossover_methods = controls.methods
         current_signature = studio_dsp_input_signature(
@@ -3962,6 +3985,7 @@ def _render_system_phase_alignment_controls(
                         0 if automatic_structure or str(capability) == "使用不可" else max(1, len(ways) - 2)
                     ),
                     crossover_methods=crossover_methods,
+                    lobe_heights_db=controls.lobe_heights_db,
                     timing_provenance_by_channel={
                         channel_id: row.get("timing_provenance")
                         for channel_id, row in row_by_id.items()

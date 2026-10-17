@@ -22,7 +22,8 @@ def crossover_response(config, frequency):
             h *= boundary_response(config.sample_rate, frequency, item.fc,
                                    "highpass" if item.mode == "hp" else "lowpass",
                                    4 if "4" in item.response else 2,
-                                   item.response.startswith("linear_phase"))
+                                   item.response.startswith("linear_phase"), method=item.response,
+                                   lobe_height_db=item.lobe_height_db)
     return h
 
 
