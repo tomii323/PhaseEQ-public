@@ -2529,11 +2529,13 @@ def _registry_checkbox(
 ) -> bool:
     item_id = str(item.get("id", ""))
     widget_key = _registry_widget_key("chk", list_key, item_id, field)
+    # State alone initializes restored/remounted checkboxes, as in checkbox_stateful.
+    st.session_state[widget_key] = bool(
+        st.session_state.get(widget_key, _registry_item_value(item, field, default))
+    )
     value = bool(
         st.checkbox(
             label,
-            # Row selection remounts this editor: send the saved state to the browser.
-            value=bool(_registry_item_value(item, field, default)),
             key=widget_key,
             help=help,
             disabled=disabled,
@@ -2757,10 +2759,11 @@ def _registry_slider(
     except Exception:
         current_number = float(default)
     desired_value = type(default)(max(float(min_value), min(float(max_value), current_number)))
+    # Explicit state also projects restored values to an already mounted slider.
+    st.session_state[widget_key] = st.session_state.get(widget_key, desired_value)
     widget_args = {
         "min_value": min_value,
         "max_value": max_value,
-        "value": st.session_state.get(widget_key, desired_value),
         "key": widget_key,
         "disabled": disabled,
         "help": help,
