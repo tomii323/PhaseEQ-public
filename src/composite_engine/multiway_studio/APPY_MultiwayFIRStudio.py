@@ -2425,7 +2425,7 @@ st.set_page_config(
 from utils.ui_language import initialize_language, render_language_setting
 _watch_phaseeq_result_inbox()
 initialize_language()
-from utils.ui_help import initialize_help, render_help_setting
+from utils.ui_help import initialize_help, render_help_setting, render_manual_links
 initialize_help()
 _apply_app_theme()
 
@@ -2498,6 +2498,7 @@ with st.sidebar:
     with preferences_host:
         render_language_setting(key="multiway_ui_language")
         render_help_setting(key="multiway_help_delay")
+        render_manual_links(key="multiway_quick_manual")
     st.markdown(
         f"""
         <div class="sidebar-workflow">

@@ -1,10 +1,32 @@
 """Shared hover-help timing, independent of DSP and project settings."""
 import json
 import math
+from pathlib import Path
 
 from utils.ui_language import language_path, save_ui_preference, current_language
 
 DEFAULT_DELAY_SECONDS = 2.5
+QUICK_GUIDE_PATH = "docs/distribution/manual/PhaseEQ_Multiway_QuickGuide_15p_Dark_JA.pdf"
+
+
+def render_manual_links(*, key):
+    """Serve the bundled guide locally, including offline installations."""
+    import streamlit as st
+
+    japanese = current_language() != 'en'
+    path = Path(__file__).resolve().parents[1] / QUICK_GUIDE_PATH
+    with st.container(border=True):
+        st.markdown('#### 操作マニュアル' if japanese else '#### Operation manual')
+        if path.is_file():
+            st.download_button(
+                'マルチウェイ簡易操作マニュアル（15ページ・PDF）' if japanese
+                else 'Multiway quick operation manual (15 pages, Japanese PDF)',
+                data=path.read_bytes(), file_name=path.name,
+                mime='application/pdf', key=key, on_click='ignore',
+            )
+        else:
+            st.warning('同梱マニュアルが見つかりません。配布ZIPを再取得してください。' if japanese
+                       else 'Bundled manual not found. Download the distribution ZIP again.')
 
 
 def validate_delay(value):

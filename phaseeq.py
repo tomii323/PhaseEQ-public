@@ -2035,7 +2035,7 @@ def _apply_app_theme() -> None:
 st.set_page_config(page_title=f"{APP_NAME} v{APP_VERSION}", layout="wide")
 from utils.ui_language import initialize_language, render_language_setting, current_language
 initialize_language()
-from utils.ui_help import initialize_help, render_help_setting
+from utils.ui_help import initialize_help, render_help_setting, render_manual_links
 initialize_help()
 _apply_app_theme()
 from ui.app_update import initialize_updates, render_shutdown_notice, render_update_notice, render_update_settings
@@ -11696,7 +11696,7 @@ def _sync_gain_eq_registry(
                 "legacy_prefix": f"gain_shelf_{idx}",
                 "enabled": bool(item.enabled),
                 "mode": str(item.mode),
-                "response": str(item.response),
+                # GainShelf owns no crossover response selector.
                 "fc": float(item.fc),
                 "q": float(item.q),
                 "gain_db": float(item.gain_db),
@@ -17488,6 +17488,7 @@ if active_page == "Common Settings":
   with editor_window:
         render_language_setting(key="phaseeq_ui_language")
         render_help_setting(key="phaseeq_help_delay")
+        render_manual_links(key="phaseeq_quick_manual")
         render_update_settings(APP_ROOT, APP_VERSION)
         with st.container(border=True):
             st.markdown(display_text("#### 予測応答の表示設定"))
