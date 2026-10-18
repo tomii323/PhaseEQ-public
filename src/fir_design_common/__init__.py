@@ -114,6 +114,10 @@ def project_centered_fir(response: np.ndarray, taps: int) -> np.ndarray:
 
 
 def normalize_dc_gain(fir: np.ndarray, target_dc_abs: float) -> np.ndarray:
+    # A stopband DC request at the -180 dB numerical floor cannot provide a
+    # gain reference. Scaling truncation leakage to that floor mutes the passband.
+    if target_dc_abs <= 1e-9:
+        return fir
     dc = float(np.sum(fir))
     if abs(dc) < 1e-12:
         return fir

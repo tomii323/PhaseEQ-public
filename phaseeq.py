@@ -7164,6 +7164,8 @@ def _single_row_table_selector(
 
 FIR_EQ_ADD_TYPE_OPTIONS = (
     "Gain · PEQ",
+    "Gain · High Pass",
+    "Gain · Low Pass",
     "Gain · High Shelf",
     "Gain · Low Shelf",
     "Gain · High Tilt",
@@ -7187,6 +7189,9 @@ def _fir_eq_item_frequency(item: dict[str, Any]) -> str:
 
 
 def _fir_eq_item_detail(item: dict[str, Any]) -> str:
+    if item.get("response"):
+        from phase_fir_designer.gain_crossover import GAIN_CROSSOVER_RESPONSES
+        return GAIN_CROSSOVER_RESPONSES.get(str(item["response"]), str(item["response"]))
     if "q" in item:
         return f"Q {float(item.get('q', 0.0) or 0.0):g}"
     if "smoothing_fraction" in item:
@@ -7212,6 +7217,7 @@ def _fir_eq_overview_data(
     groups = (
         ("Gain", "gain_peq", "PEQ", "PEQ / Shelf", "gain_eq_selected_filter"),
         ("Gain", "gain_shelf", "Shelf", "PEQ / Shelf", "gain_eq_selected_filter"),
+        ("Gain", "gain_linear", "HP / LP", "HP / LP", "gain_linear_selected_filter"),
         ("Gain", "gain_tilt", "High Tilt", "Tilt", "gain_tilt_selected_filter"),
         ("Gain", "gain_lo_tilt", "Low Tilt", "Tilt", "gain_tilt_selected_filter"),
         ("Phase", "phase_peq", "PEQ", "PEQ / Shelf / All-pass", "phase_eq_selected_filter"),
@@ -7233,6 +7239,8 @@ def _fir_eq_overview_data(
             mode = str(item.get("mode", ""))
             if prefix in {"gain_shelf", "phase_shelf"}:
                 filter_type = "High Shelf" if mode == "high" else "Low Shelf"
+            if prefix == "gain_linear":
+                filter_type = "High Pass" if mode == "hp" else "Low Pass"
             option_ids.append(option_id)
             stage_counts[task] += 1
             metadata[option_id] = {
@@ -7252,7 +7260,8 @@ def _fir_eq_overview_data(
                 "#": str(index),
                 "ON": "ON" if bool(item.get("enabled", True)) else "OFF",
                 "Type": filter_type,
-                "Phase": "Min." if task == "Auto Gain" and item.get("gain_phase_mode", "lin") == "min" else "Lin.",
+                "Phase": ("IIR" if prefix == "gain_linear" and str(item.get("response", "")).startswith("iir_")
+                          else "Min." if task == "Auto Gain" and item.get("gain_phase_mode", "lin") == "min" else "Lin."),
                 "Frequency": _fir_eq_item_frequency(item),
                 "Value": value,
                 "Q / Smoothing": _fir_eq_item_detail(item),
@@ -7288,6 +7297,8 @@ def _fir_eq_overview_data(
 def _add_fir_eq_item(add_type: str, nyquist: float) -> tuple[str, str]:
     mapping: dict[str, tuple[str, dict[str, Any], str, str]] = {
         "Gain · PEQ": ("gain_peq", {}, "Gain", "gain_eq_selected_filter"),
+        "Gain · High Pass": ("gain_linear", {"mode": "hp", "response": "linear_phase_lr2"}, "Gain", "gain_linear_selected_filter"),
+        "Gain · Low Pass": ("gain_linear", {"mode": "lp", "response": "linear_phase_lr2"}, "Gain", "gain_linear_selected_filter"),
         "Gain · High Shelf": ("gain_shelf", {"mode": "high"}, "Gain", "gain_eq_selected_filter"),
         "Gain · Low Shelf": ("gain_shelf", {"mode": "low"}, "Gain", "gain_eq_selected_filter"),
         "Gain · High Tilt": (
@@ -8602,6 +8613,31 @@ def _render_linear_fir_preset_manager() -> None:
     st.caption(
         ui_message('ui.c81dfafabaa7a1')
     )
+
+
+def _render_gain_crossover_editor(nyquist: float) -> None:
+    from phase_fir_designer.gain_crossover import GAIN_CROSSOVER_RESPONSES
+    items = _indexed_group_registry_items("gain_linear")[2]
+    rows = [("High Pass" if item.get("mode") == "hp" else "Low Pass", "gain_linear", idx, item)
+            for idx, item in enumerate(items)]
+    selected = _render_filter_overview_selector(rows, key="gain_linear_selected_filter", show_table=False)
+    if selected is None:
+        return
+    label, prefix, idx, item = selected
+    with st.container(border=True, key="gain_crossover_selected_card"):
+        enabled = _registry_checkbox(ui_message('ui.e8a01133b1351e'), list_key="gain_linear_items", item=item, field="enabled", default=True)
+        _render_eq_card_header(_gain_eq_title(idx, label, prefix, idx, enabled=bool(enabled)), prefix, idx)
+        _registry_selectbox("Type", ["hp", "lp"], list_key="gain_linear_items", item=item, field="mode",
+                           default="lp",
+                           format_func=lambda mode: display_text("High Pass" if mode == "hp" else "Low Pass"))
+        options = (["lr2"] if item.get("response") == "lr2" else []) + list(GAIN_CROSSOVER_RESPONSES)
+        _registry_selectbox("Response", options, list_key="gain_linear_items", item=item, field="response",
+                           default="linear_phase_lr2",
+                           format_func=lambda value: GAIN_CROSSOVER_RESPONSES.get(value, "LR2 (legacy)"))
+        _registry_number_input("Frequency Hz", list_key="gain_linear_items", item=item, field="fc",
+                               min_value=0.0 if item.get("response") == "lr2" else 1.0,
+                               max_value=max(1.0, nyquist - 1.0), default=1000.0, step=1.0, format="%.0f")
+        st.caption(display_text("HP／LPの振幅・位相をFIRへ反映します。IIR係数は追加しません。実際の応答はタップ長・窓・EQ適用帯域の制約を受けます。"))
 
 
 def _render_gain_one_frequency_eq(
@@ -11303,7 +11339,13 @@ def _collect_manual_gain_state(
         )
         for item in _items_for("gain_shelf_items")
     ]
-    linear_filters: list[GainLinearFilter] = []
+    linear_filters = [GainLinearFilter(
+        mode=str(item.get("mode", "lp")), response=str(item.get("response", "lr2")),
+        fc=min(max(float(item.get("fc", 1000.0)), 0.0 if item.get("response", "lr2") == "lr2" else 1.0),
+               max(nyquist - 1.0, 1.0)),
+        cycles=float(item.get("cycles", 4.0)), beta=float(item.get("beta", 12.0)),
+        enabled=bool(item.get("enabled", True)),
+    ) for item in _items_for("gain_linear_items")]
     tilt_filters = [
         GainTilt(
             f_start=min(max(float(item.get("f_start", 100.0)), 0.0), nyquist),
@@ -13034,7 +13076,6 @@ if _workspace_assignment is not None:
             sample_rate=_workspace_assignment.sample_rate_hz,
             taps=_workspace_assignment.tap_count if _workspace_assignment.tap_count > 0 else None,
         )
-        _apply_composite_linear_fir_assignment(_workspace_assignment)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         st.session_state["_settings_notice"] = f"Composite Workspaceを復元できませんでした: {exc}"
 _apply_pending_config_payload()
@@ -13087,6 +13128,14 @@ try:
 except (OSError, ValueError, sqlite3.Error) as exc:
     st.error(f"Stereo Linkを読み込めません: {exc}")
     st.stop()
+# EQ ownership can project a saved payload. Apply channel-owned crossover
+# constraints after that projection, before collecting any graph/design input.
+if _stereo_assignment is not None:
+    try:
+        _apply_composite_linear_fir_assignment(_stereo_assignment)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        st.error(f"Composite帯域分割を適用できません: {exc}")
+        st.stop()
 _sync_design_condition_widget_state()
 register_default_dependencies(register_dependency)
 if "_registry_clean_initialized" not in st.session_state:
@@ -19618,7 +19667,7 @@ if navigation_page == "FIR EQ":
 
 if active_page == "Gain EQ":
   with editor_window:
-    gain_item_keys = ("gain_peq_items", "gain_shelf_items", "gain_tilt_items", "gain_lo_tilt_items")
+    gain_item_keys = ("gain_peq_items", "gain_shelf_items", "gain_linear_items", "gain_tilt_items", "gain_lo_tilt_items")
     gain_filter_count = sum(len(_items_for(key)) for key in gain_item_keys)
     gain_enabled_count = sum(len(_enabled_registry_items(key)) for key in gain_item_keys)
     with st.container(border=True):
@@ -19628,12 +19677,12 @@ if active_page == "Gain EQ":
     _flow_section(1, ui_message('ui.ffe525fb550cfb'), tag=ui_message('ui.cd843e170534b0'))
     gain_edit_group = (
         _current_plain_widget_option(
-            "gain_edit_group", ("PEQ / Shelf", "Tilt"), "PEQ / Shelf",
+            "gain_edit_group", ("PEQ / Shelf", "HP / LP", "Tilt"), "PEQ / Shelf",
         )
         if navigation_page == "FIR EQ"
         else _segmented_setting_widget(
             ui_message('ui.5f7f15041e67c6'),
-            ["PEQ / Shelf", "Tilt"],
+            ["PEQ / Shelf", "HP / LP", "Tilt"],
             "gain_edit_group",
             default="PEQ / Shelf",
         )
@@ -19641,6 +19690,9 @@ if active_page == "Gain EQ":
     if gain_edit_group == "PEQ / Shelf":
         with st.container(border=False):
             _render_gain_one_frequency_eq(nyquist, show_add=False, show_overview=False)
+
+    if gain_edit_group == "HP / LP":
+        _render_gain_crossover_editor(nyquist)
 
     if gain_edit_group == "Tilt":
         with st.container(border=False):
@@ -20042,7 +20094,7 @@ if active_page == "Export":
                 settings_key="dc_gain_normalize",
                 default=True,
                 disabled=composite_export_locked,
-                help=ui_message('ui.3010cfa8304870'),
+                help=ui_message('ui.b1712299ab480b'),
             )
             output_fir_polarity_invert = checkbox_stateful(
                 ui_message('ui.76af0569d11d05'),

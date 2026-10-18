@@ -170,6 +170,14 @@ def manual_phase_eq_deg(
     apply_linear_fir_mask: bool = False,
 ) -> np.ndarray:
     phase = np.zeros_like(frequency, dtype=float)
+    from .gain_crossover import gain_crossover_response
+    for item in config.gain_linear_filters:
+        if item.enabled:
+            response = gain_crossover_response(frequency, item, config.sample_rate)
+            phase += _maybe_apply_linear_fir_eq_mask(
+                config, frequency, np.rad2deg(np.unwrap(np.angle(response))),
+                mode="gain", enabled=apply_linear_fir_mask,
+            )
     for item in config.peq_filters:
         if item.enabled:
             phase += _maybe_apply_linear_fir_eq_mask(
@@ -285,7 +293,7 @@ def manual_gain_eq_db(
             gain += _maybe_apply_linear_fir_eq_mask(
                 config,
                 frequency,
-                gain_linear_eq_filter_db(frequency, item),
+                gain_linear_eq_filter_db(frequency, item, sample_rate=config.sample_rate),
                 mode="gain",
                 enabled=apply_linear_fir_mask,
             )
@@ -601,8 +609,9 @@ def _linkwitz_riley_magnitude(frequency: np.ndarray, item: GainLinearFilter) -> 
     return magnitude
 
 
-def gain_linear_eq_filter_db(frequency: np.ndarray, item: GainLinearFilter) -> np.ndarray:
-    magnitude = _linkwitz_riley_magnitude(frequency, item)
+def gain_linear_eq_filter_db(frequency: np.ndarray, item: GainLinearFilter, *, sample_rate: int = 48000) -> np.ndarray:
+    from .gain_crossover import gain_crossover_response
+    magnitude = np.abs(gain_crossover_response(frequency, item, sample_rate))
     return 20.0 * np.log10(np.clip(magnitude, 1e-9, 1.0))
 
 

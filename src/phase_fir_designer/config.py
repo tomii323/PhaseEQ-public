@@ -135,7 +135,7 @@ class GainTilt:
 @dataclass(frozen=True)
 class GainLinearFilter:
     mode: Literal["hp", "lp"]
-    response: Literal["lr2"] = "lr2"
+    response: Literal["lr2", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4"] = "lr2"
     fc: float = 1000.0
     cycles: float = 4.0
     beta: float = 12.0
@@ -501,10 +501,13 @@ class DesignConfig:
         for item in self.gain_linear_filters:
             if item.mode not in ("hp", "lp"):
                 raise ValueError("gain linear mode must be hp or lp")
-            if item.response != "lr2":
-                raise ValueError("gain linear response must be lr2")
+            from .gain_crossover import GAIN_CROSSOVER_RESPONSES
+            if item.response not in {"lr2", *GAIN_CROSSOVER_RESPONSES}:
+                raise ValueError("unsupported gain linear response")
             if item.fc < 0:
                 raise ValueError("gain linear fc must be >= 0")
+            if item.response != "lr2" and not 0 < item.fc < self.sample_rate / 2:
+                raise ValueError("FIR Gain HP/LP fc must be between 0 and Nyquist")
             if item.cycles <= 0:
                 raise ValueError("gain linear cycles must be > 0")
             if item.beta < 0:
@@ -739,7 +742,7 @@ def _clip_gain_linear(item: GainLinearFilter, sample_rate: int) -> GainLinearFil
     mode = item.mode if item.mode in ("hp", "lp") else "lp"
     return GainLinearFilter(
         mode=mode,
-        response="lr2",
+        response="lr2" if item.response == "kaiser" else item.response,
         fc=_clip_frequency(item.fc, sample_rate),
         cycles=max(float(item.cycles), 0.01),
         beta=max(float(item.beta), 0.0),

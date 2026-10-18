@@ -283,6 +283,10 @@ JAPANESE_UI_LABELS: dict[str, str] = {
     "Open FIR EQ": "FIRイコライザーを開く",
     "Open Linear FIR": "リニアFIRを開く",
     "Gain · PEQ": "ゲイン・PEQ",
+    "Gain · High Pass": "ゲイン・ハイパス",
+    "Gain · Low Pass": "ゲイン・ローパス",
+    "Linear-phase LR2": "リニアフェーズLR2",
+    "Linear-phase LR4": "リニアフェーズLR4",
     "Gain · High Shelf": "ゲイン・ハイシェルフ",
     "Gain · Low Shelf": "ゲイン・ローシェルフ",
     "Gain · High Tilt": "ゲイン・ハイチルト",
@@ -636,6 +640,7 @@ PHASEEQ_TRANSLATED_MENU_GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "FIR EQ item type": (
         "Gain · PEQ", "Gain · High Shelf", "Gain · Low Shelf",
+        "Gain · High Pass", "Gain · Low Pass",
         "Gain · High Tilt", "Gain · Low Tilt", "Phase · PEQ",
         "Phase · High Shelf", "Phase · Low Shelf", "Phase · All Pass",
         "Phase · Tilt", "Auto Gain · Section", "Auto Phase · Section",

@@ -16763,5 +16763,35 @@
     "source": "ONではWay・分割方式・分割周波数に合わせて理論配置を更新します。適用ボタンは時間整合だけを実行します。ONからOFFへ切り替えると自動補償を解除し、Delayと極性は維持します。",
     "ja": "ONではWay・分割方式・分割周波数に合わせて理論配置を更新します。適用ボタンは時間整合だけを実行します。ONからOFFへ切り替えると自動補償を解除し、Delayと極性は維持します。",
     "en": "When ON, theoretical phase compensation follows the Ways, crossover methods and frequencies. Apply updates time alignment only. Switching from ON to OFF removes automatic phase compensation while preserving Delay and polarity."
+  },
+  "ui.220566a4757535": {
+    "source": "Gain · High Pass",
+    "ja": "ゲイン・ハイパス",
+    "en": "Gain · High Pass"
+  },
+  "ui.6d527800b35479": {
+    "source": "HP／LPの振幅・位相をFIRへ反映します。IIR係数は追加しません。実際の応答はタップ長・窓・EQ適用帯域の制約を受けます。",
+    "ja": "HP／LPの振幅・位相をFIRへ反映します。IIR係数は追加しません。実際の応答はタップ長・窓・EQ適用帯域の制約を受けます。",
+    "en": "Apply HP/LP magnitude and phase through the FIR. No IIR coefficients are added. Realized response depends on tap length, window and the FIR EQ mask."
+  },
+  "ui.86c01b3adfb8a8": {
+    "source": "Linear-phase LR4",
+    "ja": "リニアフェーズLR4",
+    "en": "Linear-phase LR4"
+  },
+  "ui.d7e1533eef0383": {
+    "source": "Gain · Low Pass",
+    "ja": "ゲイン・ローパス",
+    "en": "Gain · Low Pass"
+  },
+  "ui.f4cfe6c7e5f8a0": {
+    "source": "Linear-phase LR2",
+    "ja": "リニアフェーズLR2",
+    "en": "Linear-phase LR2"
+  },
+  "ui.b1712299ab480b": {
+    "source": "ONではFIRのDCゲインをTargetのDC値へ合わせます。TargetのDCが−180 dB以下の場合は係数を保持します。OFFでは窓関数後の係数をそのまま出力します。",
+    "ja": "ONではFIRのDCゲインをTargetのDC値へ合わせます。TargetのDCが−180 dB以下の場合は係数を保持します。OFFでは窓関数後の係数をそのまま出力します。",
+    "en": "When on, match FIR DC gain to the Target DC value. Keep coefficients unchanged when the Target DC is at or below -180 dB. When off, export windowed coefficients as they are."
   }
 }
