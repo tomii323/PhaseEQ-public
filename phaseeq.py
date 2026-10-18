@@ -11707,7 +11707,24 @@ def _sync_gain_eq_registry(
         )
     for idx, item in enumerate(shelf_filters)
     ]
-    linear_items: list[dict[str, Any]] = []
+    linear_items = [
+        make_list_item(
+            "gain_linear",
+            {
+                "legacy_prefix": f"gain_linear_{idx}",
+                "enabled": bool(item.enabled),
+                "mode": str(item.mode),
+                "response": str(item.response),
+                "fc": float(item.fc),
+                "cycles": float(item.cycles),
+                "beta": float(item.beta),
+            },
+            item_id=f"gain_linear_{idx}",
+            enabled=bool(item.enabled),
+            order=idx,
+        )
+        for idx, item in enumerate(linear_filters)
+    ]
     high_tilt_filters = [item for item in tilt_filters if str(getattr(item, "mode", "high")) != "low"]
     low_tilt_filters = [item for item in tilt_filters if str(getattr(item, "mode", "high")) == "low"]
     tilt_items = [
