@@ -14,8 +14,10 @@ from timing_provenance import (
 )
 
 
-FIR_CROSSOVER_METHODS = frozenset({"Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR"})
-IIR_CROSSOVER_METHODS = frozenset({"LR2", "LR4", "NTM4"})
+from crossover_engine.methods import METHOD_DEFINITIONS, boundary_method
+
+FIR_CROSSOVER_METHODS = frozenset(name for name, method in METHOD_DEFINITIONS.items() if method.kind == 'fir')
+IIR_CROSSOVER_METHODS = frozenset(name for name, method in METHOD_DEFINITIONS.items() if method.kind == 'iir')
 
 
 from crossover_engine.alignment import AllPassSection, allpass_sos, allpass_response
@@ -106,6 +108,7 @@ def analyze_system_phase_alignment(
     allpass_limit: int = 1,
     crossover_methods: tuple[str, ...] | None = None,
     lobe_heights_db: tuple[float, ...] = (),
+    acoustic_targets: tuple[bool, ...] = (),
     timing_provenance_by_channel: dict[str, object] | None = None,
     external_distances_m_by_channel: dict[str, float] | None = None,
 ) -> SystemPhaseAlignmentProposal:
@@ -148,6 +151,7 @@ def analyze_system_phase_alignment(
                 allpass_limit=allpass_limit,
                 crossover_methods=crossover_methods,
                 lobe_heights_db=lobe_heights_db,
+                acoustic_targets=acoustic_targets,
                 fit_delays=not authoritative_timing,
             ),
         ))
@@ -302,6 +306,7 @@ def analyze_phase_alignment(
     allpass_limit: int = 1,
     crossover_methods: tuple[str, ...] | None = None,
     lobe_heights_db: tuple[float, ...] = (),
+    acoustic_targets: tuple[bool, ...] = (),
     fit_delays: bool = True,
 ) -> PhaseAlignmentProposal:
     """Fit upward from the lowest-frequency Channel, adding delay to higher Ways."""
@@ -320,6 +325,7 @@ def analyze_phase_alignment(
     sections, compensation_channels = _structural_allpass_topology(
         ordered_channels, crossover_frequencies_hz, methods, allpass_limit,
         lobe_heights_db=lobe_heights_db,
+        acoustic_targets=acoustic_targets,
     )
     assessments: list[BoundaryAssessment] = []
     warnings: list[str] = []
@@ -520,7 +526,7 @@ def analyze_phase_alignment(
     )
 
 
-def structural_allpass_sections(ordered_channels, crossover_frequencies_hz, methods, *, lobe_heights_db=()):
+def structural_allpass_sections(ordered_channels, crossover_frequencies_hz, methods, *, lobe_heights_db=(), acoustic_targets=()):
     """Calculate theoretical phase compensation without measurements or delay fitting."""
     if len(crossover_frequencies_hz) != len(ordered_channels) - 1 or len(methods) != len(crossover_frequencies_hz):
         raise ValueError("Channel and crossover boundary counts do not match")
@@ -531,6 +537,7 @@ def structural_allpass_sections(ordered_channels, crossover_frequencies_hz, meth
     sections, _ = _structural_allpass_topology(
         ordered_channels, crossover_frequencies_hz, methods, max(0, len(ordered_channels) - 2),
         lobe_heights_db=lobe_heights_db,
+        acoustic_targets=acoustic_targets,
     )
     return sections
 
@@ -540,36 +547,32 @@ def _structural_allpass_topology(
     crossover_frequencies_hz: tuple[float, ...],
     methods: tuple[str, ...],
     block_limit: int,
-    *, lobe_heights_db=(),
+    *, lobe_heights_db=(), acoustic_targets=(),
 ) -> tuple[dict[str, tuple[AllPassSection, ...]], tuple[tuple[str, ...], ...]]:
     sections: dict[str, list[AllPassSection]] = {name: [] for name in ordered_channels}
-    if "NTM4" in methods:
-        from crossover_engine.ntm4 import cascaded_allpass_sections
-        return cascaded_allpass_sections(ordered_channels, crossover_frequencies_hz,
-                                        methods, lobe_heights_db, block_limit=block_limit)
+    from crossover_engine.topology import resolve_split_topology
+    plan = resolve_split_topology(methods, acoustic_targets=acoustic_targets)
+    from crossover_engine.ntm4 import DEFAULT_LOBE_DB
+    lobes = tuple(lobe_heights_db) or (DEFAULT_LOBE_DB,) * len(methods)
+    if len(lobes) != len(methods):
+        raise ValueError("NTM4 Lobe Height count does not match boundaries")
     blocks_used = {name: 0 for name in ordered_channels}
     recipients: list[tuple[str, ...]] = []
     for boundary_index, (frequency, method) in enumerate(zip(crossover_frequencies_hz, methods)):
         boundary_recipients: list[str] = []
-        if method not in IIR_CROSSOVER_METHODS or block_limit == 0:
+        definition = boundary_method(method)
+        if definition.sum_ap_q is None or block_limit == 0:
             recipients.append(())
             continue
-        for channel_index, channel in enumerate(ordered_channels):
-            if channel_index in {boundary_index, boundary_index + 1}:
-                continue
+        for channel_index in plan.ap_recipients(boundary_index):
+            channel = ordered_channels[channel_index]
             if blocks_used[channel] >= block_limit:
                 continue
-            if method == "LR2":
-                # Above-boundary recipients require the LR2 constant 180° sign
-                # that is otherwise supplied by the adjacent Channel polarity.
-                polarity = -1 if channel_index > boundary_index + 1 else 1
-                block = (AllPassSection(
-                    float(frequency), 0.0, order=1, polarity=polarity,
-                ),)
-            else:
-                block = (AllPassSection(
-                    float(frequency), 1.0 / np.sqrt(2.0), order=2,
-                ),)
+            polarity = definition.above_ap_polarity if channel_index > boundary_index + 1 else 1
+            block = (AllPassSection(
+                float(frequency), definition.sum_ap_q(lobes[boundary_index]),
+                order=definition.sum_ap_order, polarity=polarity,
+            ),)
             sections[channel].extend(block)
             blocks_used[channel] += 1
             boundary_recipients.append(channel)

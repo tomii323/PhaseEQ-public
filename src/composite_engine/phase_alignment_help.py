@@ -54,7 +54,7 @@ STRUCTURAL_PHASE_HELP = {
 | 3Way＋SUB／4Way | 2段 |
 | 4Way＋SUB | 3段 |
 
-3WayのLR構成ではLowとHighに各1段、Midは追加なしです。NTM4を含む構成では前段HPを共有するため、Lowに後段クロスのAPを追加し、QはそのLobe Heightに連動します。FIR・スルーの境界には自動構造補償用の段を生成しません。直接IIRで適用する場合、この機能だけで追加FIRタップは不要です。出力先のバイクアッド枠とオールパスへの対応を確認してください。
+3WayのLR構成ではLowとHighに各1段、Midは追加なしです。NTM4を含み全境界を直接IIRで分割する構成では前段HPを共有し、Lowに後段クロスのAPを追加します。FIR・スルー・音響ターゲットを含む構成では、各Wayの隣接境界だけで分割し、離れたIIR境界の位相はAPで補います。NTM4用QはそのLobe Heightに連動します。FIR・スルーの境界自体からAPを生成せず、構造補償のためにHPを追加しません。直接IIRで適用する場合、この機能だけで追加FIRタップは不要です。出力先のバイクアッド枠とオールパスへの対応を確認してください。
 
 このチェックは設定済みDelayを変更しません。オールパスには周波数ごとの群遅延があり、LR4用1段の中心1 kHz付近では約0.45 ms（96 kHz時）です。一定時間を全周波数へ加えるDelayとは区別して確認します。
 
@@ -65,7 +65,7 @@ STRUCTURAL_PHASE_HELP = {
         'tooltip': 'Reduces crossover-related phase differences and summed-gain dips or peaks in 3Way or larger systems containing IIR crossovers. ON updates with Way, method and frequency changes. Switching ON to OFF removes automatic compensation while retaining Delay and manual polarity. See the guide immediately below for examples and resource requirements.',
         'purpose': '''**Use this to reduce phase differences and summed-gain dips or peaks around crossovers.**
 
-This mainly applies to 3Way or larger systems containing IIR LR2/LR4. In 3Way, Mid passes through both crossover boundaries, so the other boundary adds phase rotation relative to each adjacent Way. All-pass sections supply the missing rotation while preserving each Way's magnitude.
+This mainly applies to 3Way or larger systems containing IIR LR2/LR4/NTM4. In 3Way, Mid passes through both crossover boundaries, so the other boundary adds phase rotation relative to each adjacent Way. All-pass sections supply the missing rotation while preserving each Way's magnitude.
 
 **Procedure**
 
@@ -94,7 +94,7 @@ For direct IIR output, each added all-pass section uses one SOS/biquad slot. The
 | 3Way+SUB / 4Way | 2 |
 | 4Way+SUB | 3 |
 
-In a 3Way LR bank, Low and High each receive one section; Mid receives none. Banks containing NTM4 share preceding HP stages, so Low receives the later crossover AP with Q derived from its Lobe Height. FIR and Through boundaries generate no automatic structural-compensation sections. Direct IIR application requires no additional FIR taps for this function. Check the output device's biquad capacity and all-pass support.
+In a 3Way LR bank, Low and High each receive one section; Mid receives none. NTM4 banks with direct IIR at every boundary share preceding HP stages, so Low receives the later crossover AP. Banks containing FIR, Through or acoustic-target boundaries split only at each Way's adjacent boundaries and compensate remote IIR phase with APs. NTM4 AP Q follows that boundary's Lobe Height. FIR and Through boundaries themselves generate no APs; structural compensation does not add HP stages. Direct IIR application requires no additional FIR taps for this function. Check the output device's biquad capacity and all-pass support.
 
 This checkbox does not change configured Delay. All-pass sections introduce frequency-dependent group delay: approximately 0.45 ms near a 1 kHz center for one LR4 compensation section at 96 kHz. Distinguish this from adding a constant delay to all frequencies.
 

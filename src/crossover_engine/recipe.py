@@ -14,7 +14,9 @@ LR4_TARGET_ALGORITHM_VERSION = "multiway-v3-lr4-acoustic-target"
 ALIGNMENT_ALGORITHM_VERSION = "multiway-v4-phase-alignment"
 POLARITY_ALGORITHM_VERSION = "multiway-v5-crossover-polarity"
 
-METHODS = ("Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "NTM4", "Through")
+from .methods import METHOD_DEFINITIONS
+
+METHODS = tuple(METHOD_DEFINITIONS)
 
 
 def recipe_hash(recipe):
@@ -169,7 +171,7 @@ def boundary_details(recipe):
                 else odd_number(recipe["sample_rate_hz"] / max(b["base_crossover_hz"], 1) * b["cycles"]))
         result.append({**b, "lowpass_cutoff_hz": lp, "highpass_cutoff_hz": hp,
                        "natural_taps": taps
-                       if b["method"] in METHODS[:3] else None})
+                       if METHOD_DEFINITIONS[b["method"]].kind == "fir" else None})
     return result
 
 
@@ -177,7 +179,7 @@ def adjacent_filter_parameters(recipe):
     """Editable single-channel projection; never substitutes for the full bank."""
     details = boundary_details(recipe)
     index = recipe["ordered_ways"].index(recipe["way"])
-    names = dict(zip(METHODS[:-1], ("kaiser", "linear_phase_lr2", "linear_phase_lr4", "iir_lr2", "iir_lr4", "iir_ntm4")))
+    names = {name: method.response_key for name, method in METHOD_DEFINITIONS.items()}
     return [dict(mode=mode, response=names[d["method"]],
                  fc=d["highpass_cutoff_hz" if mode == "hp" else "lowpass_cutoff_hz"],
                  cycles=d["cycles"], beta=d["beta"], acoustic_target=d.get("acoustic_target", False),

@@ -3,6 +3,7 @@ import sqlite3
 import streamlit as st
 from utils.multiway_measurements import assignment_measurement_input, measurement_input_record
 from utils.ui_localization import display_text
+from utils.session_state_transaction import snapshot_session_state, rollback_session_state
 
 
 def _token(assignment, item):
@@ -23,17 +24,13 @@ def sync_measurement_input(root, db_path, assignment, apply_record, *, target_ed
         token = _token(assignment, item)
         if st.session_state.get('_channel_measurement_input_seen') == token:
             return
-        before = dict(st.session_state)
+        before = snapshot_session_state(st.session_state)
         try:
             ok, message = apply_record(measurement_input_record(item, db_path))
             if not ok:
                 raise ValueError(message)
         except Exception:
-            for key in list(st.session_state):
-                if key not in before:
-                    del st.session_state[key]
-            for key, value in before.items():
-                st.session_state[key] = value
+            rollback_session_state(st.session_state, before)
             raise
         st.session_state['_channel_measurement_input_seen'] = token
         st.session_state.pop('_channel_measurement_input_failed', None)

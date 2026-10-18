@@ -4566,7 +4566,8 @@ def _apply_config_payload_to_state(
     config = config.normalized()
     config.validate()
     saved_iir = payload["processing"].get("band_split_iir_crossover")
-    previous = dict(st.session_state)
+    from utils.session_state_transaction import snapshot_session_state, rollback_session_state
+    previous = snapshot_session_state(st.session_state)
     try:
         _clear_project_profile_widget_state(payload)
         _reset_transient_ui_state_for_config_load()
@@ -4612,12 +4613,7 @@ def _apply_config_payload_to_state(
         st.session_state["_stereo_loaded_payload"] = deepcopy(payload)
         return config
     except Exception:
-        for key in list(st.session_state):
-            if key not in previous:
-                del st.session_state[key]
-        for key, value in previous.items():
-            if key not in st.session_state or st.session_state[key] is not value:
-                st.session_state[key] = value
+        rollback_session_state(st.session_state, previous)
         raise
 
 
@@ -12616,18 +12612,8 @@ def _sync_composite_iir_assignment(assignment: Any, *, apply: bool = True) -> bo
         for section in sos:
             if np.any(np.abs(np.roots(section[3:])) >= 1.0):
                 raise ValueError("Composite IIR SOS is unstable")
-        hash_fields = (
-            "enabled", "family", "order", "highpass_hz", "lowpass_hz",
-            "common_highpass_hz", "common_lowpass_hz", "overlap_oct", "lr2_polarity",
-            "highpass_order", "lowpass_order",
-        )
-        hash_payload = {
-            **{key: received_iir[key] for key in hash_fields if key in received_iir},
-            "coefficient_sample_rate_hz": coefficient_fs,
-        }
-        actual_hash = hashlib.sha256(
-            json.dumps(hash_payload, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        from crossover_engine.iir import iir_definition_hash
+        actual_hash = iir_definition_hash(received_iir, coefficient_fs)
         if str(received_iir.get("definition_hash", "")) != actual_hash:
             raise ValueError("Composite IIR definition hash does not match SOS contract")
         if not apply:
@@ -12862,7 +12848,8 @@ if isinstance(_pending_context, dict) and str(_pending_context["assignment_id"])
 if _active_target_edit_session is None and (
     _requested_context_id != _current_context_id or not _context_initialized
 ):
-    _context_before = dict(st.session_state)
+    from utils.session_state_transaction import snapshot_session_state, rollback_session_state
+    _context_before = snapshot_session_state(st.session_state)
     try:
         _destination = None
         if _requested_context_id:
@@ -12993,12 +12980,7 @@ if _active_target_edit_session is None and (
                 "state_updates": {},
             }
     except Exception as exc:
-        for _key in list(st.session_state):
-            if _key not in _context_before:
-                del st.session_state[_key]
-        for _key, _value in _context_before.items():
-            if _key not in st.session_state or st.session_state[_key] is not _value:
-                st.session_state[_key] = _value
+        rollback_session_state(st.session_state, _context_before)
         st.session_state.pop("_composite_channel_switcher_context", None)
         if _current_assignment is not None:
             st.query_params["assignment"] = _current_context_id

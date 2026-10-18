@@ -45,12 +45,19 @@ class IIRCrossoverConfig:
         if int(self.highpass_order) not in {0, 2, 4} or int(self.lowpass_order) not in {0, 2, 4}:
             raise ValueError("exclusive IIR boundary order must be 0, 2 or 4")
         if self.ntm4_topology is not None:
+            from .methods import METHOD_DEFINITIONS
             from .ntm4 import validate_lobe_db
+            from .topology import ROUTING_VERSION
             topology = self.ntm4_topology
-            if not isinstance(topology, dict) or set(topology) != {"way_index", "methods", "frequencies", "overlaps", "lobes"}:
+            required = {"way_index", "methods", "frequencies", "overlaps", "lobes"}
+            if not isinstance(topology, dict) or set(topology) not in (required, required | {"routing_version"}):
                 raise ValueError("Invalid NTM4 topology")
+            if "routing_version" in topology and (type(topology["routing_version"]) is not int
+                                                 or topology["routing_version"] != ROUTING_VERSION):
+                raise ValueError("Unsupported IIR bank routing version")
             count = len(topology["methods"])
-            if ("NTM4" not in topology["methods"] or type(topology["way_index"]) is not int
+            if (not any(METHOD_DEFINITIONS.get(method) and METHOD_DEFINITIONS[method].requires_bank_definition
+                        for method in topology["methods"]) or type(topology["way_index"]) is not int
                     or not 0 <= topology["way_index"] <= count
                     or any(len(topology[key]) != count for key in ("frequencies", "overlaps", "lobes"))):
                 raise ValueError("NTM4 boundary count does not match Ways")
@@ -74,10 +81,24 @@ class IIRCrossoverConfig:
         return result
 
     def definition_hash(self, sample_rate_hz: int) -> str:
-        payload = {**self.to_dict(), "coefficient_sample_rate_hz": int(sample_rate_hz)}
-        return hashlib.sha256(
-            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        return iir_definition_hash(self.to_dict(), sample_rate_hz)
+
+
+def iir_definition_hash(definition: dict, sample_rate_hz: int) -> str:
+    """Hash the shared definition fields for both publishers and receivers.
+
+    Preserve omitted legacy fields instead of inserting current defaults.
+    Transport metadata and SOS are checked by their separate contracts.
+    """
+    payload = {
+        key: value for key, value in definition.items()
+        if key in IIRCrossoverConfig.__dataclass_fields__
+        and not (key == "ntm4_topology" and value is None)
+    }
+    payload["coefficient_sample_rate_hz"] = int(sample_rate_hz)
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def crossover_edges_hz(common_hz: float, overlap_oct: float) -> tuple[float, float]:
@@ -138,19 +159,26 @@ def realized_exclusive_iir_config(
     lp_method = methods[lp_index] if lp_index is not None else "Kaiser FIR"
     hp_common = float(crossover_frequencies_hz[hp_index]) if hp_index is not None else 0.0
     lp_common = float(crossover_frequencies_hz[lp_index]) if lp_index is not None else 0.0
-    hp_order = 4 if hp_method == "NTM4" else int(hp_method[2:]) if hp_method.startswith("LR") else 0
-    lp_order = 4 if lp_method == "NTM4" else int(lp_method[2:]) if lp_method.startswith("LR") else 0
+    from .methods import boundary_method
+    definitions = tuple(boundary_method(method) for method in methods)
+    hp_order = boundary_method(hp_method).order
+    lp_order = boundary_method(lp_method).order
     hp = crossover_edges_hz(hp_common, overlap_oct[hp_index])[1] if hp_order else 0.0
     lp = crossover_edges_hz(lp_common, overlap_oct[lp_index])[0] if lp_order else 0.0
     topology = None
-    if "NTM4" in methods:
+    if any(method.requires_bank_definition for method in definitions):
         from .ntm4 import DEFAULT_LOBE_DB, validate_lobe_db
+        from .topology import ROUTING_VERSION
         lobes = lobe_heights_db or (DEFAULT_LOBE_DB,) * len(methods)
         if len(lobes) != len(methods) or len(crossover_frequencies_hz) != len(methods):
             raise ValueError("NTM4 boundary count does not match Ways")
-        topology = dict(way_index=index, methods=list(methods),
+        lobes = tuple(validate_lobe_db(value) for value in lobes)
+        topology = dict(routing_version=ROUTING_VERSION, way_index=index, methods=list(methods),
                         frequencies=list(crossover_frequencies_hz), overlaps=list(overlap_oct),
-                        lobes=[validate_lobe_db(value) for value in lobes])
+                        # Inactive controls remain in Studio settings, while
+                        # the effective definition matches the portable Recipe.
+                        lobes=[value if method == "NTM4" else DEFAULT_LOBE_DB
+                               for method, value in zip(methods, lobes)])
     return IIRCrossoverConfig(
         enabled=bool(hp_order or lp_order or topology), family="Linkwitz-Riley",
         order=max(hp_order, lp_order, 2), highpass_hz=hp, lowpass_hz=lp,
@@ -169,8 +197,7 @@ def iir_crossover_sos(config: IIRCrossoverConfig, sample_rate_hz: int) -> np.nda
         return np.empty((0, 6), dtype=float)
     config.validate(sample_rate_hz)
     if config.ntm4_topology is not None:
-        from .ntm4 import cascaded_way_sos
-        return cascaded_way_sos(**config.ntm4_topology, fs=sample_rate_hz)
+        return bank_way_sos(**config.ntm4_topology, fs=sample_rate_hz)
     sections: list[np.ndarray] = []
     for kind, cutoff, boundary_order in (
         ("highpass", config.highpass_hz, config.highpass_order),
@@ -188,6 +215,24 @@ def iir_crossover_sos(config: IIRCrossoverConfig, sample_rate_hz: int) -> np.nda
         else:
             sections.append(signal.bessel(design_order, float(cutoff), btype=kind, fs=sample_rate_hz, output="sos", norm="phase"))
     return np.vstack(sections) if sections else np.empty((0, 6), dtype=float)
+
+
+def bank_way_sos(way_index, methods, frequencies, overlaps, lobes, fs, routing_version=None):
+    """Generate direct stages from a routing plan and boundary-owned prototypes."""
+    from .methods import boundary_method
+    from .topology import ROUTING_VERSION, resolve_split_topology
+    if routing_version is not None and routing_version != ROUTING_VERSION:
+        raise ValueError('Unsupported IIR bank routing version')
+    plan = resolve_split_topology(methods)
+    rows = []
+    for index in plan.split_boundaries(way_index):
+        method = boundary_method(methods[index])
+        if method.split_sos is None:
+            continue
+        side = 'highpass' if index < way_index else 'lowpass'
+        cutoff = crossover_edges_hz(frequencies[index], overlaps[index])[1 if side == 'highpass' else 0]
+        rows.append(method.split_sos(side, cutoff, fs, lobes[index]))
+    return np.vstack(rows) if rows else np.empty((0, 6), dtype=float)
 
 
 def iir_crossover_response(

@@ -23,7 +23,7 @@ import pandas as pd
 import streamlit as st
 from utils.list_menu_ui import selectbox as shared_selectbox, radio as shared_radio, segmented_control as shared_segmented_control
 
-from crossover_engine.recipe import from_studio as band_split_from_studio
+from crossover_engine.recipe import METHODS as CROSSOVER_METHODS, from_studio as band_split_from_studio
 from crossover_engine.bank import MODE_BANDS as CROSSOVER_MODE_BANDS
 from composite_engine.multiway_studio.processing import alignment_target, alignment_structure
 from composite_engine.multiway_studio.processing.adaptive_crop_state import (
@@ -268,7 +268,6 @@ from composite_engine.multiway_studio.components.visualization import (
 )
 
 
-CROSSOVER_METHODS = ("Kaiser FIR", "Linear-phase LR2 FIR", "Linear-phase LR4 FIR", "LR2", "LR4", "NTM4", "Through")
 CROSSOVER_METHOD_LABELS = {
     "Through": "スルー（外部で帯域分割済み）",
     "Kaiser FIR": "Kaiser-window linear-phase FIR",
@@ -1916,6 +1915,7 @@ def render_composite_sidebar(
             st.session_state.get("settings", {}), MODE_WAYS[mode_key], crossover_frequencies_hz,
             boundary_controls.methods,
             lobe_heights_db=boundary_controls.lobe_heights_db,
+            acoustic_targets=boundary_controls.acoustic_targets,
         )
         st.markdown(ui_message('ui.e5f113fdc5fdf7'))
         layout_key = "composite_studio_output_layout"
@@ -3263,6 +3263,7 @@ def _render_phase_alignment_controls(
                 ),
                 crossover_methods=crossover_methods,
                 lobe_heights_db=controls.lobe_heights_db,
+                acoustic_targets=controls.acoustic_targets,
             )
             proposal = residual_proposal
             by_channel_name = {
@@ -3987,6 +3988,7 @@ def _render_system_phase_alignment_controls(
                     ),
                     crossover_methods=crossover_methods,
                     lobe_heights_db=controls.lobe_heights_db,
+                    acoustic_targets=controls.acoustic_targets,
                     timing_provenance_by_channel={
                         channel_id: row.get("timing_provenance")
                         for channel_id, row in row_by_id.items()
