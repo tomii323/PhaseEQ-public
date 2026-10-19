@@ -10,11 +10,12 @@ import numpy as np
 
 from .adaptive_crop import (AdaptiveCropResult, plan_adaptive_crop, execute_crop, crop_result, AdaptiveCropPlan, _metrics)
 from fir_output_window import output_window
-from .validation import FIRResponseValidation, FIRValidationError, validate_final_fir
+from .validation import FIRResponseValidation, FIRValidationError, validate_final_fir, validate_fixed_fir
 
 
 COSINE_TAPER_KAISER_RATIO_NUMERATOR = 11
 COSINE_TAPER_KAISER_RATIO_DENOMINATOR = 10
+FixedWindowMode = Literal["protected", "direct"]
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ class FinalOutputTapResult:
     window_applied: bool = False
     validation: FIRResponseValidation | None = None
     crop_range: FinalCropRange | None = None
+    window_mode: FixedWindowMode = "protected"
 
 
 def _validated_fir(values: np.ndarray) -> np.ndarray:
@@ -80,15 +82,20 @@ def decide_final_crop_range(start: int, stop: int, input_taps: int,
 
 
 def _execute_final_plan(source, plan, decision, *, mode, configured_taps,
-                         output_window_enabled):
+                         output_window_enabled, window_mode: FixedWindowMode = "protected"):
     """Steps ⑥–⑨ in one ordered executor; publish only after validation."""
     output = execute_crop(source, plan, start=decision.start, stop=decision.stop)
-    window = output_window(output.size, output_window_enabled, protected_center_taps=plan.taps)
+    window = output_window(output.size, output_window_enabled,
+                           protected_center_taps=plan.taps if window_mode == "protected" else None)
     if output_window_enabled:
         output *= window
-    validation = validate_final_fir(source, plan, decision.start, decision.stop, output,
-                                    window=window,
-                                    enforce_precision=mode == "adaptive" and plan.adopted)
+    if window_mode == "direct":
+        validation = validate_fixed_fir(source, plan, decision.start, decision.stop, output,
+                                        window=window)
+    else:
+        validation = validate_final_fir(source, plan, decision.start, decision.stop, output,
+                                        window=window,
+                                        enforce_precision=mode == "adaptive" and plan.adopted)
     crop = (crop_result(source, plan, decision.start, decision.stop, output,
                         window_enabled=output_window_enabled) if mode == "adaptive" else None)
     # Immutable bytes prevent a consumer from changing the authoritative FIR.
@@ -98,11 +105,11 @@ def _execute_final_plan(source, plan, decision, *, mode, configured_taps,
         crop = replace(crop, coefficients=output)
     return FinalOutputTapResult(
         output, mode, configured_taps, source.size, output.size, adaptive=crop,
-        taper_reference_taps=plan.taps if output_window_enabled else None,
-        taper_frame_taps=output.size if output_window_enabled else None,
-        taper_source_limit_taps=source.size if output_window_enabled else None,
+        taper_reference_taps=plan.taps if output_window_enabled and window_mode == "protected" else None,
+        taper_frame_taps=output.size if output_window_enabled and window_mode == "protected" else None,
+        taper_source_limit_taps=source.size if output_window_enabled and window_mode == "protected" else None,
         crop_delay_samples=float(decision.start), window_applied=True,
-        validation=validation, crop_range=decision,
+        validation=validation, crop_range=decision, window_mode=window_mode,
     )
 
 
@@ -122,12 +129,15 @@ def apply_final_output_tap_policy(
     coefficients: np.ndarray, output_taps: int, *, adaptive: bool = False,
     minimum_taps: object = 1,
     output_window_enabled: bool = False, kaiser_band_split_active: bool = False,
+    fixed_window_mode: FixedWindowMode = "protected",
 ) -> FinalOutputTapResult:
     """Common finalization without synthetic padding or later windowing."""
     source = _validated_fir(coefficients)
     configured = int(output_taps)
     if configured < 1:
         raise ValueError("resolved output taps must be positive")
+    if fixed_window_mode not in ("protected", "direct"):
+        raise ValueError("unknown fixed FIR window mode")
     if adaptive:
         return finalize_adaptive_fir(source, minimum_taps=minimum_taps, maximum_taps=configured,
                                      output_window_enabled=output_window_enabled)
@@ -137,7 +147,8 @@ def apply_final_output_tap_policy(
     plan = AdaptiveCropPlan(source.size, start, stop, False, _metrics(source, source),
                             input_digest=hashlib.sha256(
                                 np.asarray(source, dtype="<f8").tobytes()).hexdigest())
-    decision = decide_final_crop_range(start, stop, source.size, output_window_enabled,
+    decision = decide_final_crop_range(start, stop, source.size,
+                                       output_window_enabled and fixed_window_mode == "protected",
                                        require_odd=False)
     return _execute_final_plan(source, plan, decision, mode="fixed", configured_taps=configured,
-                               output_window_enabled=output_window_enabled)
+                               output_window_enabled=output_window_enabled, window_mode=fixed_window_mode)

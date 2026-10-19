@@ -2715,6 +2715,7 @@ def _phaseeq_channel_fir(row, sample_rate_hz):
 def _prepare_studio_output_firs(state, final_firs, sample_rate_hz, *, output_taper):
     """Build one final coefficient snapshot for Group analysis and all outputs."""
     from composite_engine.export import DSPChannelExportInput
+    from composite_engine.multiway_studio.processing.fir_state import resolve_fixed_window_mode
     configured = state.get("composite_studio_channels", [])
     dsp_channels = []
     crop_rows = []
@@ -2845,6 +2846,9 @@ def _prepare_studio_output_firs(state, final_firs, sample_rate_hz, *, output_tap
             ),
             fir_stages=tuple(stages),
             cosine_taper_enabled=bool(output_taper),
+            fixed_window_mode=resolve_fixed_window_mode(
+                str(fir_state.get("tap_source", "")), auto_crop=adaptive_crop_enabled,
+            ),
             kaiser_band_split_active=bool(
                 band in kaiser_taper_bands and band in kaiser_split_firs
             ),
@@ -4671,7 +4675,7 @@ def render_composite_results(
             ui_message('ui.78c3bbd1fa1439'),
             key="composite_output_cosine_taper",
             on_change=_commit_output_taper,
-            help=ui_message('ui.50afae67eec81c'),
+            help=ui_message('ui.f3366f7e525eed'),
         )
         for message in taper_limit_messages(final_snapshot["channels"]):
             st.caption(message)

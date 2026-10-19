@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Mapping, Sequence
 
 import numpy as np
+from fir_design_common.output_tap_policy import FixedWindowMode
 from fir_design_common.fir_state import (
     DEFAULT_MANUAL_FIR_TAPS,
     FIRFrameState,
@@ -53,6 +54,11 @@ def bands_using_kaiser_split(
         if direct_fir_split_family(method) == "kaiser":
             required.update((bands[index], bands[index + 1]))
     return frozenset(required)
+
+
+def resolve_fixed_window_mode(tap_source: str, *, auto_crop: bool) -> FixedWindowMode:
+    """Keep zero-tap allocation independent from manual final windowing."""
+    return "direct" if tap_source == "manual" and not auto_crop else "protected"
 
 
 def resolve_band_fir_states(

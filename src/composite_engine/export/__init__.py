@@ -14,6 +14,7 @@ from ..fir_artifact import FinalFIRArtifact
 from fir_design_common import generation_fft_size, generation_frequency_axis, project_centered_fir, compose_fir_stages_full
 from fir_design_common.output_tap_policy import (
     FinalOutputTapResult,
+    FixedWindowMode,
     apply_final_output_tap_policy,
 )
 
@@ -80,6 +81,7 @@ class DSPChannelExportInput:
     final_window_applied: bool = False
     basic_fir_taps: int = 1
     output_reference_delay_samples: float = 0.0
+    fixed_window_mode: FixedWindowMode = "protected"
 
 
 def compose_channel_fir(channel: DSPChannelExportInput) -> np.ndarray:
@@ -104,6 +106,7 @@ def prepare_channel_fir(channel: DSPChannelExportInput, *, adaptive: bool = Fals
         natural, int(channel.pre_alignment_tap_count or channel.tap_count or natural.size),
         adaptive=adaptive, minimum_taps=channel.basic_fir_taps,
         output_window_enabled=channel.cosine_taper_enabled,
+        fixed_window_mode=channel.fixed_window_mode,
     )
 
 
@@ -126,6 +129,7 @@ def capture_finalized_channel(channel: DSPChannelExportInput,
         "timing_mode": "external_delay" if result.crop_delay_samples else "none",
     }
     metadata["configured_taps"] = result.configured_taps
+    metadata["final_window_mode"] = result.window_mode
     metadata["final_validation"] = asdict(result.validation)
     metadata["final_crop_range"] = asdict(result.crop_range) if result.crop_range else None
     return replace(channel, tap_count=result.final_taps, pre_alignment_tap_count=None,

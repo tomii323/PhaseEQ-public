@@ -13,6 +13,7 @@
 
 ## バージョン別の更新案内
 
+- [v1.20.35](release-notes-v1.20.35.md)
 - [v1.20.34](release-notes-v1.20.34.md)
 - [v1.20.33](release-notes-v1.20.33.md)
 - [v1.20.32](release-notes-v1.20.32.md)

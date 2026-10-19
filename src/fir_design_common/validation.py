@@ -50,6 +50,21 @@ def validate_basic_fir(coefficients):
 
 def validate_final_fir(source, plan, start, stop, output, *, window,
                        enforce_precision):
+    """Validate protected-core finalization, including Adaptive precision."""
+    return _validate_final_fir(source, plan, start, stop, output, window=window,
+                               enforce_precision=enforce_precision, preserve_core=True)
+
+
+def validate_fixed_fir(source, plan, start, stop, output, *, window):
+    """Validate direct windowing of the exact fixed range without a core guard."""
+    if (start, stop) != (plan.start, plan.stop) or plan.adopted:
+        raise FIRValidationError("fixed FIR must retain its planned range")
+    return _validate_final_fir(source, plan, start, stop, output, window=window,
+                               enforce_precision=False, preserve_core=False)
+
+
+def _validate_final_fir(source, plan, start, stop, output, *, window,
+                        enforce_precision, preserve_core):
     """Verify the actual DSP coefficients and their compensated time origin.
 
     Existing amplitude/phase/complex/energy limits remain authoritative.
@@ -63,9 +78,9 @@ def validate_final_fir(source, plan, start, stop, output, *, window,
     if not np.array_equal(output, expected):
         raise FIRValidationError("final FIR differs from the one crop/window operation")
     first, last = plan.start - start, plan.stop - start
-    if not np.array_equal(window[first:last], np.ones(plan.taps)):
+    if preserve_core and not np.array_equal(window[first:last], np.ones(plan.taps)):
         raise FIRValidationError("Adaptive core window must be exactly 1.0")
-    if not np.array_equal(output[first:last], source[plan.start:plan.stop]):
+    if preserve_core and not np.array_equal(output[first:last], source[plan.start:plan.stop]):
         raise FIRValidationError("Adaptive core coefficients have changed")
     metrics = _metrics(source, output, centered_shift_samples=(source.size-stop-start)/2)
     removed = float(np.dot(source[:start], source[:start]) + np.dot(source[stop:], source[stop:]))

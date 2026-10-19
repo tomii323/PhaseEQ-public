@@ -96,5 +96,5 @@ def render_output_timing(
         if any(item.get("measurement_source") == "retained" for item in terms):
             st.caption(display_text("共通基準の測定到達差が揃わないため、保存済みの測定補正を維持しています。測定を更新した場合は、全チャンネルの測定基準を確認して再計算してください。"))
     with st.expander(display_text("タップ数・Delayの明細"), expanded=False):
-        st.caption(ui_message('ui.023f329fe82da0'))
+        st.caption(ui_message('ui.f75d7c94785b9f'))
         st.dataframe(output_timing_frame(details), hide_index=True, width="stretch")

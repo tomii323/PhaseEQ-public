@@ -1,4 +1,14 @@
 {
+  "ui.f3366f7e525eed": {
+    "source": "帯域タップ長が1以上で自動クロップOFFの場合は、指定長へ中央切り出しした係数にα=0.10の窓を直接1回かけます。窓ONでも長さを拡張しません。指定値0または自動クロップONでは、既存の中央保護と110%拡張を使用します。",
+    "ja": "帯域タップ長が1以上で自動クロップOFFの場合は、指定長へ中央切り出しした係数にα=0.10の窓を直接1回かけます。窓ONでも長さを拡張しません。指定値0または自動クロップONでは、既存の中央保護と110%拡張を使用します。",
+    "en": "With a positive band tap setting and auto-crop OFF, apply the alpha=0.10 window once directly to the centered fixed-length coefficients. Enabling the window does not extend the length. A zero setting or auto-crop ON retains the existing protected core and 110% extension."
+  },
+  "ui.f75d7c94785b9f": {
+    "source": "補正用割り当て、分割FIR、中間合成、最終FIRの長さを分けて表示します。手動指定・自動クロップOFFでは固定長へ直接窓をかけます。それ以外は追加実係数内でテーパーを完了します。クロップ開始位置はDSP追加Delayで補償し、最終係数のゼロ埋めは行いません。",
+    "ja": "補正用割り当て、分割FIR、中間合成、最終FIRの長さを分けて表示します。手動指定・自動クロップOFFでは固定長へ直接窓をかけます。それ以外は追加実係数内でテーパーを完了します。クロップ開始位置はDSP追加Delayで補償し、最終係数のゼロ埋めは行いません。",
+    "en": "Correction allocation, split FIR, intermediate composition and final FIR lengths are shown separately. Manual taps with auto-crop OFF use a direct fixed-length window; other paths taper only the added real coefficients. DSP delay compensates the crop origin. Final coefficients are never padded."
+  },
   "ui.48b7ca78705bec": {
     "source": "{channel}: 拡張用の実係数が左右にないため、テーパーON/OFFとも{final} tapsです（110%目標{requested}／入力{input} taps）。中央係数を保持し、窓による変更はありません。",
     "ja": "{channel}: 拡張用の実係数が左右にないため、テーパーON/OFFとも{final} tapsです（110%目標{requested}／入力{input} taps）。中央係数を保持し、窓による変更はありません。",
