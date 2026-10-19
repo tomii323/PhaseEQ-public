@@ -12,6 +12,7 @@ _TAP_COUNT_COLUMNS = (
     "帯域分割FIRタップ数", "分割＋追加EQタップ数",
     "コサインテーパー保護枠 [taps]",
     "整列前FIRタップ数", "整列追加zero [taps]", "Adaptive削減 [taps]",
+    "固定枠追加zero [taps]", "固定長切り出し [taps]",
 )
 
 WAITING_MESSAGES = {
@@ -96,5 +97,5 @@ def render_output_timing(
         if any(item.get("measurement_source") == "retained" for item in terms):
             st.caption(display_text("共通基準の測定到達差が揃わないため、保存済みの測定補正を維持しています。測定を更新した場合は、全チャンネルの測定基準を確認して再計算してください。"))
     with st.expander(display_text("タップ数・Delayの明細"), expanded=False):
-        st.caption(ui_message('ui.f75d7c94785b9f'))
+        st.caption(ui_message('ui.6c1c481f75aba4'))
         st.dataframe(output_timing_frame(details), hide_index=True, width="stretch")

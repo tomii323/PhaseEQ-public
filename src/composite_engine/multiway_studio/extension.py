@@ -4675,7 +4675,7 @@ def render_composite_results(
             ui_message('ui.78c3bbd1fa1439'),
             key="composite_output_cosine_taper",
             on_change=_commit_output_taper,
-            help=ui_message('ui.f3366f7e525eed'),
+            help=ui_message('ui.2dba6f0551df35'),
         )
         for message in taper_limit_messages(final_snapshot["channels"]):
             st.caption(message)

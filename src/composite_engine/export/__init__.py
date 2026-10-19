@@ -132,6 +132,8 @@ def capture_finalized_channel(channel: DSPChannelExportInput,
     metadata["final_window_mode"] = result.window_mode
     metadata["final_validation"] = asdict(result.validation)
     metadata["final_crop_range"] = asdict(result.crop_range) if result.crop_range else None
+    if result.frame_plan is not None:
+        metadata["fixed_frame"] = asdict(result.frame_plan)
     return replace(channel, tap_count=result.final_taps, pre_alignment_tap_count=None,
                    final_fir_override=result.coefficients, final_window_applied=True,
                    cosine_taper_protected_center_taps=result.taper_reference_taps,

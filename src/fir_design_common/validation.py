@@ -63,6 +63,29 @@ def validate_fixed_fir(source, plan, start, stop, output, *, window):
                                enforce_precision=False, preserve_core=False)
 
 
+def validate_fixed_frame(source, plan, output, *, window):
+    """Verify the planned crop/zero frame, window and original time reference."""
+    from .fixed_frame import plan_fixed_fir_frame
+    if plan != plan_fixed_fir_frame(len(source), plan.output_taps):
+        raise FIRValidationError("fixed FIR frame differs from its centered plan")
+    if len(output) != plan.output_taps or len(window) != plan.output_taps:
+        raise FIRValidationError("fixed FIR must have the configured length")
+    expected = np.zeros(plan.output_taps, dtype=float)
+    expected[plan.padding_left:plan.output_taps-plan.padding_right] = source[
+        plan.source_start:plan.source_stop]
+    if not np.array_equal(output, expected * window):
+        raise FIRValidationError("fixed FIR differs from the one frame/window operation")
+    report = validate_basic_fir(output)
+    size = 1 << max(4, (max(len(source), len(output)) * 8 - 1).bit_length())
+    _, ref_mask, ref_delay = _response(source, size)
+    _, got_mask, got_delay = _response(output, size)
+    active = ref_mask & got_mask
+    error = (float(np.max(np.abs(got_delay[active] + plan.origin_samples - ref_delay[active])))
+             if np.any(active) else 0.0)
+    from dataclasses import replace
+    return replace(report, max_group_delay_error_samples=error)
+
+
 def _validate_final_fir(source, plan, start, stop, output, *, window,
                         enforce_precision, preserve_core):
     """Verify the actual DSP coefficients and their compensated time origin.

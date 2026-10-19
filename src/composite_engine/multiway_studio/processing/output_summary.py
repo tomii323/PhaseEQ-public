@@ -26,6 +26,8 @@ def output_timing_rows(
         taper_protection = (taper_protection_taps or {}).get(channel.way)
         identity = {"出力CH": channel.output_index, "グループ": channel.group, "チャンネル": channel.name}
         terms = (channel.adaptive_crop_metadata or {}).get("delay_breakdown", {})
+        metadata = channel.adaptive_crop_metadata or {}
+        fixed_frame = metadata.get("fixed_frame", {})
         summary.append({
             **identity,
             "最終FIRタップ数": taps if taps is not None else "—",
@@ -44,6 +46,14 @@ def output_timing_rows(
             "整列前FIRタップ数": pre_alignment_taps if pre_alignment_taps is not None else "—",
             "整列追加zero [taps]": alignment_padding if alignment_padding is not None else "—",
             "最終FIRタップ数": taps if taps is not None else "—",
+            "固定枠追加zero [taps]": (
+                int(fixed_frame["padding_left"] + fixed_frame["padding_right"])
+                if fixed_frame else "—"
+            ),
+            "固定長切り出し [taps]": (
+                int(fixed_frame["input_taps"] - (fixed_frame["source_stop"] - fixed_frame["source_start"]))
+                if fixed_frame else "—"
+            ),
             "FIR長差Delay [samples]": round(float(terms.get("fir_base", channel.fir_alignment_delay_samples)), 6),
             "FIR理論差補償 [samples]": round(float(
                 (channel.adaptive_crop_metadata or {}).get("theoretical_alignment_delay_samples", 0.0)
@@ -61,11 +71,11 @@ def output_timing_rows(
                     channel.adaptive_crop_metadata.get("original_taps", taps)
                     - channel.adaptive_crop_metadata.get("final_taps", taps)
                 )
-                if isinstance(channel.adaptive_crop_metadata, dict) and taps is not None else "—"
+                if metadata.get("mode") == "adaptive" and taps is not None else "—"
             ),
             "Adaptive時間補償": (
                 channel.adaptive_crop_metadata.get("timing_mode", "—")
-                if isinstance(channel.adaptive_crop_metadata, dict) else "—"
+                if metadata.get("mode") == "adaptive" else "—"
             ),
         })
     return summary, details

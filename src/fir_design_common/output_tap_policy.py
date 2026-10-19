@@ -11,6 +11,8 @@ import numpy as np
 from .adaptive_crop import (AdaptiveCropResult, plan_adaptive_crop, execute_crop, crop_result, AdaptiveCropPlan, _metrics)
 from fir_output_window import output_window
 from .validation import FIRResponseValidation, FIRValidationError, validate_final_fir, validate_fixed_fir
+from .fixed_frame import FixedFIRFramePlan, plan_fixed_fir_frame, execute_fixed_fir_frame
+from .validation import validate_fixed_frame
 
 
 COSINE_TAPER_KAISER_RATIO_NUMERATOR = 11
@@ -51,6 +53,7 @@ class FinalOutputTapResult:
     validation: FIRResponseValidation | None = None
     crop_range: FinalCropRange | None = None
     window_mode: FixedWindowMode = "protected"
+    frame_plan: FixedFIRFramePlan | None = None
 
 
 def _validated_fir(values: np.ndarray) -> np.ndarray:
@@ -131,7 +134,7 @@ def apply_final_output_tap_policy(
     output_window_enabled: bool = False, kaiser_band_split_active: bool = False,
     fixed_window_mode: FixedWindowMode = "protected",
 ) -> FinalOutputTapResult:
-    """Common finalization without synthetic padding or later windowing."""
+    """Finalize a manual exact frame or the existing protected/Adaptive range."""
     source = _validated_fir(coefficients)
     configured = int(output_taps)
     if configured < 1:
@@ -141,6 +144,8 @@ def apply_final_output_tap_policy(
     if adaptive:
         return finalize_adaptive_fir(source, minimum_taps=minimum_taps, maximum_taps=configured,
                                      output_window_enabled=output_window_enabled)
+    if fixed_window_mode == "direct":
+        return _finalize_fixed_frame(source, configured, output_window_enabled)
     core_taps = min(source.size, configured)
     start = (source.size - core_taps) // 2
     stop = start + core_taps
@@ -152,3 +157,19 @@ def apply_final_output_tap_policy(
                                        require_odd=False)
     return _execute_final_plan(source, plan, decision, mode="fixed", configured_taps=configured,
                                output_window_enabled=output_window_enabled, window_mode=fixed_window_mode)
+
+
+def _finalize_fixed_frame(source, configured, window_enabled):
+    plan = plan_fixed_fir_frame(source.size, configured)
+    framed = execute_fixed_fir_frame(source, plan)
+    window = output_window(configured, window_enabled)
+    output = framed * window
+    validation = validate_fixed_frame(source, plan, output, window=window)
+    output = np.frombuffer(np.asarray(output, dtype="<f8").tobytes(), dtype="<f8")
+    return FinalOutputTapResult(
+        coefficients=output, mode="fixed", configured_taps=configured,
+        input_taps=source.size, final_taps=configured,
+        crop_delay_samples=float(plan.origin_samples), window_applied=True,
+        validation=validation, window_mode="direct", frame_plan=plan,
+        crop_range=FinalCropRange(plan.source_start, plan.source_stop, configured, False),
+    )

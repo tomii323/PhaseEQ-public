@@ -7,7 +7,7 @@ import numpy as np
 
 def source_signature(channel) -> str:
     digest = hashlib.sha256(json.dumps([
-        'final-fir-a-v5', int(channel.sample_rate_hz), int(channel.tap_count or 0),
+        'final-fir-a-v6', int(channel.sample_rate_hz), int(channel.tap_count or 0),
         getattr(channel, 'fixed_window_mode', 'protected'),
         bool(channel.cosine_taper_enabled),
         bool(getattr(channel, "final_window_applied", False)),

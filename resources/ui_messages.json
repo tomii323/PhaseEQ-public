@@ -16803,5 +16803,25 @@
     "source": "ONではFIRのDCゲインをTargetのDC値へ合わせます。TargetのDCが−180 dB以下の場合は係数を保持します。OFFでは窓関数後の係数をそのまま出力します。",
     "ja": "ONではFIRのDCゲインをTargetのDC値へ合わせます。TargetのDCが−180 dB以下の場合は係数を保持します。OFFでは窓関数後の係数をそのまま出力します。",
     "en": "When on, match FIR DC gain to the Target DC value. Keep coefficients unchanged when the Target DC is at or below -180 dB. When off, export windowed coefficients as they are."
+  },
+  "ui.2dba6f0551df35": {
+    "source": "帯域タップ長が1以上で自動クロップOFFの場合は、長い入力を中央切り出しし、短い入力を中央配置して両端をゼロで補い、指定長の係数枠を生成します。窓ONでは、その長さのα=0.10の窓を直接1回かけます。指定値0と自動クロップONの処理は従来どおりです。",
+    "ja": "帯域タップ長が1以上で自動クロップOFFの場合は、長い入力を中央切り出しし、短い入力を中央配置して両端をゼロで補い、指定長の係数枠を生成します。窓ONでは、その長さのα=0.10の窓を直接1回かけます。指定値0と自動クロップONの処理は従来どおりです。",
+    "en": "With positive band taps and auto-crop OFF, create exactly the requested frame: center-crop longer inputs or center shorter inputs with zero padding. When enabled, apply the alpha=0.10 window once at that length. Zero-tap allocation and auto-crop ON retain their existing processing."
+  },
+  "ui.6c1c481f75aba4": {
+    "source": "補正用割り当て、分割FIR、中間合成、最終FIRの長さを分けて表示します。手動指定・自動クロップOFFでは指定長の係数枠へ直接窓をかけます。固定枠の追加zeroと切り出しをAdaptiveと分けて表示し、配置・切り出しによる時間原点の移動を補償します。",
+    "ja": "補正用割り当て、分割FIR、中間合成、最終FIRの長さを分けて表示します。手動指定・自動クロップOFFでは指定長の係数枠へ直接窓をかけます。固定枠の追加zeroと切り出しをAdaptiveと分けて表示し、配置・切り出しによる時間原点の移動を補償します。",
+    "en": "Correction allocation, split FIR, intermediate composition and final FIR lengths are shown separately. Manual taps with auto-crop OFF use an exact requested frame and direct window. Fixed-frame padding and cropping are shown separately from Adaptive; time-origin shifts from placement or cropping are compensated."
+  },
+  "ui.f5e761e75c4d91": {
+    "source": "固定枠追加zero [taps]",
+    "ja": "固定枠追加zero [taps]",
+    "en": "Fixed-frame zero padding [taps]"
+  },
+  "ui.53560f79e23ff7": {
+    "source": "固定長切り出し [taps]",
+    "ja": "固定長切り出し [taps]",
+    "en": "Fixed-length removal [taps]"
   }
 }
