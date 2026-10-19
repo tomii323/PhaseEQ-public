@@ -17,6 +17,7 @@ class LinkChange:
     seeds: dict
     baseline: dict
     affected: tuple[str, ...]
+    successor: dict
 
 
 @dataclass(frozen=True)
@@ -84,25 +85,24 @@ def plan_change(model: EQLinks, *, channel, linking, candidates, source, categor
         old_group = model.channels.get(member, {}).get("group")
         if old_group:
             affected.update(key for key, record in model.channels.items() if record["group"] == old_group)
+    successor = EQLinks(model.snapshot())
+    if linking:
+        for target, seed in seeds.items():
+            successor.ensure(target, seed)
+        successor.link(candidates, source, categories)
+    else:
+        successor.unlink([channel])
     return LinkChange(channel, bool(linking), candidates, source, categories,
-                      deepcopy(seeds), model.snapshot(), tuple(sorted(affected)))
+                      deepcopy(seeds), model.snapshot(), tuple(sorted(affected)), successor.snapshot())
 
 
 def commit_change(model: EQLinks, change: LinkChange | RestoreChange, *, approved: bool):
     """The only ownership mutation path; cancellation and conflicts are inert."""
     if not approved:
         return False
-    if model.snapshot() != change.baseline:
+    if model.snapshot() != change.baseline or not hasattr(change, "successor"):
         raise ValueError("確認中に設定が変更されました。最新状態で再度確認してください。")
-    # Build a complete successor first. Validation cannot leave a partial group.
-    successor = EQLinks(model.snapshot())
-    if isinstance(change, RestoreChange):
-        successor = EQLinks(change.successor)
-    elif change.linking:
-        for target, seed in change.seeds.items():
-            successor.ensure(target, seed)
-        successor.link(change.candidates, change.source, change.categories)
-    else:
-        successor.unlink([change.channel])
+    # Revalidate the completed plan before replacing the owner atomically.
+    successor = EQLinks(change.successor)
     model.channels, model.groups = successor.channels, successor.groups
     return True

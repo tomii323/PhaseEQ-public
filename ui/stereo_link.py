@@ -3,11 +3,76 @@ from __future__ import annotations
 
 from utils.ui_localization import ui_message, display_text
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 
-from utils.eq_links import EQLinks, extract_eq, transaction, standalone_payload
+from utils.eq_links import EQLinks, SHARED_CATEGORIES, extract_eq, transaction, standalone_payload
 from utils.link_change import plan_change, commit_change, RestoreChange
+
+
+def require_context(state, assignment):
+    scope, channel, _ = channel_context(state, None, assignment)
+    if state.get("_stereo_context") != (scope, channel):
+        raise ValueError("編集対象とEQの所有者が一致しません。保存・返却を停止しました。")
+
+
+def restore_context(state, root, assignment, payload, apply, *, draft=False):
+    """Resolve ownership before one projection; keep DB and state on failure.
+
+    Drafts contain the EQ snapshot captured with their edits. A different live
+    owner must be reconciled explicitly, never overwritten by an old draft.
+    Channel inputs and crossover conditions remain in the destination payload.
+    """
+    from utils.session_state_transaction import snapshot_session_state, rollback_session_state
+
+    previous = snapshot_session_state(state)
+    scope, channel, options = channel_context(state, root, assignment)
+    base = clean_payload(payload)
+    conflict = state.get("_stereo_conflicts", {}).get((scope, channel)) if assignment is not None else None
+    boundary = nullcontext(None) if assignment is None else model_for(state, root, scope)
+    try:
+        with boundary as model:
+            if model is None:
+                effective, expected = base, None
+            else:
+                selected = payload.get("eq_link_channel")
+                if selected is not None and selected != channel:
+                    raise ValueError("復帰先と保存EQのチャンネルが一致しません。")
+                existed = channel in model.channels
+                model.ensure(channel, base)
+                if draft and existed and conflict is None:
+                    baseline = EQLinks(payload["eq_links"]) if "eq_links" in payload else None
+                    unchanged = (baseline is not None and channel in baseline.channels
+                                 and baseline.projection_token(channel) == model.projection_token(channel))
+                    if not unchanged and extract_eq(base) != extract_eq(model.effective(channel, base)):
+                        raise ValueError("保存後に復帰先のEQが変更されています。Draftを保持して切替を停止しました。")
+                    # Local edits belong to this channel. Shared categories are
+                    # resolved below from the current group, never overwritten.
+                    model.channels[channel]["local"] = extract_eq(base)
+                # An already recorded conflict must remain reviewable in its
+                # own editor. It is displayed without writing it to the DB.
+                effective = clean_payload(conflict) if conflict is not None else model.effective(channel, base)
+                expected = model.projection_token(channel)
+            result = apply(effective)
+            state.pop("_stereo_loaded_payload", None)
+            for key in ("_stereo_conflict", "_stereo_refresh_projection", "_stereo_pending_change",
+                        "_stereo_links", "_stereo_channel", "_stereo_channel_selector", "_stereo_channel_payloads"):
+                state.pop(key, None)
+            state["_stereo_context"] = (scope, channel)
+            if conflict is not None:
+                state["_stereo_conflict"] = deepcopy(conflict)
+            state["_stereo_live_payload"] = deepcopy(effective)
+            state["_stereo_options"] = options
+            if model is None:
+                state.pop("_stereo_expected", None)
+                state.pop("_stereo_applied_payload", None)
+            else:
+                state["_stereo_expected"] = expected
+                state["_stereo_applied_payload"] = deepcopy(effective)
+        return result
+    except Exception:
+        rollback_session_state(state, previous)
+        raise
 
 
 def channel_context(state, root, assignment, assignments=()):
@@ -29,7 +94,8 @@ def model_for(state, root, scope):
 def prepare(state, root, assignment, assignments, default_payload, apply):
     scope, channel, options = channel_context(state, root, assignment, assignments)
     loaded = state.pop("_stereo_loaded_payload", None)
-    payload = loaded or state.get("_stereo_live_payload") or default_payload
+    same_owner = state.get("_stereo_context") == (scope, channel)
+    payload = loaded or (state.get("_stereo_live_payload") if same_owner else None) or default_payload
     if assignment is None:
         effective = standalone_payload(payload)
         if extract_eq(effective) != extract_eq(payload) or state.get("_stereo_context") != (scope, channel):
@@ -150,7 +216,7 @@ def render(state, root, load_channel, load_other=None, *, toggle_host=None, deta
         record = model.channels[channel]
         group_id = record["group"]
         members = [key for key, value in model.channels.items() if group_id and value["group"] == group_id]
-        categories = model.groups[group_id]["categories"] if group_id else ["iir", "fir", "target"]
+        categories = model.groups[group_id]["categories"] if group_id else list(SHARED_CATEGORIES)
     selected_key = f"_stereo_members_{scope}_{channel}"
     source_key = f"_stereo_source_{scope}_{channel}"
     settings_key = f"_stereo_categories_{scope}_{channel}"
@@ -169,6 +235,8 @@ def render(state, root, load_channel, load_other=None, *, toggle_host=None, deta
         state.pop(draft_key, None)
     for key, value in state.get(draft_key, {}).items():
         state.setdefault(key, deepcopy(value))
+    if settings_key in state:
+        state[settings_key] = [name for name in state[settings_key] if name in SHARED_CATEGORIES]
     state.setdefault(selected_key, [member for member in members if member != channel and member in options])
     state.setdefault(settings_key, list(categories))
     if toggle_host is None or detail_host is None:
@@ -185,8 +253,8 @@ def render(state, root, load_channel, load_other=None, *, toggle_host=None, deta
         candidates = [channel, *selected]
         source = st.selectbox(ui_message("ui.c99fa954c2e1d0"), candidates,
             format_func=lambda key: ui_message("ui.695a8a6f8f3e4b") if key == channel else options[key], key=source_key)
-        shared = st.multiselect(ui_message("ui.95eee0aefa9e15"), ["iir", "fir", "target"],
-            format_func=lambda key: {"iir": "IIR EQ", "fir": ui_message("ui.ca46694f443358"), "target": ui_message("ui.d7b5054c74e1ea")}[key], key=settings_key)
+        shared = st.multiselect(ui_message("ui.95eee0aefa9e15"), list(SHARED_CATEGORIES),
+            format_func=category_label, key=settings_key)
         st.caption(ui_message("ui.3454bed137c4ea"))
         apply_clicked = st.button(ui_message("ui.2b22a780e4da52"), disabled=not selected or not shared)
     state[draft_key] = {selected_key: list(selected), source_key: source, settings_key: list(shared)}
@@ -219,6 +287,10 @@ def render(state, root, load_channel, load_other=None, *, toggle_host=None, deta
         render_confirmation(state, root, scope, pending[1], options)
 
 
+def category_label(category):
+    return {"iir": "IIR EQ", "fir": ui_message("ui.ca46694f443358")}[category]
+
+
 def render_confirmation(state, root, scope, change, options):
     """Display the prepared change; only the explicit OK branch can commit."""
     import streamlit as st
@@ -235,10 +307,9 @@ def render_confirmation(state, root, scope, change, options):
                 if member in successor.channels:
                     group = successor.channels[member]["group"]
                     st.write(options.get(member, member), "Linked" if group else "Unlinked")
-                    categories = successor.groups[group]["categories"] if group else ["iir", "fir", "target"]
+                    categories = successor.groups[group]["categories"] if group else list(SHARED_CATEGORIES)
                     st.write(ui_message("ui.aaa58681013d7c") + ", ".join(
-                        {"iir": "IIR EQ", "fir": ui_message("ui.ca46694f443358"),
-                         "target": ui_message("ui.d7b5054c74e1ea")}[name] for name in categories))
+                        category_label(name) for name in categories))
                     eq = successor.effective(member, {"config": {}, "ui": {}, "io": {}})["config"]
                     filters = []
                     for name in ("iir_filters", "peq_filters", "gain_peq_filters", "shelf_filters",
@@ -255,7 +326,8 @@ def render_confirmation(state, root, scope, change, options):
             if detached:
                 st.write(ui_message("ui.e81bcd17291bb6") + ", ".join(options.get(member, member) for member in detached))
             st.write(ui_message("ui.1bf6bea7b1cfae") + options.get(change.source, change.source))
-            st.write(ui_message("ui.aaa58681013d7c") + ", ".join({"iir": "IIR EQ", "fir": ui_message("ui.ca46694f443358"), "target": ui_message("ui.d7b5054c74e1ea")}[name] for name in change.categories))
+            st.write(ui_message("ui.aaa58681013d7c") + ", ".join(
+                category_label(name) for name in change.categories if name in SHARED_CATEGORIES))
         else:
             st.write(ui_message("ui.f284e4d4e94330"))
         st.caption(ui_message("ui.74a94d5556fc7e"))

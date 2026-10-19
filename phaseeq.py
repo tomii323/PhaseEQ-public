@@ -4620,6 +4620,22 @@ def _apply_config_payload_to_state(
         raise
 
 
+def _restore_context_payload(
+    payload: dict[str, Any], *, assignment: Any = None,
+    standalone_taps: int | None = None, draft: bool = False,
+    preserve_common_analysis_fft: bool = True,
+) -> DesignConfig:
+    from ui.stereo_link import restore_context
+
+    return restore_context(
+        st.session_state, STORAGE_PATHS["composite_exchange"], assignment, payload,
+        lambda resolved: _apply_config_payload_to_state(
+            resolved, assignment=assignment, standalone_taps=standalone_taps,
+            preserve_common_analysis_fft=preserve_common_analysis_fft,
+        ), draft=draft,
+    )
+
+
 def _snapshot_files() -> list[Path]:
     if not CONFIG_EXPORT_DIR.exists():
         return []
@@ -4922,6 +4938,14 @@ def _save_current_settings(
         )
     payload = settings_json(settings_payload)
     payload_digest = content_digest(payload)
+    from ui.composite_context import save_standalone_settings
+    try:
+        if not save_standalone_settings(st.session_state, SETTINGS_FILE, settings_payload):
+            st.warning(ui_message('ui.68a9677fa7df52'))
+            return
+    except OSError as exc:
+        st.warning(ui_message('ui.322dd87fce9abc', p0=f'{exc}'))
+        return
     if st.session_state.get("_settings_autosave_digest") == payload_digest:
         return
     try:
@@ -6083,8 +6107,10 @@ def _ensure_initial_state() -> None:
         for key, default in SHAPING_UI_DEFAULTS.items():
             st.session_state[key] = default
     if "settings_initialized" not in st.session_state:
+        from ui.composite_context import startup_settings_path, standalone_settings_path
+        startup_path = startup_settings_path(SETTINGS_FILE)
         loaded = load_startup_settings(
-            SETTINGS_FILE,
+            startup_path,
             expected_schema_version=SETTINGS_SCHEMA_VERSION,
         )
         if loaded.payload is not None:
@@ -6094,7 +6120,7 @@ def _ensure_initial_state() -> None:
                 asset_warning = st.session_state.pop("_settings_asset_warning", "")
                 st.session_state["_settings_notice"] = (
                     " / ".join(message for message in (overlap_warning, asset_warning) if message)
-                    or f"前回の設定を復元しました: {SETTINGS_FILE}"
+                    or f"前回の設定を復元しました: {startup_path}"
                 )
             except Exception as exc:
                 _apply_config_to_state(DEFAULT_CONFIG)
@@ -6119,6 +6145,7 @@ def _ensure_initial_state() -> None:
         else:
             _apply_config_to_state(DEFAULT_CONFIG)
         st.session_state["_settings_file_revision"] = file_revision(SETTINGS_FILE)
+        st.session_state["_standalone_settings_file_revision"] = file_revision(standalone_settings_path(SETTINGS_FILE))
         st.session_state["settings_initialized"] = True
 
 
@@ -12901,7 +12928,10 @@ _pending_context = st.session_state.pop("_pending_composite_context", None)
 _context_initialized = bool(st.session_state.get("_composite_context_initialized"))
 _current_assignment = st.session_state.get("_active_context_assignment")
 _current_context_id = str(getattr(_current_assignment, "assignment_id", ""))
-from ui.composite_context import requested_context_id, same_channel_context, queue_channel_switch
+from ui.composite_context import (
+    context_owner, source_context_payload, validate_draft_owner, load_standalone_settings,
+    requested_context_id, same_channel_context, queue_channel_switch,
+)
 _requested_context_id = requested_context_id(
     str(st.query_params.get("assignment", "")).strip(), _current_context_id, _pending_context,
 )
@@ -12923,19 +12953,20 @@ if _active_target_edit_session is None and (
                 _requested_context_id = _destination.assignment_id
             if _destination is None:
                 raise ValueError("Composite Assignmentが見つかりません。Multiwayで再発行してください。")
-        _source_payload = (
-            _pending_context.get("payload") if isinstance(_pending_context, dict)
-            else st.session_state.get("_composite_context_payload")
-        )
-        if callable(_source_payload):
-            _source_payload = _source_payload()
+        _source_payload = source_context_payload(st.session_state, _current_assignment, _pending_context)
         _drafts = dict(st.session_state.get("_composite_channel_drafts", {}))
+        _draft_owners = dict(st.session_state.get("_composite_channel_draft_owners", {}))
         if _source_payload is not None:
             _drafts[_current_context_id or "Standalone"] = _source_payload
+            _draft_owners[_current_context_id or "Standalone"] = context_owner(_current_assignment)
+        validate_draft_owner(_draft_owners, _requested_context_id or "Standalone", _destination)
         _payload = (deepcopy(_drafts.get(_requested_context_id))
                     if _destination is not None else _source_payload)
+        _restoring_draft = _payload is not None
         if _destination is None and _current_assignment is not None:
             _payload = deepcopy(_drafts.get("Standalone"))
+            if _payload is None:
+                _payload = load_standalone_settings(SETTINGS_FILE)
             if _payload is None:
                 _payload = build_config_payload(
                     app_name=APP_NAME, app_version=APP_VERSION, app_author=APP_AUTHOR,
@@ -12948,6 +12979,7 @@ if _active_target_edit_session is None and (
             and _source_payload is not None):
             # A revised Assignment changes band conditions, not the current EQ.
             _payload = deepcopy(_source_payload)
+            _restoring_draft = True
         if _payload is None and _destination is not None:
             _workspace_zip = assignment_working_session_path(
                 STORAGE_PATHS["composite_exchange"], _requested_context_id,
@@ -12989,13 +13021,15 @@ if _active_target_edit_session is None and (
                         "taps", DEFAULT_CONFIG.taps,
                     )
                 )
-            _apply_config_payload_to_state(
+            _restore_context_payload(
                 _payload, assignment=_destination,
                 standalone_taps=_standalone_taps,
+                draft=_restoring_draft,
                 preserve_common_analysis_fft=True,
             )
         # Commit connection identity only after settings and response restoration succeed.
         st.session_state["_composite_channel_drafts"] = _drafts
+        st.session_state["_composite_channel_draft_owners"] = _draft_owners
         st.session_state["_active_context_assignment"] = _destination
         st.session_state["_composite_context_initialized"] = True
         st.session_state["_composite_channel_workspace_id"] = str(getattr(_destination, "channel_id", ""))
@@ -13086,7 +13120,7 @@ if _workspace_assignment is not None:
             _workspace_data = _workspace_zip.read_bytes()
             _workspace_revision = hashlib.sha256(_workspace_data).hexdigest()
             if st.session_state.get("_composite_workspace_restore_revision") != _workspace_revision:
-                _apply_config_payload_to_state(
+                _restore_context_payload(
                     config_payload_from_project_zip(io.BytesIO(_workspace_data)),
                     assignment=_workspace_assignment,
                     preserve_common_analysis_fft=True,
@@ -20845,6 +20879,7 @@ st.session_state["_fir_status_snapshot"]["saved_request"] = bool(
 )
 
 try:
+    stereo_link.require_context(st.session_state, active_composite_assignment)
     _stereo_current = _config_payload(config, raw_speaker_response=raw_speaker_response_for_export,
                                      raw_target_response=raw_target_response_for_export,
                                      mic_cal_response=mic_cal_response_for_export)
@@ -20855,6 +20890,15 @@ try:
 except (OSError, ValueError, sqlite3.Error) as exc:
     st.error(f"Stereo Linkの設定を保存できません: {exc}")
     st.stop()
+
+# Freeze ownership together with the settled payload before any later UI action
+# can rerun the script (including history controls and the channel selector).
+st.session_state["_composite_context_payload"] = _config_payload(
+    config, raw_speaker_response=raw_speaker_response_for_export,
+    raw_target_response=raw_target_response_for_export,
+    mic_cal_response=mic_cal_response_for_export, deferred=True,
+)
+st.session_state["_composite_context_payload_owner"] = context_owner(active_composite_assignment)
 
 if acoustic_target_enabled(config) and result_pane is not None:
     with result_pane:
@@ -21007,13 +21051,6 @@ if active_page != "Measure":
                     st.session_state["_history_error"] = str(exc)
                 else:
                     st.session_state.pop("_history_restore_pending", None)
-
-# Keep a lazy snapshot for URL-driven switches as well as the selector.
-st.session_state["_composite_context_payload"] = _config_payload(
-    config, raw_speaker_response=raw_speaker_response_for_export,
-    raw_target_response=raw_target_response_for_export,
-    mic_cal_response=mic_cal_response_for_export, deferred=True,
-)
 
 if project_db_slot is not None:
   with project_db_slot:
@@ -22210,371 +22247,376 @@ with live_result_body_window:
             on_click="ignore",
         )
 
-        _flow_section(6, ui_message('ui.d219fe0c837005'), tag=ui_message('ui.d38a2a54cf74a6'))
-        st.caption(
-            ui_message('ui.ff1178420324e0')
-        )
-        if active_assignment_id:
-            try:
-                composite_assignment = read_composite_assignment(
-                    STORAGE_PATHS["composite_exchange"], active_assignment_id,
-                )
-            except (OSError, ValueError, json.JSONDecodeError) as exc:
+        if active_composite_assignment is not None:
+            _flow_section(6, ui_message('ui.d219fe0c837005'), tag=ui_message('ui.d38a2a54cf74a6'))
+            st.caption(
+                ui_message('ui.ff1178420324e0')
+            )
+            if active_assignment_id:
+                try:
+                    composite_assignment = read_composite_assignment(
+                        STORAGE_PATHS["composite_exchange"], active_assignment_id,
+                    )
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    composite_assignment = None
+                    st.error(ui_message('ui.dbe60881bc67bb', p0=f'{exc}'))
+            else:
                 composite_assignment = None
-                st.error(ui_message('ui.dbe60881bc67bb', p0=f'{exc}'))
-        else:
-            composite_assignment = None
-        standalone_composite_disabled = active_composite_assignment is None or composite_assignment is None
-        if composite_assignment is None:
-            st.info(
-                ui_message('ui.e3e688a7c2be4b')
+            standalone_composite_disabled = (
+                composite_assignment is None
+                or context_owner(composite_assignment) != context_owner(active_composite_assignment)
             )
-            published_source_name = " · ".join(filter(None, (
-                str(project_name).strip(),
-                str(output_band_name).strip(),
-            ))) or "PhaseEQ FIR"
-            published_way = "Unassigned"
-            published_group = "Inbox"
-        else:
-            published_source_name = composite_assignment.channel_name
-            published_way = composite_assignment.way
-            published_group = composite_assignment.group
-            st.success(
-                ui_message('ui.7d4f45c0ad2d1d', p0=f'{published_source_name}', p1=f'{published_way}', p2=f'{published_group}', p3=f'{composite_assignment.sample_rate_hz:,}')
-                + (
-                    ui_message('ui.b91338c8b8fd0a', p0=f'{composite_assignment.tap_count}')
-                    if int(composite_assignment.tap_count) > 0 else ui_message('ui.c1d2d14c3a9414')
+            if composite_assignment is None:
+                st.info(
+                    ui_message('ui.e3e688a7c2be4b')
+                )
+                published_source_name = " · ".join(filter(None, (
+                    str(project_name).strip(),
+                    str(output_band_name).strip(),
+                ))) or "PhaseEQ FIR"
+                published_way = "Unassigned"
+                published_group = "Inbox"
+            else:
+                published_source_name = composite_assignment.channel_name
+                published_way = composite_assignment.way
+                published_group = composite_assignment.group
+                st.success(
+                    ui_message('ui.7d4f45c0ad2d1d', p0=f'{published_source_name}', p1=f'{published_way}', p2=f'{published_group}', p3=f'{composite_assignment.sample_rate_hz:,}')
+                    + (
+                        ui_message('ui.b91338c8b8fd0a', p0=f'{composite_assignment.tap_count}')
+                        if int(composite_assignment.tap_count) > 0 else ui_message('ui.c1d2d14c3a9414')
+                    )
+                )
+            composite_assignment_fir_enabled = (
+                composite_assignment is None
+                or int(composite_assignment.tap_count) > 0
+            )
+            requested_taps_raw = (
+                int(composite_assignment.tap_count)
+                if composite_assignment is not None else int(taps)
+            )
+            requested_taps = (
+                _normalize_taps_value(requested_taps_raw)
+                if composite_assignment_fir_enabled else int(taps)
+            )
+            requested_sample_rate = (
+                int(composite_assignment.sample_rate_hz)
+                if composite_assignment is not None else int(sample_rate)
+            )
+            design_matches_assignment = (
+                int(sample_rate) == requested_sample_rate
+                and (
+                    not composite_assignment_fir_enabled
+                    or (
+                        int(taps) == requested_taps
+                    )
                 )
             )
-        composite_assignment_fir_enabled = (
-            composite_assignment is None
-            or int(composite_assignment.tap_count) > 0
-        )
-        requested_taps_raw = (
-            int(composite_assignment.tap_count)
-            if composite_assignment is not None else int(taps)
-        )
-        requested_taps = (
-            _normalize_taps_value(requested_taps_raw)
-            if composite_assignment_fir_enabled else int(taps)
-        )
-        requested_sample_rate = (
-            int(composite_assignment.sample_rate_hz)
-            if composite_assignment is not None else int(sample_rate)
-        )
-        design_matches_assignment = (
-            int(sample_rate) == requested_sample_rate
-            and (
-                not composite_assignment_fir_enabled
-                or (
-                    int(taps) == requested_taps
+            if not design_matches_assignment:
+                st.warning(
+                    ui_message('ui.ebe6cf3570794d', p0=f'{requested_sample_rate:,}')
+                    + (
+                        ui_message('ui.b91338c8b8fd0a', p0=f'{requested_taps_raw}')
+                        if composite_assignment_fir_enabled else ui_message('ui.c1d2d14c3a9414')
+                    )
+                    + "、"
+                    + ui_message('ui.fc7cd8fa0d3d4f', p0=f'{int(sample_rate):,}')
+                    + (
+                        ui_message('ui.86cf10c5ddab4f', p0=f'{int(taps)}')
+                        if composite_assignment_fir_enabled else ui_message('ui.ca700cc7c3c59a')
+                    )
+                    + ui_message('ui.1e4262cbe0e203')
                 )
-            )
-        )
-        if not design_matches_assignment:
-            st.warning(
-                ui_message('ui.ebe6cf3570794d', p0=f'{requested_sample_rate:,}')
-                + (
-                    ui_message('ui.b91338c8b8fd0a', p0=f'{requested_taps_raw}')
-                    if composite_assignment_fir_enabled else ui_message('ui.c1d2d14c3a9414')
-                )
-                + "、"
-                + ui_message('ui.fc7cd8fa0d3d4f', p0=f'{int(sample_rate):,}')
-                + (
-                    ui_message('ui.86cf10c5ddab4f', p0=f'{int(taps)}')
-                    if composite_assignment_fir_enabled else ui_message('ui.ca700cc7c3c59a')
-                )
-                + ui_message('ui.1e4262cbe0e203')
-            )
-            if st.button(
-                ui_message('ui.b247034274645e'),
+                if st.button(
+                    ui_message('ui.b247034274645e'),
+                    type="primary",
+                    width="stretch",
+                    icon=":material/refresh:",
+                    key="apply_composite_requested_taps",
+                ):
+                    _set_design_condition_state(
+                        sample_rate=requested_sample_rate,
+                        taps=requested_taps,
+                    )
+                    _invalidate_live_result_cache()
+                    st.session_state["_pending_page_navigation"] = {
+                        "page": "Export",
+                        "state_updates": {},
+                    }
+                    st.rerun()
+            export_send_requested = st.button(
+                ui_message('ui.d219fe0c837005'),
                 type="primary",
                 width="stretch",
-                icon=":material/refresh:",
-                key="apply_composite_requested_taps",
-            ):
-                _set_design_condition_state(
-                    sample_rate=requested_sample_rate,
-                    taps=requested_taps,
-                )
-                _invalidate_live_result_cache()
-                st.session_state["_pending_page_navigation"] = {
-                    "page": "Export",
-                    "state_updates": {},
-                }
-                st.rerun()
-        export_send_requested = st.button(
-            ui_message('ui.d219fe0c837005'),
-            type="primary",
-            width="stretch",
-            icon=":material/publish:",
-            key="publish_composite_exchange_source",
-            disabled=standalone_composite_disabled or not design_matches_assignment
-                     or st.session_state.get("_stereo_conflict") is not None,
-        )
-        if multiway_send_requested and st.session_state.get("_stereo_conflict") is not None:
-            multiway_send_feedback.warning(ui_message("ui.e53f023a382ffe"))
-        if multiway_send_requested and (standalone_composite_disabled or not design_matches_assignment):
-            multiway_send_feedback.warning(ui_message('ui.26c0df9794e82a'))
-        if (
-            (export_send_requested or multiway_send_requested)
-            and not standalone_composite_disabled
-            and design_matches_assignment
-            and st.session_state.get("_stereo_conflict") is None
-        ):
-            try:
-                if acoustic_target_enabled(config) and (config.speaker_response is None or config.speaker_response.phase_deg is None):
-                    raise ValueError("音響ターゲット補正には振幅・位相を含むスピーカー測定データを適用してください。")
-                composite_fir_recipe = None
-                composite_recipe_result = None
-                composite_eq_output_fir = np.array([], dtype=float)
-                composite_eq_fir_applied = False
-                if assignment_fir_enabled:
-                    composite_exchange_config = config_for_composite_exchange(
-                        config,
-                        assignment_target_is_reference=(
-                            active_composite_assignment is not None
-                            and isinstance(active_composite_assignment.target_definition, dict)
-                        ),
-                    )
-                    composite_fir_recipe = recipe_from_config(composite_exchange_config)
-                    composite_recipe_result = generate_fir_recipe(composite_fir_recipe)
-                    composite_eq_output_fir = composite_recipe_result.coefficients
-                    composite_identity_fir = np.zeros_like(composite_eq_output_fir, dtype=float)
-                    if composite_identity_fir.size % 2 == 1:
-                        composite_identity_fir[composite_identity_fir.size // 2] = 1.0
-                    composite_eq_fir_applied = bool(
-                        composite_identity_fir.size % 2 == 0
-                        or not np.allclose(
-                            composite_eq_output_fir, composite_identity_fir,
-                            rtol=0.0, atol=1e-9,
-                        )
-                    )
-                if composite_assignment_fir_enabled and len(composite_eq_output_fir) != requested_taps:
-                    raise ValueError("生成したFIRのtap数がAssignmentと一致しません。")
-                zip_name, zip_data = _build_current_working_session()
-                exchange_state = (
-                    upsert_exchange_channel(
-                        STORAGE_PATHS["composite_exchange"],
-                        sample_rate_hz=int(sample_rate),
-                        channel_name=published_source_name,
-                        way=published_way,
-                        group=published_group,
-                        coefficients=composite_eq_output_fir,
-                        deferred=composite_assignment is not None,
-                        assignment_id=(
-                            composite_assignment.assignment_id
-                            if composite_assignment is not None else ""
-                        ),
-                        channel_id=(
-                            composite_assignment.channel_id
-                            if composite_assignment is not None else ""
-                        ),
-                    )
-                    if composite_assignment_fir_enabled else None
-                )
-            except (OSError, ValueError, json.JSONDecodeError) as exc:
-                st.error(ui_message('ui.833ea12fe560f2', p0=f'{exc}'))
-                multiway_send_feedback.error(ui_message('ui.77ecb2670fe278', p0=f'{exc}'))
-            else:
-                if composite_assignment is not None and composite_assignment.assignment_id:
-                    try:
-                        processed_speaker = st.session_state.get(
-                            "_current_processed_speaker_response"
-                        )
-                        if processed_speaker is None:
-                            raise ValueError(
-                                "Response ProcessingのSpeaker出力がありません。Inputから再計算してください。"
-                            )
-                        speaker_path, speaker_hash = write_assignment_speaker_response(
-                            STORAGE_PATHS["composite_exchange"],
-                            composite_assignment.assignment_id,
-                            frequency_hz=processed_speaker.frequency,
-                            gain_db=processed_speaker.gain_db,
-                            phase_deg=processed_speaker.phase_deg,
-                            immutable=True,
-                        )
-                        workspace_zip_path = write_assignment_working_session(
-                            STORAGE_PATHS["composite_exchange"],
-                            composite_assignment.assignment_id,
-                            zip_data, immutable=True,
-                        )
-                        current_timing_provenance = timing_provenance_after_phase_centering(
-                            st.session_state.get(
-                                "_current_speaker_timing_provenance"
-                            ),
-                            additional_removed_delay_ms=(
-                                float(speaker_phase_center_applied_ms)
-                                if speaker_phase_center_applied_ms is not None else None
-                            ),
-                            sample_rate_hz=int(sample_rate),
-                            phase_origin=input_pipeline_result.phase_origin,
-                            response_hash=speaker_hash,
-                            center_method=speaker_phase_center_info.method,
-                            center_source=speaker_phase_center_info.source_type,
-                        )
-                        _publication_result = {
-                                "base_assignment_signature": composite_assignment.assignment_signature,
-                                "system_id": composite_assignment.system_id,
-                                "system_revision_number": composite_assignment.system_revision_number,
-                                "system_content_hash": composite_assignment.system_content_hash,
-                                "target_id": composite_assignment.target_id,
-                                "target_revision_number": composite_assignment.target_revision_number,
-                                "target_content_hash": composite_assignment.target_content_hash,
-                                "result_generation_signature": hashlib.sha256(
-                                    b"\0".join((
-                                        composite_assignment.assignment_signature.encode("utf-8"),
-                                        (
-                                            np.ascontiguousarray(
-                                                composite_eq_output_fir, dtype=np.float64,
-                                            ).tobytes()
-                                            if composite_assignment_fir_enabled else b"FIR-OFF"
-                                        ),
-                                        speaker_hash.encode("ascii"),
-                                        np.ascontiguousarray(cascade_iir_sos(
-                                            config.iir_filters, int(sample_rate),
-                                        ), dtype=np.float64).tobytes(),
-                                        json.dumps(
-                                            current_timing_provenance or {},
-                                            ensure_ascii=False,
-                                            sort_keys=True,
-                                            separators=(",", ":"),
-                                        ).encode("utf-8"),
-                                    ))
-                                ).hexdigest(),
-                                "sample_rate_hz": int(sample_rate),
-                                "tap_count": (
-                                    int(len(composite_eq_output_fir))
-                                    if composite_assignment_fir_enabled else 0
-                                ),
-                                "channel_name": published_source_name,
-                                "way": published_way,
-                                "group": published_group,
-                                "manifest": (
-                                    str(exchange_state.manifest_path)
-                                    if exchange_state is not None else None
-                                ),
-                                "asset_schema": 1,
-                                "exchange_channel": (
-                                    json.loads(exchange_state.manifest_path.read_text())["channels"][0]
-                                    if exchange_state is not None else None
-                                ),
-                                "working_session": str(workspace_zip_path),
-                                "working_session_hash": hashlib.sha256(zip_data).hexdigest(),
-                                "speaker_response": {
-                                    "path": str(speaker_path),
-                                    "content_hash": speaker_hash,
-                                    "source_stage": "Response Processing",
-                                    "phase_available": processed_speaker.phase_deg is not None,
-                                },
-                                "timing_provenance": current_timing_provenance,
-                                "phaseeq_iir": [asdict(item) for item in config.iir_filters],
-                                "phaseeq_iir_sos": cascade_iir_sos(
-                                    config.iir_filters, int(sample_rate),
-                                ).tolist(),
-                                "alignment_target_applied": bool(
-                                    (config.band_split_recipe or {}).get("phase_alignment", {}).get("acoustic_target", False)
-                                    and bool(auto_phase_eq_sections(config.auto_eq))
-                                    and composite_assignment_fir_enabled
-                                    and composite_recipe_result is not None
-                                    and not composite_recipe_result.bypass
-                                    and config.speaker_response is not None
-                                    and config.speaker_response.phase_deg is not None
-                                ),
-                                "target_applied_to_fir": False,
-                                "phaseeq_fir_applied": bool(
-                                    composite_assignment_fir_enabled
-                                    and composite_eq_fir_applied
-                                    and composite_recipe_result is not None
-                                    and not composite_recipe_result.bypass
-                                ),
-                                "fir_recipe": (
-                                    composite_fir_recipe.to_dict()
-                                    if composite_fir_recipe is not None else None
-                                ),
-                                "fir_recipe_hash": (
-                                    composite_recipe_result.recipe_hash
-                                    if composite_recipe_result is not None else None
-                                ),
-                                "fir_coefficient_hash": (
-                                    composite_recipe_result.coefficient_hash
-                                    if composite_recipe_result is not None else None
-                                ),
-                                "fir_recipe_bypass": (
-                                    composite_recipe_result.bypass
-                                    if composite_recipe_result is not None else True
-                                ),
-                                "composite_postprocess": {
-                                    "output_fir_polarity_invert": False,
-                                    "fir_auto_gain_enabled": False,
-                                },
-                                "fir_auto_gain_enabled": False,
-                                "iir_crossover": (
-                                    dict(st.session_state["_composite_iir_crossover"])
-                                    if isinstance(active_assignment_crossover(st.session_state), dict)
-                                    else None
-                                ),
-                            }
-                        from utils.exchange_publication import publication_identity
-                        _publication_identity = publication_identity(_publication_result)
-                        if st.session_state.get('_exchange_publish_identity') != _publication_identity:
-                            st.session_state['_exchange_publish_identity'] = _publication_identity
-                            st.session_state['_exchange_publish_operation'] = uuid.uuid4().hex
-                        mark_assignment_status(
-                            STORAGE_PATHS["composite_exchange"],
-                            composite_assignment.assignment_id,
-                            state="Ready",
-                            operation_id=st.session_state.setdefault('_exchange_publish_operation', uuid.uuid4().hex),
-                            message=(
-                                "PhaseEQ FIR published"
-                                if composite_assignment_fir_enabled
-                                else "PhaseEQ IIR and workspace published (FIR OFF)"
-                            ),
-                            result=_publication_result,
-                        )
-                    except (OSError, ValueError, json.JSONDecodeError) as exc:
-                        st.error(ui_message('ui.c3d2402baad7df', p0=f'{exc}'))
-                        multiway_send_feedback.error(ui_message('ui.acd549db5dae11', p0=f'{exc}'))
-                        st.stop()
-                st.session_state.pop("_exchange_publish_operation", None)
-                multiway_send_feedback.success(
-                    ui_message('ui.155fd134ebd301', p0=f'{published_group}', p1=f'{published_source_name}')
-                )
-                st.session_state["composite_exchange_last"] = {
-                    "sample_rate_hz": int(sample_rate),
-                    "group": published_group,
-                    "channel_count": (
-                        len(exchange_state.channel_names)
-                        if exchange_state is not None else 0
-                    ),
-                }
-                st.success(
-                    ui_message('ui.23266c9e9f81a1', p0=f'{published_source_name}', p1=f'{published_group}')
-                    + (
-                        ui_message('ui.8738c93a2c05f4')
-                        if not composite_assignment_fir_enabled else "。"
-                    )
-                )
-                if composite_assignment is not None and composite_assignment.return_url:
-                    current_composite_url = os.environ.get(
-                        "COMPOSITE_ENGINE_URL",
-                        f"http://localhost:{os.environ.get('COMPOSITE_ENGINE_PORT', '8502')}",
-                    )
-                    launch_button(STORAGE_PATHS["composite_exchange"], "multiway", "マルチウェイを開く",
-                                  current_composite_return_url(current_composite_url, composite_assignment.return_url))
-
-        exchange_last = st.session_state.get("composite_exchange_last")
-        if isinstance(exchange_last, dict) and int(exchange_last.get("sample_rate_hz", 0)) == int(sample_rate):
-            query = urlencode({
-                "exchange": str(int(sample_rate)),
-                "group": str(exchange_last.get("group", "")),
-            })
-            composite_url = os.environ.get(
-                "COMPOSITE_ENGINE_URL",
-                f"http://localhost:{os.environ.get('COMPOSITE_ENGINE_PORT', '8502')}",
+                icon=":material/publish:",
+                key="publish_composite_exchange_source",
+                disabled=standalone_composite_disabled or not design_matches_assignment
+                         or st.session_state.get("_stereo_conflict") is not None,
             )
-            launch_button(STORAGE_PATHS["composite_exchange"], "multiway", "マルチウェイで確認",
-                          f"{composite_url}?{query}", disabled=standalone_composite_disabled)
+            if multiway_send_requested and st.session_state.get("_stereo_conflict") is not None:
+                multiway_send_feedback.warning(ui_message("ui.e53f023a382ffe"))
+            if multiway_send_requested and (standalone_composite_disabled or not design_matches_assignment):
+                multiway_send_feedback.warning(ui_message('ui.26c0df9794e82a'))
+            if (
+                (export_send_requested or multiway_send_requested)
+                and not standalone_composite_disabled
+                and design_matches_assignment
+                and st.session_state.get("_stereo_conflict") is None
+            ):
+                try:
+                    stereo_link.require_context(st.session_state, composite_assignment)
+                    if acoustic_target_enabled(config) and (config.speaker_response is None or config.speaker_response.phase_deg is None):
+                        raise ValueError("音響ターゲット補正には振幅・位相を含むスピーカー測定データを適用してください。")
+                    composite_fir_recipe = None
+                    composite_recipe_result = None
+                    composite_eq_output_fir = np.array([], dtype=float)
+                    composite_eq_fir_applied = False
+                    if assignment_fir_enabled:
+                        composite_exchange_config = config_for_composite_exchange(
+                            config,
+                            assignment_target_is_reference=(
+                                active_composite_assignment is not None
+                                and isinstance(active_composite_assignment.target_definition, dict)
+                            ),
+                        )
+                        composite_fir_recipe = recipe_from_config(composite_exchange_config)
+                        composite_recipe_result = generate_fir_recipe(composite_fir_recipe)
+                        composite_eq_output_fir = composite_recipe_result.coefficients
+                        composite_identity_fir = np.zeros_like(composite_eq_output_fir, dtype=float)
+                        if composite_identity_fir.size % 2 == 1:
+                            composite_identity_fir[composite_identity_fir.size // 2] = 1.0
+                        composite_eq_fir_applied = bool(
+                            composite_identity_fir.size % 2 == 0
+                            or not np.allclose(
+                                composite_eq_output_fir, composite_identity_fir,
+                                rtol=0.0, atol=1e-9,
+                            )
+                        )
+                    if composite_assignment_fir_enabled and len(composite_eq_output_fir) != requested_taps:
+                        raise ValueError("生成したFIRのtap数がAssignmentと一致しません。")
+                    zip_name, zip_data = _build_current_working_session()
+                    exchange_state = (
+                        upsert_exchange_channel(
+                            STORAGE_PATHS["composite_exchange"],
+                            sample_rate_hz=int(sample_rate),
+                            channel_name=published_source_name,
+                            way=published_way,
+                            group=published_group,
+                            coefficients=composite_eq_output_fir,
+                            deferred=composite_assignment is not None,
+                            assignment_id=(
+                                composite_assignment.assignment_id
+                                if composite_assignment is not None else ""
+                            ),
+                            channel_id=(
+                                composite_assignment.channel_id
+                                if composite_assignment is not None else ""
+                            ),
+                        )
+                        if composite_assignment_fir_enabled else None
+                    )
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    st.error(ui_message('ui.833ea12fe560f2', p0=f'{exc}'))
+                    multiway_send_feedback.error(ui_message('ui.77ecb2670fe278', p0=f'{exc}'))
+                else:
+                    if composite_assignment is not None and composite_assignment.assignment_id:
+                        try:
+                            processed_speaker = st.session_state.get(
+                                "_current_processed_speaker_response"
+                            )
+                            if processed_speaker is None:
+                                raise ValueError(
+                                    "Response ProcessingのSpeaker出力がありません。Inputから再計算してください。"
+                                )
+                            speaker_path, speaker_hash = write_assignment_speaker_response(
+                                STORAGE_PATHS["composite_exchange"],
+                                composite_assignment.assignment_id,
+                                frequency_hz=processed_speaker.frequency,
+                                gain_db=processed_speaker.gain_db,
+                                phase_deg=processed_speaker.phase_deg,
+                                immutable=True,
+                            )
+                            workspace_zip_path = write_assignment_working_session(
+                                STORAGE_PATHS["composite_exchange"],
+                                composite_assignment.assignment_id,
+                                zip_data, immutable=True,
+                            )
+                            current_timing_provenance = timing_provenance_after_phase_centering(
+                                st.session_state.get(
+                                    "_current_speaker_timing_provenance"
+                                ),
+                                additional_removed_delay_ms=(
+                                    float(speaker_phase_center_applied_ms)
+                                    if speaker_phase_center_applied_ms is not None else None
+                                ),
+                                sample_rate_hz=int(sample_rate),
+                                phase_origin=input_pipeline_result.phase_origin,
+                                response_hash=speaker_hash,
+                                center_method=speaker_phase_center_info.method,
+                                center_source=speaker_phase_center_info.source_type,
+                            )
+                            _publication_result = {
+                                    "base_assignment_signature": composite_assignment.assignment_signature,
+                                    "system_id": composite_assignment.system_id,
+                                    "system_revision_number": composite_assignment.system_revision_number,
+                                    "system_content_hash": composite_assignment.system_content_hash,
+                                    "target_id": composite_assignment.target_id,
+                                    "target_revision_number": composite_assignment.target_revision_number,
+                                    "target_content_hash": composite_assignment.target_content_hash,
+                                    "result_generation_signature": hashlib.sha256(
+                                        b"\0".join((
+                                            composite_assignment.assignment_signature.encode("utf-8"),
+                                            (
+                                                np.ascontiguousarray(
+                                                    composite_eq_output_fir, dtype=np.float64,
+                                                ).tobytes()
+                                                if composite_assignment_fir_enabled else b"FIR-OFF"
+                                            ),
+                                            speaker_hash.encode("ascii"),
+                                            np.ascontiguousarray(cascade_iir_sos(
+                                                config.iir_filters, int(sample_rate),
+                                            ), dtype=np.float64).tobytes(),
+                                            json.dumps(
+                                                current_timing_provenance or {},
+                                                ensure_ascii=False,
+                                                sort_keys=True,
+                                                separators=(",", ":"),
+                                            ).encode("utf-8"),
+                                        ))
+                                    ).hexdigest(),
+                                    "sample_rate_hz": int(sample_rate),
+                                    "tap_count": (
+                                        int(len(composite_eq_output_fir))
+                                        if composite_assignment_fir_enabled else 0
+                                    ),
+                                    "channel_name": published_source_name,
+                                    "way": published_way,
+                                    "group": published_group,
+                                    "manifest": (
+                                        str(exchange_state.manifest_path)
+                                        if exchange_state is not None else None
+                                    ),
+                                    "asset_schema": 1,
+                                    "exchange_channel": (
+                                        json.loads(exchange_state.manifest_path.read_text())["channels"][0]
+                                        if exchange_state is not None else None
+                                    ),
+                                    "working_session": str(workspace_zip_path),
+                                    "working_session_hash": hashlib.sha256(zip_data).hexdigest(),
+                                    "speaker_response": {
+                                        "path": str(speaker_path),
+                                        "content_hash": speaker_hash,
+                                        "source_stage": "Response Processing",
+                                        "phase_available": processed_speaker.phase_deg is not None,
+                                    },
+                                    "timing_provenance": current_timing_provenance,
+                                    "phaseeq_iir": [asdict(item) for item in config.iir_filters],
+                                    "phaseeq_iir_sos": cascade_iir_sos(
+                                        config.iir_filters, int(sample_rate),
+                                    ).tolist(),
+                                    "alignment_target_applied": bool(
+                                        (config.band_split_recipe or {}).get("phase_alignment", {}).get("acoustic_target", False)
+                                        and bool(auto_phase_eq_sections(config.auto_eq))
+                                        and composite_assignment_fir_enabled
+                                        and composite_recipe_result is not None
+                                        and not composite_recipe_result.bypass
+                                        and config.speaker_response is not None
+                                        and config.speaker_response.phase_deg is not None
+                                    ),
+                                    "target_applied_to_fir": False,
+                                    "phaseeq_fir_applied": bool(
+                                        composite_assignment_fir_enabled
+                                        and composite_eq_fir_applied
+                                        and composite_recipe_result is not None
+                                        and not composite_recipe_result.bypass
+                                    ),
+                                    "fir_recipe": (
+                                        composite_fir_recipe.to_dict()
+                                        if composite_fir_recipe is not None else None
+                                    ),
+                                    "fir_recipe_hash": (
+                                        composite_recipe_result.recipe_hash
+                                        if composite_recipe_result is not None else None
+                                    ),
+                                    "fir_coefficient_hash": (
+                                        composite_recipe_result.coefficient_hash
+                                        if composite_recipe_result is not None else None
+                                    ),
+                                    "fir_recipe_bypass": (
+                                        composite_recipe_result.bypass
+                                        if composite_recipe_result is not None else True
+                                    ),
+                                    "composite_postprocess": {
+                                        "output_fir_polarity_invert": False,
+                                        "fir_auto_gain_enabled": False,
+                                    },
+                                    "fir_auto_gain_enabled": False,
+                                    "iir_crossover": (
+                                        dict(st.session_state["_composite_iir_crossover"])
+                                        if isinstance(active_assignment_crossover(st.session_state), dict)
+                                        else None
+                                    ),
+                                }
+                            from utils.exchange_publication import publication_identity
+                            _publication_identity = publication_identity(_publication_result)
+                            if st.session_state.get('_exchange_publish_identity') != _publication_identity:
+                                st.session_state['_exchange_publish_identity'] = _publication_identity
+                                st.session_state['_exchange_publish_operation'] = uuid.uuid4().hex
+                            mark_assignment_status(
+                                STORAGE_PATHS["composite_exchange"],
+                                composite_assignment.assignment_id,
+                                state="Ready",
+                                operation_id=st.session_state.setdefault('_exchange_publish_operation', uuid.uuid4().hex),
+                                message=(
+                                    "PhaseEQ FIR published"
+                                    if composite_assignment_fir_enabled
+                                    else "PhaseEQ IIR and workspace published (FIR OFF)"
+                                ),
+                                result=_publication_result,
+                            )
+                        except (OSError, ValueError, json.JSONDecodeError) as exc:
+                            st.error(ui_message('ui.c3d2402baad7df', p0=f'{exc}'))
+                            multiway_send_feedback.error(ui_message('ui.acd549db5dae11', p0=f'{exc}'))
+                            st.stop()
+                    st.session_state.pop("_exchange_publish_operation", None)
+                    multiway_send_feedback.success(
+                        ui_message('ui.155fd134ebd301', p0=f'{published_group}', p1=f'{published_source_name}')
+                    )
+                    st.session_state["composite_exchange_last"] = {
+                        "sample_rate_hz": int(sample_rate),
+                        "group": published_group,
+                        "channel_count": (
+                            len(exchange_state.channel_names)
+                            if exchange_state is not None else 0
+                        ),
+                    }
+                    st.success(
+                        ui_message('ui.23266c9e9f81a1', p0=f'{published_source_name}', p1=f'{published_group}')
+                        + (
+                            ui_message('ui.8738c93a2c05f4')
+                            if not composite_assignment_fir_enabled else "。"
+                        )
+                    )
+                    if composite_assignment is not None and composite_assignment.return_url:
+                        current_composite_url = os.environ.get(
+                            "COMPOSITE_ENGINE_URL",
+                            f"http://localhost:{os.environ.get('COMPOSITE_ENGINE_PORT', '8502')}",
+                        )
+                        launch_button(STORAGE_PATHS["composite_exchange"], "multiway", "マルチウェイを開く",
+                                      current_composite_return_url(current_composite_url, composite_assignment.return_url))
+
+            exchange_last = st.session_state.get("composite_exchange_last")
+            if isinstance(exchange_last, dict) and int(exchange_last.get("sample_rate_hz", 0)) == int(sample_rate):
+                query = urlencode({
+                    "exchange": str(int(sample_rate)),
+                    "group": str(exchange_last.get("group", "")),
+                })
+                composite_url = os.environ.get(
+                    "COMPOSITE_ENGINE_URL",
+                    f"http://localhost:{os.environ.get('COMPOSITE_ENGINE_PORT', '8502')}",
+                )
+                launch_button(STORAGE_PATHS["composite_exchange"], "multiway", "マルチウェイで確認",
+                              f"{composite_url}?{query}", disabled=standalone_composite_disabled)
 
 
 if _graph_mode() == "Light":
