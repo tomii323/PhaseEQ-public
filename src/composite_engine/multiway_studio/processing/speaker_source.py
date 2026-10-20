@@ -22,6 +22,8 @@ class SpeakerAlignmentReadiness:
     mode: str
     configured_channels: tuple[str, ...]
     unity_channels: tuple[str, ...]
+    ideal_channels: tuple[str, ...] = ()
+    missing_channels: tuple[str, ...] = ()
 
     @property
     def ready(self) -> bool:
@@ -41,15 +43,19 @@ def assess_speaker_alignment_readiness(
 
     configured: list[str] = []
     unity: list[str] = []
+    ideal: list[str] = []
+    missing: list[str] = []
     for row in rows:
         name = str(row.get("name") or row.get("way") or "Channel")
         source = resolve_speaker_source(row)
         if source is None or source.generated_ideal:
             unity.append(name)
+            (missing if source is None else ideal).append(name)
         else:
             configured.append(name)
     mode = "mixed" if configured and unity else "speaker" if configured else "filter_only"
-    return SpeakerAlignmentReadiness(mode, tuple(configured), tuple(unity))
+    return SpeakerAlignmentReadiness(mode, tuple(configured), tuple(unity),
+                                     tuple(ideal), tuple(missing))
 
 
 def resolve_speaker_source(row: dict[str, Any]) -> ResolvedSpeakerSource | None:

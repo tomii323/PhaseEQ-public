@@ -5552,6 +5552,8 @@ def _current_input_summary_label() -> str:
 
 
 def _current_speaker_model_summary_label() -> str:
+    if st.session_state.get("_speaker_input_definition") is not None:
+        return display_text("理想スピーカー特性")
     record_id = str(st.session_state.get("current_speaker_measurement_id", "")).strip()
     if record_id:
         record = get_measurement(SPEAKER_MEASUREMENTS_DB_FILE, record_id)

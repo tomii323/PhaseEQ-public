@@ -15586,7 +15586,7 @@
   },
   "ui.0371397a95026b": {
     "source": "Insufficient common Input/Target data for input shaping",
-    "ja": "入力整形に必要な共通の測定データが不足しています。補正帯域と入力・Targetを確認してください。",
+    "ja": "入力とTargetの共通データが入力整形に必要な帯域を満たしていません。補正帯域と入力・Targetを確認してください。",
     "en": "Insufficient common Input/Target data for input shaping"
   },
   "ui.4b37273c3f504b": {
@@ -16883,5 +16883,50 @@
     "source": "Channel・Way・Composite Groupを入力し、同じGroup内のChannel名を重複させないでください。",
     "ja": "Channel・Way・Composite Groupを入力し、同じGroup内のChannel名を重複させないでください。",
     "en": "Enter Channel, Way and Composite Group, and use unique Channel names within each Group."
+  },
+  "ui.1fe807ef6d1291": {
+    "source": "入力未設定（Unity）",
+    "ja": "入力未設定（Unity）",
+    "en": "No input (Unity)"
+  },
+  "ui.70d8d7f9f0a903": {
+    "source": "理想特性",
+    "ja": "理想特性",
+    "en": "Ideal response"
+  },
+  "ui.a941299e876875": {
+    "source": "理想特性：",
+    "ja": "理想特性：",
+    "en": "Ideal response: "
+  },
+  "ui.80cfcb8547dba5": {
+    "source": "入力未設定（Unity）：",
+    "ja": "入力未設定（Unity）：",
+    "en": "No input (Unity): "
+  },
+  "ui.ad7737f1d903a9": {
+    "source": "Speaker応答と理想特性／Unityが混在しているため、自動時間整合を実行できません。",
+    "ja": "Speaker応答と理想特性／Unityが混在しているため、自動時間整合を実行できません。",
+    "en": "Automatic time alignment is unavailable because speaker responses are mixed with ideal responses or Unity."
+  },
+  "ui.cedf66107b605a": {
+    "source": "全Channelに実測応答を適用するか、全Channelを理想特性またはUnityにしてフィルターだけを解析してください。",
+    "ja": "全Channelに実測応答を適用するか、全Channelを理想特性またはUnityにしてフィルターだけを解析してください。",
+    "en": "Apply measured responses to all channels, or use ideal responses or Unity for all channels to analyze filters only."
+  },
+  "ui.4099870c613495": {
+    "source": "Speakerの音響時間差を含めず、Crossover／Filterだけを位相・時間整合します。",
+    "ja": "Speakerの音響時間差を含めず、Crossover／Filterだけを位相・時間整合します。",
+    "en": "Only crossovers/filters are aligned; speaker acoustic time differences are excluded."
+  },
+  "ui.554edd741bb321": {
+    "source": "理想特性を反映",
+    "ja": "理想特性を反映",
+    "en": "Ideal response applied"
+  },
+  "ui.e913fb60294702": {
+    "source": "理想スピーカー特性",
+    "ja": "理想スピーカー特性",
+    "en": "Ideal speaker response"
   }
 }

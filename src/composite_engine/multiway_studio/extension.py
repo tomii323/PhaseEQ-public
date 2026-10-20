@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from ui.multiway_channel_editor import channel_field
+from ui.speaker_input_status import alignment_input_notice, returned_speaker_status, speaker_source_label
 from utils.list_menu_ui import selectbox as shared_selectbox, radio as shared_radio, segmented_control as shared_segmented_control
 
 from crossover_engine.recipe import METHODS as CROSSOVER_METHODS, from_studio as band_split_from_studio
@@ -1659,8 +1660,7 @@ def _phaseeq_return_summary(row):
     return {
         display_text("FIR反映"): fir_state,
         display_text("IIR反映"): f"{len(sos)} SOS" if sos else display_text("なし") if returned else display_text("未返却"),
-        display_text("測定反映"): display_text("反映済み") if isinstance(row.get("phaseeq_speaker_response"), dict)
-                    else display_text("なし") if returned else display_text("未返却"),
+        display_text("測定反映"): returned_speaker_status(row),
     }
 
 
@@ -2458,7 +2458,7 @@ def render_composite_sidebar(
             st.session_state["composite_studio_channels"] = channel_rows
             for slot, row in zip(measurement_source_slots, channel_rows):
                 source = resolve_speaker_source(row)
-                slot.caption(display_text("現在の入力：") + (source.label if source is not None else display_text("未設定")))
+                slot.caption(display_text("現在の入力：") + speaker_source_label(source))
             for applied in applied_measurements:
                 st.caption(f"{applied['name']} ← {applied['measurement']}")
             st.session_state['_multiway_channel_snapshot_ready'] = True
@@ -3216,9 +3216,9 @@ def _render_phase_alignment_controls(
         st.caption(
             ui_message('ui.d1cdc6e2a210fc') + " / ".join(
                 (
-                    f"{way}={source.label}"
+                    f"{way}={speaker_source_label(source)}"
                     + (f" (rev {source.revision})" if source.revision else "")
-                ) if source is not None else f"{way}=Unity"
+                ) if source is not None else f"{way}={speaker_source_label(None)}"
                 for way, source in speaker_inputs.items()
             )
         )
@@ -3239,9 +3239,9 @@ def _render_phase_alignment_controls(
             or all(method == "Through" for method in crossover_methods),
         )
         if not speaker_readiness.ready:
-            st.error(
-                ui_message('ui.35f73725a56aee', p0=f"{' / '.join(speaker_readiness.unity_channels)}")
-            )
+            st.error(alignment_input_notice(speaker_readiness))
+        elif speaker_readiness.mode == "filter_only":
+            st.info(alignment_input_notice(speaker_readiness))
         if crossover_methods and all(method == "Through" for method in crossover_methods):
             st.caption(ui_message('ui.61259b99a7dd04'))
         if apply_requested and any(method != "Through" for method in crossover_methods):
@@ -3781,21 +3781,17 @@ def _render_system_phase_alignment_controls(
             ui_message('ui.d1cdc6e2a210fc') + " / ".join(
                 f"{row.get('name', row.get('way', 'Channel'))}="
                 + (
-                    source.label + (f" (rev {source.revision})" if source.revision else "")
-                    if (source := resolve_speaker_source(row)) is not None else "Unity"
+                    speaker_source_label(source) + (f" (rev {source.revision})" if source.revision else "")
+                    if (source := resolve_speaker_source(row)) is not None else speaker_source_label(None)
                 )
                 for row in rows
             )
         )
         speaker_readiness = assess_speaker_alignment_readiness(list(rows))
         if not speaker_readiness.ready:
-            st.error(
-                ui_message('ui.dcace7d9a8cda7', p0=f"{' / '.join(speaker_readiness.unity_channels)}")
-            )
+            st.error(alignment_input_notice(speaker_readiness))
         elif speaker_readiness.mode == "filter_only":
-            st.info(
-                ui_message('ui.94eb04e4f240fb')
-            )
+            st.info(alignment_input_notice(speaker_readiness))
         distance_config = (
             settings.get("external_distance_timing", {})
             if isinstance(settings, dict) else {}
