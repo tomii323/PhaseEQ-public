@@ -4,6 +4,15 @@ PhaseEQの主な変更点を、バージョンごとにまとめます。
 
 ## 未リリース
 
+## v1.20.38 - 2026-10-20
+
+- 自動IIR削除やページ切替時に共通入力設定が以前の値へ戻る問題を修正する。Stereo Linkの入力整形をFIR EQの共有所有者へ統一し、旧設定と保存済みOFFを保持する。Multiwayの出力正規化は初期化元をSession Stateに統一する。
+
+- IIR／FIR Auto EQの入力整形は新規編集時に深いディップの圧縮と帯域別oct平滑化を両方ONとする。未編集チャンネルとStereo Linkの初期化も揃え、保存済みのOFF設定と旧FIR Recipeの再生成条件を保持する。
+
+- IIR EQのHP／LPとAll Pass presetにNTM4を追加し、各項目でLobe Heightを指定・保存できるようにする。
+- FIR EQの入力表示とAuto Gain／Auto PhaseでIIR適用の共通処理を使用する。IIR適用後の応答を保存測定へ書き戻さず、IIRの二重適用を防ぐ。設定復帰と処理フローを開発文書へ記録する。
+
 ## v1.20.37 - 2026-10-19
 
 - Stereo Linkの共有対象をIIR EQ／FIR EQに限定する。旧Target共有を検証後に正規化し、既存EQとStandaloneのTarget・入力条件を保持する。DB更新前に旧snapshotを退避し、確認前の変更案作成と確定処理を分離する。

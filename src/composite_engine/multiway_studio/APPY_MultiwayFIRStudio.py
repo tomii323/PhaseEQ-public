@@ -3336,9 +3336,9 @@ with st.sidebar:
         format_func=localized_formatter(str))
         st.caption(ui_message('ui.b67843b0d4e50e'))
 
+        st.session_state.setdefault(KEY_OUTPUT_NORMALIZE, bool(settings.get("output_normalize", False)))
         output_normalize = st.checkbox(
             ui_message('ui.53ca5c1d4607c3'),
-            value=bool(settings.get("output_normalize", False)),
             key=KEY_OUTPUT_NORMALIZE,
             on_change=clear_results,
             disabled=not fir_output_enabled,

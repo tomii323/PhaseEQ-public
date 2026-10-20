@@ -346,9 +346,11 @@ def unedited_channel_settings(current):
     """An older project with no PhaseEQ edits means an empty EQ, not today's EQ."""
     from dataclasses import asdict
     from phase_fir_designer import DesignConfig
+    from phase_fir_designer.auto_iir_input_shaping import initial_input_shaping_settings
     result = deepcopy(current)
     config = current['config']
-    result['config'] = asdict(DesignConfig(sample_rate=int(config['sample_rate']), taps=max(3, int(config['taps']))))
+    result['config'] = asdict(DesignConfig(sample_rate=int(config['sample_rate']), taps=max(3, int(config['taps'])),
+        auto_gain_input_shaping=initial_input_shaping_settings()))
     result['config'].pop('speaker_response', None)
     result['config'].pop('target_response', None)
     result['ui_profile'] = {}

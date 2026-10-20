@@ -20,7 +20,7 @@ import unicodedata
 from list_menu import core as list_core
 from list_menu_state import resolve_choice
 from .list_menu_ui import choice_widget
-from .ui_state_commit import bind_setting_commit
+from .ui_state_commit import bind_setting_commit, project_setting_widget
 
 
 UI_REGISTRY_STATE_KEY = "__ui_index_registry"
@@ -107,6 +107,7 @@ def selectbox_indexed(
 
     widget_key = safe_widget_key("__sel_val_", settings_key, key)
     current = _current_value(settings_key=settings_key, values=options, default=default, value_coerce=value_coerce)
+    project_setting_widget(st.session_state, settings_key, widget_key, current)
     widget_args = {
         "key": widget_key,
         "help": help,
@@ -151,6 +152,7 @@ def radio_indexed(
 
     widget_key = safe_widget_key("__rad_val_", settings_key, key)
     current = _current_value(settings_key=settings_key, values=options, default=default, value_coerce=value_coerce)
+    project_setting_widget(st.session_state, settings_key, widget_key, current)
     widget_args = {
         "key": widget_key,
         "help": help,
@@ -199,6 +201,7 @@ def segmented_control_indexed(
 
     widget_key = safe_widget_key("__seg_val_", settings_key, key)
     current = _current_value(settings_key=settings_key, values=options, default=default, value_coerce=value_coerce)
+    project_setting_widget(st.session_state, settings_key, widget_key, current)
     widget_args = {
         "key": widget_key,
         "help": help,
@@ -249,7 +252,7 @@ def multiselect_indexed(
         return []
 
     widget_key = safe_widget_key("__multi_val_", settings_key, key)
-    current_values = list(st.session_state.get(widget_key, st.session_state.get(settings_key, list(default_values or []))) or [])
+    current_values = list(st.session_state.get(settings_key, st.session_state.get(widget_key, list(default_values or []))) or [])
     if value_coerce:
         current_values = [_coerce(value, value_coerce) for value in current_values]
     selected_defaults: list[Any] = []
@@ -264,9 +267,9 @@ def multiselect_indexed(
         "format_func": lambda value: _labels_map(options, labels).get(value, str(value)),
         **widget_kwargs,
     }
-    if widget_key in st.session_state and list(st.session_state[widget_key] or []) != selected_defaults:
-        st.session_state.pop(widget_key, None)
-    widget_args["default"] = selected_defaults
+    st.session_state[settings_key] = selected_defaults
+    project_setting_widget(st.session_state, settings_key, widget_key, selected_defaults)
+    widget_args.pop("default", None)
     bind_setting_commit(widget_args, settings_key,
                         lambda values: [_coerce(value, value_coerce) for value in (values or [])])
     selected = list(st.multiselect(label, options, **widget_args))
@@ -304,7 +307,7 @@ def number_input_stateful_safe(
 
     widget_key = safe_widget_key("__num_val_", settings_key, key)
     bounded_max = max(min_value, max_value)
-    current = st.session_state.get(settings_key, default)
+    current = st.session_state.get(settings_key, st.session_state.get(widget_key, default))
     try:
         current_number = float(current)
     except Exception:
@@ -313,23 +316,6 @@ def number_input_stateful_safe(
     current_number = _normalize(current_number, normalize)
     current_number = max(float(min_value), min(float(bounded_max), float(current_number)))
     desired_widget_value = type(default)(current_number)
-    if widget_key in st.session_state:
-        try:
-            widget_number = float(st.session_state.get(widget_key))
-            if widget_number < float(min_value) or widget_number > float(bounded_max):
-                normalized_widget_number = _normalize(widget_number, normalize)
-                if float(min_value) <= float(normalized_widget_number) <= float(bounded_max):
-                    st.session_state[widget_key] = type(default)(normalized_widget_number)
-                else:
-                    st.session_state[widget_key] = desired_widget_value
-            elif (
-                normalize is not None
-                and _normalize(widget_number, normalize) != widget_number
-                and _normalize(widget_number, normalize) == current_number
-            ):
-                st.session_state[widget_key] = desired_widget_value
-        except Exception:
-            st.session_state[widget_key] = desired_widget_value
 
     widget_args = {
         "min_value": min_value,
@@ -340,12 +326,8 @@ def number_input_stateful_safe(
         "disabled": disabled,
         **widget_kwargs,
     }
-    # Explicitly send the current value even when the server key survives a
-    # browser remount. Incoming edits take priority over a previously loaded
-    # setting; state-only initialization avoids two competing value sources.
-    st.session_state[widget_key] = type(default)(
-        st.session_state.get(widget_key, desired_widget_value)
-    )
+    st.session_state[settings_key] = desired_widget_value
+    project_setting_widget(st.session_state, settings_key, widget_key, desired_widget_value)
     # Streamlit sends this explicit state as the browser value, including on
     # remount. Do not also provide a default after a programmatic restore.
     widget_args.pop("value", None)
@@ -393,7 +375,7 @@ def slider_stateful_safe(
 
     widget_key = safe_widget_key("__slider_val_", settings_key, key)
     bounded_max = max(min_value, max_value)
-    current = st.session_state.get(settings_key, default)
+    current = st.session_state.get(settings_key, st.session_state.get(widget_key, default))
     try:
         current_number = float(current)
     except Exception:
@@ -402,13 +384,6 @@ def slider_stateful_safe(
     current_number = _normalize(current_number, normalize)
     current_number = max(float(min_value), min(float(bounded_max), float(current_number)))
     desired_widget_value = type(default)(current_number)
-    if widget_key in st.session_state:
-        try:
-            widget_number = float(st.session_state.get(widget_key))
-            if widget_number < float(min_value) or widget_number > float(bounded_max):
-                st.session_state[widget_key] = desired_widget_value
-        except Exception:
-            st.session_state[widget_key] = desired_widget_value
 
     widget_args = {
         "min_value": min_value,
@@ -420,9 +395,8 @@ def slider_stateful_safe(
     }
     # Restore through state alone, including browser remounts and clamped values.
     # Providing a default as well triggers Streamlit's duplicate-value warning.
-    st.session_state[widget_key] = type(default)(
-        st.session_state.get(widget_key, desired_widget_value)
-    )
+    st.session_state[settings_key] = desired_widget_value
+    project_setting_widget(st.session_state, settings_key, widget_key, desired_widget_value)
     widget_args.pop("value", None)
     bind_setting_commit(widget_args, settings_key, lambda value: _normalize(value, normalize))
     if step is not None:
@@ -462,9 +436,9 @@ def checkbox_stateful(
     widget_args = {"key": widget_key, "help": help, "disabled": disabled, **widget_kwargs}
     # State is the sole initialization source. Streamlit sends this explicit
     # value to a remounted browser control without a competing default.
-    st.session_state[widget_key] = bool(
-        st.session_state.get(widget_key, st.session_state.get(settings_key, default))
-    )
+    current = bool(st.session_state.get(settings_key, st.session_state.get(widget_key, default)))
+    st.session_state[settings_key] = current
+    project_setting_widget(st.session_state, settings_key, widget_key, current)
     widget_args.pop("value", None)
     bind_setting_commit(widget_args, settings_key, bool)
     value = bool(st.checkbox(display_text(label), **widget_args))
@@ -497,9 +471,9 @@ def text_input_stateful(
     widget_args = {"key": widget_key, "help": help, "disabled": disabled, **widget_kwargs}
     # One source for restored values. Writing before registration also sends
     # the current value to a remounted browser control (not an empty default).
-    st.session_state[widget_key] = str(
-        st.session_state.get(widget_key, st.session_state.get(settings_key, default))
-    )
+    current = str(st.session_state.get(settings_key, st.session_state.get(widget_key, default)))
+    st.session_state[settings_key] = current
+    project_setting_widget(st.session_state, settings_key, widget_key, current)
     widget_args.pop("value", None)
     bind_setting_commit(widget_args, settings_key, lambda value: _normalize(str(value), normalize))
     value = str(st.text_input(label, **widget_args))

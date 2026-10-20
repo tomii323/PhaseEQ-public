@@ -148,15 +148,23 @@ class IIRFilter:
     fc: float = 1000.0
     q: float = 0.7071
     gain_db: float = 0.0
-    family: Literal["linkwitz_riley", "bessel", "butterworth", "variable_q", "elliptic"] = "butterworth"
+    family: Literal["linkwitz_riley", "bessel", "butterworth", "variable_q", "elliptic", "ntm4"] = "butterworth"
     order: int = 2
     enabled: bool = True
     origin: Literal["manual", "auto"] = "manual"
-    allpass_preset: Literal["manual", "lr2_lo", "lr2_hi", "lr4", "lr8"] = "manual"
+    allpass_preset: Literal["manual", "lr2_lo", "lr2_hi", "lr4", "lr8", "ntm4"] = "manual"
     ripple_db: float = 0.1
     stop_db: float = 80.0
+    lobe_height_db: float = -36.0
 
     def __post_init__(self) -> None:
+        if (self.kind in {"high_pass", "low_pass"} and self.family == "ntm4") or (
+            self.kind == "allpass" and self.allpass_preset == "ntm4"
+        ):
+            from crossover_engine.ntm4 import validate_lobe_db
+            validate_lobe_db(self.lobe_height_db)
+            if self.kind != "allpass" and self.order != 4:
+                raise ValueError("NTM4 HP/LP requires order 4")
         if self.family == "variable_q" and (not math.isfinite(self.q) or self.q <= 0):
             raise ValueError("Variable-Q Q must be finite and > 0")
         if self.family == "elliptic" and not (
@@ -519,7 +527,7 @@ class DesignConfig:
                 raise ValueError("IIR filter fc must be between 0 and Nyquist")
             if item.q <= 0:
                 raise ValueError("IIR filter Q must be > 0")
-            if item.family not in ("linkwitz_riley", "bessel", "butterworth", "variable_q", "elliptic"):
+            if item.family not in ("linkwitz_riley", "bessel", "butterworth", "variable_q", "elliptic", "ntm4"):
                 raise ValueError("unsupported IIR crossover family")
             if item.order not in (range(1, 9) if item.family == "elliptic" else (1, 2, 3, 4, 6, 8)):
                 raise ValueError("IIR crossover order must be 1, 2, 3, 4, 6, or 8")
@@ -529,7 +537,7 @@ class DesignConfig:
                 raise ValueError("Linkwitz-Riley order must be 2, 4, 6, or 8")
             if item.origin not in ("manual", "auto"):
                 raise ValueError("IIR filter origin must be manual or auto")
-            if item.allpass_preset not in ("manual", "lr2_lo", "lr2_hi", "lr4", "lr8"):
+            if item.allpass_preset not in ("manual", "lr2_lo", "lr2_hi", "lr4", "lr8", "ntm4"):
                 raise ValueError("unsupported IIR All Pass preset")
             if item.kind == "allpass" and item.allpass_preset == "manual" and item.order not in (1, 2):
                 raise ValueError("manual IIR All Pass order must be 1 or 2")
@@ -752,10 +760,10 @@ def _clip_gain_linear(item: GainLinearFilter, sample_rate: int) -> GainLinearFil
 
 def _clip_iir_filter(item: IIRFilter, sample_rate: int) -> IIRFilter:
     kind = item.kind if item.kind in ("peq", "high_shelf", "low_shelf", "allpass", "high_pass", "low_pass") else "peq"
-    family = item.family if item.family in ("linkwitz_riley", "bessel", "butterworth", "variable_q", "elliptic") else "butterworth"
+    family = item.family if item.family in ("linkwitz_riley", "bessel", "butterworth", "variable_q", "elliptic", "ntm4") else "butterworth"
     allpass_preset = (
         item.allpass_preset
-        if item.allpass_preset in ("manual", "lr2_lo", "lr2_hi", "lr4", "lr8")
+        if item.allpass_preset in ("manual", "lr2_lo", "lr2_hi", "lr4", "lr8", "ntm4")
         else "manual"
     )
     order = parse_iir_order(item.order)
@@ -764,10 +772,15 @@ def _clip_iir_filter(item: IIRFilter, sample_rate: int) -> IIRFilter:
         allowed_orders = tuple(range(1, 9))
     elif family == "variable_q":
         allowed_orders = (2,)
-    if kind == "allpass" and allpass_preset == "manual":
-        allowed_orders = (1, 2)
+    elif family == "ntm4" and kind in ("high_pass", "low_pass"):
+        allowed_orders = (4,)
+    if kind == "allpass":
+        if allpass_preset == "manual":
+            allowed_orders = (1, 2)
+        elif allpass_preset == "ntm4":
+            allowed_orders = (2,)
     if order not in allowed_orders:
-        order = 4 if family == "linkwitz_riley" and kind in ("high_pass", "low_pass") else 2
+        order = 4 if family in ("linkwitz_riley", "ntm4") and kind in ("high_pass", "low_pass") else 2
     return IIRFilter(
         kind=kind,
         fc=min(max(float(item.fc), 1.0), _nyquist(sample_rate) - 1.0),
@@ -780,6 +793,7 @@ def _clip_iir_filter(item: IIRFilter, sample_rate: int) -> IIRFilter:
         family=family,
         ripple_db=float(item.ripple_db),
         stop_db=float(item.stop_db),
+        lobe_height_db=float(item.lobe_height_db),
         order=order,
         allpass_preset=allpass_preset,
         enabled=bool(item.enabled),

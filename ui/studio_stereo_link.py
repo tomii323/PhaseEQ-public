@@ -23,13 +23,15 @@ def render_studio_link(state, root, system_id, sample_rate, rows):
 
     def load(channel_id):
         from phase_fir_designer import DesignConfig
+        from phase_fir_designer.auto_iir_input_shaping import initial_input_shaping_settings
         from utils.settings_io import build_config_payload
         previous = latest_published_assignment_working_session(
             root, channel_id=channel_id, system_id=system_id, exclude_assignment_id="")
         if previous is not None:
             return config_payload_from_project_zip(io.BytesIO(previous[1].read_bytes()))
         return build_config_payload(app_name="PhaseEQ", app_version="", app_author="",
-                                    schema_version=3, config=DesignConfig(sample_rate, 511),
+                                    schema_version=3, config=DesignConfig(sample_rate, 511,
+                                        auto_gain_input_shaping=initial_input_shaping_settings()),
                                     ui_payload={}, ui_profile={})
 
     payload = load(channel)

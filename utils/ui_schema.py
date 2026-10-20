@@ -244,6 +244,7 @@ TARGET_FILTER_REGISTRY_ADAPTERS = {
             "family": ("family", "linkwitz_riley"),
             "filter_order": ("filter_order", 4),
             "ripple_db": ("ripple_db", 0.1), "stop_db": ("stop_db", 80.0),
+            "lobe_height_db": ("lobe_height_db", -36.0),
             "allpass_preset": ("allpass_preset", "lr4"),
             "origin": ("origin", "manual"),
         },

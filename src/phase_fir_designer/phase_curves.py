@@ -41,7 +41,7 @@ from .correction_planner import (
 )
 from .linear_fir_eq_mask import apply_linear_fir_eq_mask as _apply_linear_fir_eq_mask
 from .linear_fir_eq_mask import linear_fir_eq_mask as _linear_fir_eq_mask
-from .iir import iir_frequency_response
+from .fir_input import FIRInputTransfer, fir_input_transfer
 from .response_axis import finite_unwrapped_phase_samples
 
 AUTO_EQ_EDGE_TAPER_WITH_LINEAR_FIR_MASK_STRENGTH = 0.5
@@ -51,7 +51,7 @@ AUTO_EQ_EDGE_TAPER_WITH_LINEAR_FIR_MASK_STRENGTH = 0.5
 class _AxisResponseCache:
     """Shared response projections for one config and frequency axis."""
 
-    iir_response: np.ndarray | None = None
+    fir_input: FIRInputTransfer | None = None
     speaker_complex: dict[str, np.ndarray] = field(default_factory=dict)
     speaker_phase: dict[str, np.ndarray] = field(default_factory=dict)
     target_gain: np.ndarray | None = None
@@ -828,7 +828,7 @@ def auto_gain_shaped_speaker_response(config: DesignConfig):
     f = source_f[positive]
     gain = np.asarray(speaker.gain_db, dtype=float)[positive].copy()
     if config.iir_filters:
-        gain += 20 * np.log10(np.maximum(abs(iir_frequency_response(config.iir_filters, config.sample_rate, f)), 1e-12))
+        gain = fir_input_transfer(config.iir_filters, config.sample_rate, f).gain_db(gain)
     source = SpeakerResponse(f.tolist(), gain.tolist(), None)
     target = effective_target(config)
     if target is None:
@@ -1428,18 +1428,18 @@ def _auto_range_mask(f_min: float, f_max: float, frequency: np.ndarray) -> np.nd
     return (frequency >= f_min) & (frequency <= f_max)
 
 
-def _iir_response_on_axis(
+def _fir_input_on_axis(
     config: DesignConfig,
     frequency: np.ndarray,
     *,
     response_cache: _AxisResponseCache | None = None,
-) -> np.ndarray:
-    if response_cache is not None and response_cache.iir_response is not None:
-        return response_cache.iir_response
-    response = iir_frequency_response(config.iir_filters, config.sample_rate, frequency)
+) -> FIRInputTransfer:
+    if response_cache is not None and response_cache.fir_input is not None:
+        return response_cache.fir_input
+    stage = fir_input_transfer(config.iir_filters, config.sample_rate, frequency)
     if response_cache is not None:
-        response_cache.iir_response = response
-    return response
+        response_cache.fir_input = stage
+    return stage
 
 
 def _speaker_gain_on_axis(
@@ -1490,9 +1490,7 @@ def _speaker_phase_on_axis(
 
     if out_of_range == "hold":
         if config.iir_filters:
-            phase += np.rad2deg(
-                np.unwrap(np.angle(_iir_response_on_axis(config, frequency, response_cache=response_cache)))
-            )
+            phase = _fir_input_on_axis(config, frequency, response_cache=response_cache).phase_deg(phase)
         if response_cache is not None:
             response_cache.speaker_phase[out_of_range] = phase
         return phase
@@ -1511,9 +1509,7 @@ def _speaker_phase_on_axis(
         weight = smootherstep_weight(t)
         phase[high_mask] *= 1.0 - weight
     if config.iir_filters:
-        phase += np.rad2deg(
-            np.unwrap(np.angle(_iir_response_on_axis(config, frequency, response_cache=response_cache)))
-        )
+        phase = _fir_input_on_axis(config, frequency, response_cache=response_cache).phase_deg(phase)
     if response_cache is not None:
         response_cache.speaker_phase[out_of_range] = phase
     return phase
@@ -1590,7 +1586,7 @@ def _speaker_complex_on_axis(
             response[high_mask] = (1.0 - weight) * high_edge + weight * 1.0
 
     if config.iir_filters:
-        response *= _iir_response_on_axis(config, frequency, response_cache=response_cache)
+        response = _fir_input_on_axis(config, frequency, response_cache=response_cache).complex_response(response)
     if response.size and out_of_range != "hold":
         response[0] = np.real(response[0]) + 0.0j
         if np.isclose(float(frequency[-1]), float(config.sample_rate) / 2.0):

@@ -22,7 +22,7 @@ CONFIG_FIELDS = {
         "chebyshev_attenuation_db", "tukey_alpha"}),
 }
 SHARED_CATEGORIES = tuple(CONFIG_FIELDS)
-UI_PREFIXES = {"iir": ("auto_iir_",), "fir": ("auto_gain_", "auto_phase_",)}
+UI_PREFIXES = {"iir": ("auto_iir_",), "fir": ("auto_gain_", "auto_phase_", "auto_iir_shape_")}
 # Accept the retired category only at the legacy validation boundary.
 LEGACY_CONFIG_FIELDS = {**CONFIG_FIELDS, "target": frozenset({"target_response"})}
 LEGACY_UI_PREFIXES = {**UI_PREFIXES, "target": ("target_",)}
@@ -42,7 +42,41 @@ def _extract_fields(payload, categories, config_fields, ui_prefixes):
 
 
 def extract_eq(payload, categories=SHARED_CATEGORIES):
-    return _extract_fields(payload, categories, CONFIG_FIELDS, UI_PREFIXES)
+    result = _extract_fields(normalize_shaping_projection(payload), categories, CONFIG_FIELDS, UI_PREFIXES)
+    # A specific setting family owns its aliases even under an older broad
+    # prefix. Calculation fields and their UI projection must share one owner.
+    result["ui"] = {key: value for key, value in result["ui"].items()
+                    if ui_setting_category(key) in categories}
+    return result
+
+
+def ui_setting_category(key):
+    matches = [(len(prefix), category) for category, prefixes in UI_PREFIXES.items()
+               for prefix in prefixes if key.startswith(prefix)]
+    return max(matches)[1] if matches else None
+
+
+def normalize_shaping_projection(payload):
+    """Keep legacy UI-only settings; explicit Config is authoritative."""
+    result = deepcopy(payload)
+    config, ui = result.setdefault("config", {}), result.setdefault("ui", {})
+    legacy_ui = dict(result.get("ui_profile", {}).get("state", {}))
+    legacy_ui.update(ui)
+    if "auto_gain_input_shaping" not in config and not any(
+            key.startswith("auto_iir_shape_") for key in legacy_ui):
+        return result
+    from dataclasses import asdict
+    from phase_fir_designer.auto_iir_input_shaping import InputShapingSettings
+
+    defaults = asdict(InputShapingSettings())
+    if "auto_gain_input_shaping" in config:
+        values = {**defaults, **config["auto_gain_input_shaping"]}
+    else:
+        values = {name: legacy_ui.get("auto_iir_shape_" + name, default)
+                  for name, default in defaults.items()}
+    config["auto_gain_input_shaping"] = values
+    ui.update({"auto_iir_shape_" + name: value for name, value in values.items()})
+    return result
 
 
 def _validate_snapshot(data):
@@ -64,7 +98,7 @@ def _validate_snapshot(data):
 
 
 def normalize_snapshot(snapshot):
-    """Validate legacy data before removing Target from a private copy."""
+    """Validate legacy data before normalizing owners in a private copy."""
     data = deepcopy(snapshot)
     _validate_snapshot(data)
     channels, groups = data["channels"], data["groups"]

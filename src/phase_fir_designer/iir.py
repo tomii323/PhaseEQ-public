@@ -59,7 +59,7 @@ IIR_FILTER_TYPES = (
     "high_pass",
     "low_pass",
 )
-IIR_CROSSOVER_FAMILIES = ("linkwitz_riley", "bessel", "butterworth", "variable_q", "elliptic")
+IIR_CROSSOVER_FAMILIES = ("linkwitz_riley", "bessel", "butterworth", "variable_q", "elliptic", "ntm4")
 IIR_CROSSOVER_ORDERS = (1, 2, 3, 4, 6, 8)
 IIR_LINKWITZ_RILEY_ORDERS = (2, 4, 6, 8)
 # Increment when AutoIIRDiagnostics gains fields that the Streamlit UI reads.
@@ -389,6 +389,9 @@ def design_iir_sos(item: IIRFilter, sample_rate: int) -> np.ndarray:
         return np.empty((0, 6), dtype=float)
     if item.kind == "allpass" and item.allpass_preset != "manual":
         preset = str(item.allpass_preset)
+        if preset == "ntm4":
+            from crossover_engine.ntm4 import ntm4_sos
+            return ntm4_sos("allpass", item.fc, sample_rate, item.lobe_height_db)
         if preset == "lr2_hi":
             return design_hi_matched_allpass(sample_rate, item.fc, 2).sos
         order = {"lr2_lo": 2, "lr4": 4, "lr8": 8}.get(preset)
@@ -408,6 +411,11 @@ def design_iir_sos(item: IIRFilter, sample_rate: int) -> np.ndarray:
     family = str(item.family)
     order = int(item.order)
     fc = _clip_cutoff(item.fc, sample_rate)
+    if family == "ntm4":
+        from crossover_engine.ntm4 import ntm4_sos
+        if order != 4:
+            raise ValueError("NTM4 HP/LP requires order 4")
+        return ntm4_sos(btype, fc, sample_rate, item.lobe_height_db)
     if family == "variable_q":
         if item.order != 2:
             raise ValueError("Variable-Q requires order 2")
@@ -516,13 +524,13 @@ def apply_iir_to_speaker_response(
         return response
     frequency = np.asarray(response.frequency, dtype=float)
     gain = np.asarray(response.gain_db, dtype=float)
-    transfer = iir_frequency_response(enabled, sample_rate, frequency)
-    result_gain = gain + 20.0 * np.log10(np.maximum(np.abs(transfer), 1e-12))
+    from .fir_input import fir_input_transfer
+    stage = fir_input_transfer(enabled, sample_rate, frequency)
+    result_gain = stage.gain_db(gain)
     result_phase: list[float] | None = None
     if response.phase_deg is not None:
         source_phase = np.rad2deg(np.unwrap(np.deg2rad(np.asarray(response.phase_deg, dtype=float))))
-        filter_phase = np.rad2deg(np.unwrap(np.angle(transfer)))
-        result_phase = (source_phase + filter_phase).tolist()
+        result_phase = stage.phase_deg(source_phase).tolist()
     return SpeakerResponse(
         frequency=frequency.tolist(),
         gain_db=result_gain.tolist(),
@@ -4336,8 +4344,8 @@ def export_iir_parameter_document(filters: Iterable[IIRFilter], sample_rate: int
         f"Sample rate: {int(sample_rate)} Hz",
         "Application order: top to bottom; disabled rows are bypassed.",
         "",
-        "| Apply order | Type | Frequency [Hz] | Gain [dB] | Q | Order | Enabled | Family | Origin | All-pass preset |",
-        "|---:|---|---:|---:|---:|---:|:---:|---|---|---|",
+        "| Apply order | Type | Frequency [Hz] | Gain [dB] | Q | Order | Enabled | Family | Origin | All-pass preset | Lobe Height [dB] |",
+        "|---:|---|---:|---:|---:|---:|:---:|---|---|---|---:|",
     ]
     for apply_order, item in enumerate(items, start=1):
         lines.append(
@@ -4347,17 +4355,18 @@ def export_iir_parameter_document(filters: Iterable[IIRFilter], sample_rate: int
                 str(item.kind),
                 f"{float(item.fc):.10g}",
                 f"{float(item.gain_db):.10g}",
-                f"{float(item.q):.10g}",
+                "-" if item.family == "ntm4" or item.allpass_preset == "ntm4" else f"{float(item.q):.10g}",
                 str(int(item.order)),
                 "Yes" if item.enabled else "No",
                 str(item.family),
                 str(item.origin),
                 str(item.allpass_preset),
+                f"{item.lobe_height_db:.10g}" if item.family == "ntm4" or item.allpass_preset == "ntm4" else "-",
             ))
             + " |"
         )
     if not items:
-        lines.append("| - | - | - | - | - | - | - | - | - | - |")
+        lines.append("| - | - | - | - | - | - | - | - | - | - | - |")
     lines.extend([
         "",
         "## Notes",
@@ -4366,6 +4375,7 @@ def export_iir_parameter_document(filters: Iterable[IIRFilter], sample_rate: int
         "- Enter the filters into the destination DSP in Apply order.",
         "- A destination DSP may use different Shelf-Q, crossover-family, or All-pass conventions. Verify the realized response after entry.",
         "- The table above contains design parameters, not Biquad coefficients.",
+        "- NTM4 uses Fc and Lobe Height; Q is derived. Use the exported SOS if the destination has no NTM4 mode.",
         "",
     ])
     if np.asarray(extra_sos).size:

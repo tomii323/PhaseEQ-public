@@ -75,7 +75,7 @@ from target_engine import (
     materialize_target_preset,
     get_shared_target_preset,
 )
-from phase_fir_designer.auto_iir_input_shaping import InputShapingSettings, SHAPING_UI_DEFAULTS, SHAPING_VERSION
+from phase_fir_designer.auto_iir_input_shaping import InputShapingSettings, SHAPING_UI_DEFAULTS, SHAPING_VERSION, initial_input_shaping_settings
 from fir_recipe_engine import generate_fir_recipe, recipe_from_config
 
 import numpy as np
@@ -784,6 +784,7 @@ _FALLBACK_TARGET_FILTER_REGISTRY_ADAPTERS: dict[str, dict[str, Any]] = {
             "gain_db": ("gain_db", 0.0), "family": ("family", "linkwitz_riley"),
             "filter_order": ("filter_order", 4),
             "ripple_db": ("ripple_db", 0.1), "stop_db": ("stop_db", 80.0),
+            "lobe_height_db": ("lobe_height_db", -36.0),
             "allpass_preset": ("allpass_preset", "lr4"),
             "origin": ("origin", "manual"),
         },
@@ -2070,7 +2071,7 @@ DEFAULT_CONFIG = DesignConfig(
     taps=DEFAULT_FIR_TAPS_BY_SAMPLE_RATE[48_000],
     analysis_fft_size=DEFAULT_ANALYSIS_FFT_SIZE_BY_SAMPLE_RATE[48_000],
     peq_filters=[PhasePEQ(fc=1000.0, q=1.0, phase_deg=0.0)],
-    auto_gain_input_shaping=InputShapingSettings(dip_enabled=True, smoothing_enabled=True),
+    auto_gain_input_shaping=initial_input_shaping_settings(),
 )
 
 
@@ -2254,6 +2255,7 @@ FILTER_REGISTRY_ADAPTERS: dict[str, dict[str, Any]] = {
             "gain_db": ("gain_db", 0.0),
             "family": ("family", "butterworth"),
             "ripple_db": ("ripple_db", 0.1), "stop_db": ("stop_db", 80.0),
+            "lobe_height_db": ("lobe_height_db", -36.0),
             "filter_order": ("order_value", 2),
             "allpass_preset": ("allpass_preset", "manual"),
             "origin": ("origin", "manual"),
@@ -3642,6 +3644,7 @@ def _target_edit_payload_from_state() -> dict[str, Any]:
                 "family": str(item.get("family", "linkwitz_riley")),
                 "ripple_db": float(item.get("ripple_db", 0.1)),
                 "stop_db": float(item.get("stop_db", 80.0)),
+                "lobe_height_db": float(item.get("lobe_height_db", -36.0)),
                 "filter_order": parse_iir_order(item.get("filter_order", 4)),
                 "allpass_preset": str(item.get("allpass_preset", "lr4")),
                 "origin": "manual",
@@ -3833,6 +3836,7 @@ def _apply_target_edit_payload_to_state(payload: Any) -> None:
                 "family": str(item.get("family", "linkwitz_riley")),
                 "ripple_db": float(item.get("ripple_db", 0.1)),
                 "stop_db": float(item.get("stop_db", 80.0)),
+                "lobe_height_db": float(item.get("lobe_height_db", -36.0)),
                 "filter_order": (
                     parse_iir_order(item.get("filter_order", 4))
                     if not (
@@ -6710,7 +6714,7 @@ def _auto_eq_on_summary(*, mode: str) -> str:
 
 
 def _current_setting_value(settings_key: str, widget_key: str, default: Any) -> Any:
-    return st.session_state.get(widget_key, st.session_state.get(settings_key, default))
+    return st.session_state.get(settings_key, default)
 
 
 def _current_number_setting(settings_key: str, default: float, key: str | None = None) -> float:
@@ -6729,12 +6733,12 @@ def _current_select_setting(settings_key: str, default: str, key: str | None = N
 
 def _current_radio_setting(settings_key: str, default: str, key: str | None = None) -> str:
     widget_key = safe_widget_key("__rad_val_", settings_key, key)
-    return str(st.session_state.get(widget_key, st.session_state.get(settings_key, default)))
+    return str(_current_setting_value(settings_key, widget_key, default))
 
 
 def _current_checkbox_setting(settings_key: str, default: bool = False, key: str | None = None) -> bool:
     widget_key = safe_widget_key("__chk_val_", settings_key, key)
-    return bool(st.session_state.get(widget_key, st.session_state.get(settings_key, default)))
+    return bool(_current_setting_value(settings_key, widget_key, default))
 
 
 def _current_plain_widget_setting(settings_key: str, default: Any) -> Any:
@@ -6756,18 +6760,20 @@ def _current_multiselect_setting(
     key: str | None = None,
 ) -> list[str]:
     widget_key = safe_widget_key("__multi_val_", settings_key, key)
-    value = st.session_state.get(widget_key, st.session_state.get(settings_key, default))
+    value = _current_setting_value(settings_key, widget_key, default)
     return list(value) if isinstance(value, (list, tuple)) else list(default)
 
 
 def _current_text_setting(settings_key: str, default: str = "", key: str | None = None) -> str:
     widget_key = safe_widget_key("__text_val_", settings_key, key)
-    return str(st.session_state.get(widget_key, st.session_state.get(settings_key, default)))
+    return str(_current_setting_value(settings_key, widget_key, default))
 
 
 def _set_setting_and_widget(settings_key: str, value: Any, widget_prefix: str, key: str | None = None) -> None:
-    st.session_state[settings_key] = value
-    st.session_state[safe_widget_key(widget_prefix, settings_key, key)] = value
+    from utils.ui_state_commit import restore_setting
+
+    restore_setting(st.session_state, settings_key,
+                    safe_widget_key(widget_prefix, settings_key, key), value)
 
 
 def _set_plain_setting_and_widget(settings_key: str, value: Any, widget_key: str | None = None) -> None:
@@ -6822,7 +6828,7 @@ def _set_design_condition_state(
     if taps is not None:
         normalized_taps = _normalize_taps_value(int(taps))
         _set_setting_and_widget("taps", normalized_taps, "__num_val_", "taps_widget")
-        st.session_state[safe_widget_key("__num_val_", "taps")] = normalized_taps
+        st.session_state.pop(safe_widget_key("__num_val_", "taps"), None)
     if analysis_fft_size is not None:
         _set_setting_and_widget(
             "analysis_fft_size",
@@ -6861,20 +6867,17 @@ def _coerce_taps_state_value(value: Any) -> int:
 def _sync_design_condition_widget_state() -> None:
     sample_rate = _coerce_sample_rate_state_value(
         st.session_state.get(
-            "sample_rate_widget",
-            st.session_state.get("sample_rate", DEFAULT_CONFIG.sample_rate),
+            "sample_rate", DEFAULT_CONFIG.sample_rate,
         )
     )
     taps = _coerce_taps_state_value(
         st.session_state.get(
-            "taps_widget",
-            st.session_state.get("taps", DEFAULT_CONFIG.taps),
+            "taps", DEFAULT_CONFIG.taps,
         )
     )
     analysis_fft_size = _coerce_analysis_fft_state_value(
         st.session_state.get(
-            "analysis_fft_size_widget",
-            st.session_state.get("analysis_fft_size", DEFAULT_CONFIG.analysis_fft_size),
+            "analysis_fft_size", DEFAULT_CONFIG.analysis_fft_size,
         ),
         sample_rate,
     )
@@ -8856,22 +8859,36 @@ IIR_FAMILY_LABELS = {
     "butterworth": "Butterworth",
     "variable_q": "Variable-Q (2nd order)",
     "elliptic": "Elliptic",
+    "ntm4": "NTM4",
 }
-IIR_ALLPASS_PRESET_OPTIONS = ("manual", "lr2_lo", "lr2_hi", "lr4", "lr8")
+IIR_ALLPASS_PRESET_OPTIONS = ("manual", "lr2_lo", "lr2_hi", "lr4", "lr8", "ntm4")
 IIR_ALLPASS_PRESET_LABELS = {
     "manual": "Manual",
     "lr2_lo": "Match LR2 low-pass",
     "lr2_hi": "Match LR2 high-pass",
     "lr4": "Match LR4 crossover",
     "lr8": "Match LR8 crossover",
+    "ntm4": "Match NTM4 crossover",
 }
+
+
+def _render_iir_ntm4_parameters(list_key, item):
+    from crossover_engine.ntm4 import MIN_LOBE_DB, MAX_LOBE_DB
+    _registry_number_input(
+        "Lobe Height (dB)", list_key=list_key, item=item, field="lobe_height_db",
+        min_value=MIN_LOBE_DB, max_value=MAX_LOBE_DB, default=-36.0,
+        step=0.1, format="%.1f", use_fragment=False,
+        help=ui_message("ui.94074cd0fa8657"),
+    )
 
 
 def _render_iir_prototype_parameters(list_key, item, family, nyquist):
     # Family changes replace this group and ripple changes stopband bounds.
     # Keep these edits in the full-render lifecycle: an in-flight fragment
     # delta can otherwise address a removed group and blank the frontend.
-    if family == "variable_q":
+    if family == "ntm4":
+        _render_iir_ntm4_parameters(list_key, item)
+    elif family == "variable_q":
         _registry_number_input(
             "Q", list_key=list_key, item=item, field="q", min_value=0.01,
             max_value=100.0, default=0.7071, step=0.01, format="%.4f",
@@ -8910,18 +8927,22 @@ def _render_iir_allpass_controls(
     if current_preset not in IIR_ALLPASS_PRESET_OPTIONS:
         current_preset = default_preset
         _update_registry_item_value(list_key, item, "allpass_preset", current_preset)
+    options = [p for p in IIR_ALLPASS_PRESET_OPTIONS if p != "ntm4" or list_key == "iir_filter_items"]
     preset = _registry_selectbox(
         preset_label,
-        list(IIR_ALLPASS_PRESET_OPTIONS),
+        options,
         list_key=list_key,
         item=item,
         field="allpass_preset",
         default=current_preset,
-        labels=[IIR_ALLPASS_PRESET_LABELS[value] for value in IIR_ALLPASS_PRESET_OPTIONS],
-        help="Manualでは1次／2次を選択します。Matched presetはLR crossoverと同じ位相のDSP係数を生成します。",
+        labels=[IIR_ALLPASS_PRESET_LABELS[value] for value in options],
+        help=ui_message("ui.75bd233c347847"),
     )
     if preset != "manual":
-        section_count = 1 if preset in {"lr2_lo", "lr2_hi", "lr4"} else 2
+        if preset == "ntm4":
+            _update_registry_item_value(list_key, item, "filter_order", 2)
+            _render_iir_ntm4_parameters(list_key, item)
+        section_count = 1 if preset in {"lr2_lo", "lr2_hi", "lr4", "ntm4"} else 2
         st.caption(
             ui_message('ui.c3d599124a8999', p0=f'{IIR_ALLPASS_PRESET_LABELS[preset]}', p1=f'{section_count}')
         )
@@ -9034,8 +9055,9 @@ def _iir_registry_payload(item: IIRFilter) -> dict[str, Any]:
         "q": float(item.q),
         "gain_db": float(item.gain_db),
         "family": str(item.family),
-                "ripple_db": float(item.ripple_db),
-                "stop_db": float(item.stop_db),
+        "ripple_db": float(item.ripple_db),
+        "stop_db": float(item.stop_db),
+        "lobe_height_db": float(item.lobe_height_db),
         "filter_order": int(item.order),
         "allpass_preset": str(item.allpass_preset),
         "origin": str(item.origin),
@@ -9260,24 +9282,24 @@ def _render_iir_editor(nyquist: float, sample_rate: int, *, view: str) -> list[I
                 with crossover_cols[0]:
                     family = _registry_selectbox(
                         "Family",
-                        list(IIR_FAMILY_LABELS),
+                        [f for f in IIR_FAMILY_LABELS if f != "ntm4" or list_key == "iir_filter_items"],
                         list_key=list_key,
                         item=item,
                         field="family",
                         default="linkwitz_riley",
-                        labels=list(IIR_FAMILY_LABELS.values()),
-                        help="Linkwitz-Riley、Bessel、Butterworth、Variable-Q、Ellipticから選択します。",
+                        labels=[label for f, label in IIR_FAMILY_LABELS.items() if f != "ntm4" or list_key == "iir_filter_items"],
+                        help=ui_message("ui.24667d50d8aa0e"),
                     )
                 with crossover_cols[1]:
-                    orders = [2] if family == "variable_q" else list(range(1, 9)) if family == "elliptic" else list(IIR_LINKWITZ_RILEY_ORDERS if family == "linkwitz_riley" else IIR_CROSSOVER_ORDERS)
+                    orders = [4] if family == "ntm4" else [2] if family == "variable_q" else list(range(1, 9)) if family == "elliptic" else list(IIR_LINKWITZ_RILEY_ORDERS if family == "linkwitz_riley" else IIR_CROSSOVER_ORDERS)
                     _registry_selectbox(
                         "Order",
                         orders,
                         list_key=list_key,
                         item=item,
                         field="filter_order",
-                        default=4 if family == "linkwitz_riley" else 2,
-                        format_func=lambda value, family=family: str(value) if family == "elliptic" else f"{value} ({int(value) * 6} dB/oct)",
+                        default=4 if family in {"linkwitz_riley", "ntm4"} else 2,
+                        format_func=lambda value, family=family: str(value) if family in {"elliptic", "ntm4"} else f"{value} ({int(value) * 6} dB/oct)",
                         help="Crossoverの次数です。複数Biquadへ展開されます。",
                     )
                 _render_iir_prototype_parameters(list_key, item, family, nyquist)
@@ -11339,6 +11361,7 @@ def _collect_target_iir_state(nyquist: float) -> list[IIRFilter]:
                 family=str(item.get("family", "linkwitz_riley")),
                 ripple_db=float(item.get("ripple_db", 0.1)),
                 stop_db=float(item.get("stop_db", 80.0)),
+                lobe_height_db=float(item.get("lobe_height_db", -36.0)),
                 order=filter_order,
                 allpass_preset=allpass_preset,
                 origin="manual",
@@ -11414,6 +11437,14 @@ def _collect_iir_state(nyquist: float) -> list[IIRFilter]:
         order = parse_iir_order(item.get("filter_order", 2))
         if family == "linkwitz_riley" and kind in {"high_pass", "low_pass"} and order not in IIR_LINKWITZ_RILEY_ORDERS:
             order = 4
+        if kind == "allpass" and item.get("allpass_preset") == "ntm4":
+            order = 2
+        elif family == "ntm4" and kind in {"high_pass", "low_pass"}:
+            order = 4
+        elif family == "variable_q":
+            order = 2
+        elif order not in (range(1, 9) if family == "elliptic" else IIR_CROSSOVER_ORDERS):
+            order = 2
         filters.append(
             IIRFilter(
                 kind=kind if kind in {"peq", "high_shelf", "low_shelf", "allpass", "high_pass", "low_pass"} else "peq",
@@ -11423,7 +11454,8 @@ def _collect_iir_state(nyquist: float) -> list[IIRFilter]:
                 family=family if family in IIR_FAMILY_LABELS else "butterworth",
                 ripple_db=float(item.get("ripple_db", 0.1)),
                 stop_db=float(item.get("stop_db", 80.0)),
-                order=2 if family == "variable_q" else order if order in (range(1, 9) if family == "elliptic" else IIR_CROSSOVER_ORDERS) else 2,
+                lobe_height_db=float(item.get("lobe_height_db", -36.0)),
+                order=order,
                 allpass_preset=(
                     str(item.get("allpass_preset", "manual"))
                     if str(item.get("allpass_preset", "manual"))
@@ -11676,6 +11708,7 @@ def _sync_iir_registry(filters: list[IIRFilter]) -> None:
                 "family": str(item.family),
                 "ripple_db": float(item.ripple_db),
                 "stop_db": float(item.stop_db),
+                "lobe_height_db": float(item.lobe_height_db),
                 "filter_order": int(item.order),
                 "allpass_preset": str(item.allpass_preset),
                 "origin": str(item.origin),
@@ -11691,7 +11724,7 @@ def _sync_iir_registry(filters: list[IIRFilter]) -> None:
         settings_key="iir_filter_items",
         item_type="iir_filter",
         label="IIR EQ",
-        fields=("enabled", "kind", "fc", "q", "gain_db", "family", "ripple_db", "stop_db", "order", "allpass_preset", "origin"),
+        fields=("enabled", "kind", "fc", "q", "gain_db", "family", "ripple_db", "stop_db", "lobe_height_db", "order", "allpass_preset", "origin"),
         path=("IIR EQ",),
     )
 
@@ -17151,15 +17184,15 @@ def _render_target_iir_editor(
                     labels=list(IIR_FAMILY_LABELS.values()),
                 )
             with crossover_cols[1]:
-                orders = [2] if family == "variable_q" else list(range(1, 9)) if family == "elliptic" else list(IIR_LINKWITZ_RILEY_ORDERS if family == "linkwitz_riley" else IIR_CROSSOVER_ORDERS)
+                orders = [4] if family == "ntm4" else [2] if family == "variable_q" else list(range(1, 9)) if family == "elliptic" else list(IIR_LINKWITZ_RILEY_ORDERS if family == "linkwitz_riley" else IIR_CROSSOVER_ORDERS)
                 _registry_selectbox(
                     "Target IIR Order",
                     orders,
                     list_key=list_key,
                     item=item,
                     field="filter_order",
-                    default=4 if family == "linkwitz_riley" else 2,
-                    format_func=lambda value, family=family: str(value) if family == "elliptic" else f"{value} ({int(value) * 6} dB/oct)",
+                    default=4 if family in {"linkwitz_riley", "ntm4"} else 2,
+                    format_func=lambda value, family=family: str(value) if family in {"elliptic", "ntm4"} else f"{value} ({int(value) * 6} dB/oct)",
                 )
             _render_iir_prototype_parameters(list_key, item, family, nyquist)
         with header_slot.container():

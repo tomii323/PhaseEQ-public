@@ -39,8 +39,13 @@ class InputShapingSettings:
             raise ValueError('Invalid Auto EQ input shaping settings')
 
 
+def initial_input_shaping_settings() -> InputShapingSettings:
+    """New editor defaults; legacy calculation/recipe defaults remain bypassed."""
+    return InputShapingSettings(dip_enabled=True, smoothing_enabled=True)
+
+
 SHAPING_UI_DEFAULTS = {'auto_iir_shape_' + k: v for k, v in asdict(
-    InputShapingSettings(dip_enabled=True, smoothing_enabled=True)).items()}
+    initial_input_shaping_settings()).items()}
 
 
 def input_signature(speaker, target, sample_rate, manual):

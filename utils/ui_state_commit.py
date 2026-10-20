@@ -6,6 +6,29 @@ SETTING_WIDGET_PREFIXES = (
     '__num_val_', '__sel_val_', '__chk_val_', '__rad_val_',
     '__seg_val_', '__slider_val_', '__multi_val_', '__text_val_',
 )
+
+
+def project_setting_widget(state, settings_key, widget_key, default):
+    """Project the committed setting; accept a mirror only for legacy initial state.
+
+    Widget callbacks commit incoming edits before rendering. A surviving raw
+    widget key can be older than that commit after a hidden-page cleanup.
+    """
+    from copy import deepcopy
+
+    value = deepcopy(state.get(settings_key, state.get(widget_key, default)))
+    state[settings_key] = value
+    state[widget_key] = deepcopy(value)
+    return value
+
+
+def restore_setting(state, settings_key, widget_key, value):
+    """Restore only the setting, invalidating the previous view projection."""
+    state[settings_key] = value
+    if widget_key != settings_key:
+        state.pop(widget_key, None)
+
+
 OUTPUT_POSTPROCESS_DEFAULTS = {
     'dc_gain_normalize': True,
     'output_fir_polarity_invert': False,

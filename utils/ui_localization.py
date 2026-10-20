@@ -165,6 +165,7 @@ JAPANESE_UI_LABELS: dict[str, str] = {
     "iir_ntm4": "NTM4（IIR）",
     "NTM4 IIR(2 Biquads)": "NTM4 IIR（Biquad 2段）",
     "Lobe Height (dB)": "Lobe Height (dB)",
+    "Match NTM4 crossover": "NTM4合成位相に一致",
     "Display FFT": "表示解析のFFT倍率",
     # Application pages
     "Project": "スピーカーパッケージ管理",

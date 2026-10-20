@@ -1,4 +1,19 @@
 {
+  "ui.94074cd0fa8657": {
+    "source": "NTM4のLobe Heightです。対応する帯域分割と同じ値を指定します。",
+    "ja": "NTM4のLobe Heightです。対応する帯域分割と同じ値を指定します。",
+    "en": "NTM4 Lobe Height. Use the same value as the corresponding crossover."
+  },
+  "ui.75bd233c347847": {
+    "source": "Manualでは1次／2次を選択します。Matched presetは選択したcrossoverの合成応答と同じ位相のDSP係数を生成します。",
+    "ja": "Manualでは1次／2次を選択します。Matched presetは選択したcrossoverの合成応答と同じ位相のDSP係数を生成します。",
+    "en": "Manual selects first or second order. Matched presets generate DSP coefficients with the phase of the selected crossover's summed response."
+  },
+  "ui.24667d50d8aa0e": {
+    "source": "Linkwitz-Riley、Bessel、Butterworth、Variable-Q、Elliptic、NTM4から選択します。",
+    "ja": "Linkwitz-Riley、Bessel、Butterworth、Variable-Q、Elliptic、NTM4から選択します。",
+    "en": "Select Linkwitz-Riley, Bessel, Butterworth, Variable-Q, Elliptic, or NTM4."
+  },
   "ui.f3366f7e525eed": {
     "source": "帯域タップ長が1以上で自動クロップOFFの場合は、指定長へ中央切り出しした係数にα=0.10の窓を直接1回かけます。窓ONでも長さを拡張しません。指定値0または自動クロップONでは、既存の中央保護と110%拡張を使用します。",
     "ja": "帯域タップ長が1以上で自動クロップOFFの場合は、指定長へ中央切り出しした係数にα=0.10の窓を直接1回かけます。窓ONでも長さを拡張しません。指定値0または自動クロップONでは、既存の中央保護と110%拡張を使用します。",
