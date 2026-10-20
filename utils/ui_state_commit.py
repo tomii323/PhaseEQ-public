@@ -43,6 +43,8 @@ def clear_input_context_for_restore(state) -> None:
     Invoke inside the caller's restore transaction, before projecting saved UI
     fields. Channel-owned input preservation remains the caller's responsibility.
     """
+    from phase_fir_designer.input_state import clear_processed_input_context
+    clear_processed_input_context(state)
     for key in (
         '_restored_near_field_response_raw', '_restored_near_field_source_name',
         '_restored_port_response_raw', '_restored_port_source_name',
@@ -50,6 +52,7 @@ def clear_input_context_for_restore(state) -> None:
         '_current_speaker_timing_provenance', '_iir_auto_diagnostics',
         '_speaker_phase_center_search_start_ms', '_speaker_phase_center_search_end_ms',
         '_settings_asset_warning', '_response_asset_refs',
+        '_speaker_input_definition',
     ):
         state.pop(key, None)
     for source in ('speaker_measurement', 'mic_calibration', 'near_field_measurement', 'port_measurement'):

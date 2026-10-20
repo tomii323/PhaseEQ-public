@@ -440,6 +440,10 @@ def plotly_studio_spec(chart: StudioChart, *, theme="light") -> dict:
                 "y": list(chart.y_axes[0].domain), "showlegend": False,
                 "hoverinfo": "skip", "line": {"color": _color(marker.style_token, colors), "width": 0.8, "dash": "dash"},
             })
+    # Plotly's dict adapter rejects an empty data list. Preserve an empty
+    # projection as axes-only, without inventing a numeric response.
+    if not traces:
+        traces.append({"type": "scatter", "x": [], "y": [], "showlegend": False})
     x_axis = {
         "title": {
             "text": _label(chart.x_axis.label_key),

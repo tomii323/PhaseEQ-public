@@ -454,6 +454,9 @@ def duplicate_speaker_spec(source: SpeakerSpecRecord, *, new_id: str | None = No
 
 
 def save_measurement(path: Path, *, record: SpeakerMeasurementRecord, original=None) -> SpeakerMeasurementRecord:
+    from phase_fir_designer.ideal_input import IDEAL_INPUT_ID
+    if record.id == IDEAL_INPUT_ID:
+        raise ValueError("組込み理想特性は変更できません。別名で登録してください。")
     if (record.response_payload or {}).get("_summary"):
         raise ValueError("測定データの概要だけでは保存できません。主データを読み込んでください。")
     ensure_measurement_db(path)
@@ -610,6 +613,9 @@ MEASUREMENT_DETAIL_FIELDS = (
 
 def update_measurement_details(path: Path, record_id: str, *, details: dict[str, str], note: str) -> None:
     """Edit descriptive fields without replacing response/calibration or project history."""
+    from phase_fir_designer.ideal_input import IDEAL_INPUT_ID
+    if record_id == IDEAL_INPUT_ID:
+        raise ValueError("組込み理想特性は変更できません。別名で登録してください。")
     if set(details) - set(MEASUREMENT_DETAIL_FIELDS):
         raise ValueError("編集できない測定項目が含まれています。")
     if 'name' in details and not details['name'].strip():
@@ -668,6 +674,9 @@ def record_measurement_multiway_project(path: Path, record_id: str, project_name
 
 
 def delete_measurement(path: Path, record_id: str, *, hard: bool = False) -> None:
+    from phase_fir_designer.ideal_input import IDEAL_INPUT_ID
+    if record_id == IDEAL_INPUT_ID:
+        raise ValueError("組込み理想特性は削除できません。")
     ensure_measurement_db(path)
     with _connect(path) as conn:
         if hard:
@@ -730,6 +739,14 @@ def import_measurements_json(path: Path, payload: dict[str, Any]) -> int:
     for item in payload.get("records", []):
         if isinstance(item, dict):
             data = _measurement_payload_defaults(item)
+            from phase_fir_designer.ideal_input import IDEAL_INPUT_ID, normalize_input_definition
+            if data['id'] == IDEAL_INPUT_ID:
+                from utils.ideal_speaker_library import ensure_ideal_measurement
+                if normalize_input_definition((data['response_payload'] or {}).get('input_definition')) is None:
+                    raise ValueError('組込み理想特性の定義がありません。')
+                ensure_ideal_measurement(path)
+                count += 1
+                continue
             save_measurement(path, record=SpeakerMeasurementRecord(**data), original=originals.get(data['id']))
             count += 1
     return count

@@ -52,6 +52,20 @@ def read_measurement_inputs(root, workspace):
 
 
 @locked_exchange
+def measurement_input_snapshot(root, workspace):
+    """Read once; acknowledge exactly this content, never a later file stat."""
+    channels = read_measurement_inputs(root, workspace)
+    signature = hashlib.sha256(json.dumps(channels, sort_keys=True,
+        separators=(',', ':'), ensure_ascii=True).encode()).hexdigest()
+    return (workspace_key(workspace), signature), channels
+
+
+def measurement_update_required(applied, pending, incoming):
+    """One rerun per unconsumed snapshot; initialization is consumed in render."""
+    return applied is not None and incoming != applied and incoming != pending
+
+
+@locked_exchange
 def set_measurement_input(root, workspace, channel_id, record):
     current = read_multiway_workspace(root)
     if current is None or workspace_key(current) != workspace_key(workspace):
@@ -62,7 +76,21 @@ def set_measurement_input(root, workspace, channel_id, record):
     if record.source_type != 'speaker_input_raw' or response is None:
         raise ValueError('スピーカーの測定データを選んでください。')
     channels = read_measurement_inputs(root, current)
-    channels[channel_id] = dict(
+    channels[channel_id] = _measurement_input_item(current, record)
+    _atomic_json(mapping_path(root, current), dict(workspace_key=workspace_key(current), channels=channels))
+    return channels[channel_id]
+
+
+def _measurement_input_item(current, record):
+    response = speaker_input_from_measurement_payload(record.response_payload)
+    from phase_fir_designer.ideal_input import normalize_input_definition, ideal_speaker_response
+    definition = normalize_input_definition((record.response_payload or {}).get('input_definition'))
+    if definition is not None:
+        response = ideal_speaker_response(int(current['sample_rate_hz']), 16384)
+
+    if response is None:
+        raise ValueError("スピーカー入力応答がありません。")
+    return dict(
         request_id=uuid.uuid4().hex, measurement_id=record.id, name=record.name,
         project_name=str(current.get('system_name') or ''),
         updated_at=datetime.now(timezone.utc).isoformat(),
@@ -74,8 +102,24 @@ def set_measurement_input(root, workspace, channel_id, record):
             'brand', 'model', 'measurement_date', 'distance', 'angle', 'microphone',
             'location', 'channel', 'position_name', 'system_state', 'note')},
     )
-    _atomic_json(mapping_path(root, current), dict(workspace_key=workspace_key(current), channels=channels))
-    return channels[channel_id]
+
+
+def prepare_initial_measurement_inputs(root, workspace, *, previous_workspace, eligible_ids, record):
+    """Stage only new Channel defaults before publishing the new roster."""
+    retained = ({key: item for key, item in read_measurement_inputs(root, previous_workspace).items()
+                 if key in workspace['channel_ids']} if previous_workspace else {})
+    current = read_measurement_inputs(root, workspace)
+    channels = {**retained, **current}
+    previous_ids = set(previous_workspace.get('channel_ids', [])) if previous_workspace else set()
+    from phase_fir_designer.ideal_input import plan_input_selection
+    changed = channels != current
+    for channel in workspace['channel_ids']:
+        selection = plan_input_selection(saved_state_exists=channel in previous_ids or channel in channels)
+        if channel in eligible_ids and selection.kind == 'ideal':
+            channels[channel] = _measurement_input_item(workspace, record)
+            changed = True
+    if changed:
+        _atomic_json(mapping_path(root, workspace), dict(workspace_key=workspace_key(workspace), channels=channels))
 
 
 def assignment_measurement_input(root, assignment):
@@ -116,26 +160,36 @@ def measurement_asset(item):
         raise ValueError('測定応答がありません。')
     phases = response.phase_deg if response.phase_deg is not None else [0.0] * len(response.frequency)
     text = '\n'.join(f'{f:.17g} {g:.17g} {p:.17g}' for f, g, p in zip(response.frequency, response.gain_db, phases))
-    return dict(filename='measurement.frd', data=text.encode(), name=item['name'])
+    from phase_fir_designer.ideal_input import normalize_input_definition
+    definition = normalize_input_definition((item.get('measurement_payload') or {}).get('input_definition'))
+    return dict(filename='measurement.frd', data=text.encode(), name=item['name'],
+                generated_ideal=definition is not None)
 
 
-def apply_measurement_inputs(root, workspace, rows):
+def apply_measurement_inputs(root, workspace, rows, *, inputs=None):
     """Set only explicitly addressed rows; newer PhaseEQ returns may supersede them."""
-    inputs = read_measurement_inputs(root, workspace)
+    inputs = read_measurement_inputs(root, workspace) if inputs is None else inputs
     applied = []
+    prepared = []
     for row in rows:
         item = inputs.get(str(row.get('channel_id', '')))
         if item is None:
             continue
-        row['speaker_library_response'] = measurement_asset(item)
-        row['measurement_input'] = item
+        asset = measurement_asset(item)
         # A new explicit selection supersedes the old returned speaker response.
         # Subsequent PhaseEQ processing remains the authoritative processed input.
         from composite_engine.adapter.control import read_phaseeq_assignment_status
         assignment_id = str(row.get('phaseeq_assignment_id', ''))
         status = read_phaseeq_assignment_status(root, assignment_id=assignment_id) if assignment_id else None
         published = (status.published_at or status.updated_at) if status else ''
-        if not published or datetime.fromisoformat(published.replace('Z', '+00:00')) <= datetime.fromisoformat(item['updated_at']):
+        supersedes = (not published or datetime.fromisoformat(published.replace('Z', '+00:00'))
+                      <= datetime.fromisoformat(item['updated_at']))
+        prepared.append((row, item, asset, supersedes))
+    # Validate the whole read snapshot before changing any Channel response.
+    for row, item, asset, supersedes in prepared:
+        row['speaker_library_response'] = asset
+        row['measurement_input'] = item
+        if supersedes:
             row.pop('phaseeq_speaker_response', None)
             row['timing_provenance'] = item.get('timing_provenance')
         applied.append(dict(channel_id=row['channel_id'], name=row.get('name', ''), measurement=item['name']))

@@ -3442,6 +3442,8 @@ with st.sidebar:
         resume_upload=dsp_resume_upload,
         resume_feedback=dsp_resume_feedback,
     )
+    if not st.session_state.get('_multiway_channel_snapshot_ready', False):
+        st.stop()
     active_generated_bands = tuple(
         str(row.get("band", ""))
         for row in st.session_state.get("composite_studio_channels", [])

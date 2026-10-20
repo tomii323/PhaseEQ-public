@@ -9,6 +9,7 @@ from .config import DesignConfig, SpeakerResponse
 from .phase_curves import build_target_curves, frequency_axis
 from .speaker import TargetGainShiftEstimate, estimate_target_auto_gain_shift
 from .input_pipeline import shift_response_gain
+from .response_support import generated_support, inherit_support
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,7 @@ class TargetProcessingResult:
 def flat_target_response(sample_rate: int, analysis_fft_size: int) -> SpeakerResponse:
     frequency = frequency_axis(int(sample_rate), int(analysis_fft_size))
     zeros = np.zeros_like(frequency)
-    return SpeakerResponse(frequency.tolist(), zeros.tolist(), None)
+    return generated_support(SpeakerResponse(frequency.tolist(), zeros.tolist(), None))
 
 
 def process_target(
@@ -83,6 +84,8 @@ def process_target(
             None,
             manual_shift_db=float(settings.manual_gain_shift_db),
         )
+    base = inherit_support(base, source or flat_target_response(settings.sample_rate, settings.analysis_fft_size),
+                           extend=settings.lf_extension_enabled or settings.hf_extension_enabled)
     shifted = shift_response_gain(base, estimate.shift_db)
     assert shifted is not None
     if response_editor is not None:
@@ -93,7 +96,7 @@ def process_target(
             original_response=source,
             base_response=base,
             shifted_response=shifted,
-            effective_response=effective,
+            effective_response=inherit_support(effective, shifted),
             applied_gain_shift_db=float(estimate.shift_db),
             gain_shift_estimate=estimate,
             generated_from_flat=generated,
@@ -116,7 +119,7 @@ def process_target(
     )
     frequency = np.asarray(shifted.frequency, dtype=float)
     gain, phase = build_target_curves(config, frequency)
-    effective = SpeakerResponse(frequency.tolist(), gain.tolist(), phase.tolist())
+    effective = inherit_support(SpeakerResponse(frequency.tolist(), gain.tolist(), phase.tolist()), shifted)
     return TargetProcessingResult(
         original_response=source,
         base_response=base,

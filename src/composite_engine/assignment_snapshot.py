@@ -29,7 +29,7 @@ def validated_speaker_asset(result, root, revision):
     if isinstance(timing, dict) and int(timing.get("schema_version", 1)) >= 2:
         if timing.get("response_hash") != digest:
             raise ValueError("時間契約にSpeaker応答のhashがありません。")
-        if timing.get("phase_origin") not in {"measured", "missing", "estimated_minimum_phase", "unknown"}:
+        if timing.get("phase_origin") not in {"measured", "missing", "estimated_minimum_phase", "unknown", "generated_ideal"}:
             raise ValueError("時間契約の位相の由来が不正です。")
     values = np.genfromtxt(io.BytesIO(data), comments="#")
     if (values.ndim != 2 or values.shape[0] < 2 or values.shape[1] not in (2, 3)
@@ -41,7 +41,8 @@ def validated_speaker_asset(result, root, revision):
         # Legacy senders wrote zero phase for missing measurements.
         data = ("\n".join(f"{f:.12g} {g:.12g}" for f, g in values[:, :2]) + "\n").encode()
     return dict(filename=path.name, data=data, revision=revision, content_hash=digest,
-                phase_available=available, source_stage=asset.get("source_stage", "Response Processing"))
+                phase_available=available, source_stage=asset.get("source_stage", "Response Processing"),
+                generated_ideal=isinstance(timing, dict) and timing.get("phase_origin") == "generated_ideal")
 
 
 def timing_for_asset(result, asset):

@@ -12,6 +12,7 @@ class ResolvedSpeakerSource:
     data: bytes
     revision: int = 0
     content_hash: str = ""
+    generated_ideal: bool = False
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,8 @@ def assess_speaker_alignment_readiness(
     unity: list[str] = []
     for row in rows:
         name = str(row.get("name") or row.get("way") or "Channel")
-        if resolve_speaker_source(row) is None:
+        source = resolve_speaker_source(row)
+        if source is None or source.generated_ideal:
             unity.append(name)
         else:
             configured.append(name)
@@ -84,4 +86,5 @@ def _from_mapping(
         data=bytes(value["data"]),
         revision=int(value.get("revision", 0) or 0),
         content_hash=str(value.get("content_hash", "")),
+        generated_ideal=bool(value.get("generated_ideal", False)),
     )

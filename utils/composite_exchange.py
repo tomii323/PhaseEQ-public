@@ -378,11 +378,14 @@ def _multiway_workspace_path(root: Path, system_id: str, sample_rate_hz: int) ->
 
 
 @locked_exchange
+@locked_exchange
 def write_multiway_workspace(
     root: Path, *, system_id: str, sample_rate_hz: int, channel_ids: list[str],
     channels: list[dict[str, str]] | None = None,
     system_name: str = "",
     previous_channel_ids: list[str] | None = None,
+    initial_input_channels: list[str] | None = None,
+    measurement_db_path: Path | None = None,
 ) -> None:
     """Publish editable Channels independently of the returned-FIR manifest."""
     payload = dict(format="phaseeq-multiway-workspace", format_version=1,
@@ -395,6 +398,16 @@ def write_multiway_workspace(
     # Removing returned/external rows from an old roster must not strand the
     # measurements already assigned to its remaining editable channels.
     scoped_path = _multiway_workspace_path(root, system_id, sample_rate_hz)
+    if initial_input_channels is not None:
+        from utils.ideal_speaker_library import ensure_ideal_measurement
+        from utils.multiway_measurements import prepare_initial_measurement_inputs
+        if measurement_db_path is None:
+            raise ValueError("理想入力の登録先がありません。")
+        previous = json.loads(scoped_path.read_text(encoding="utf-8")) if scoped_path.is_file() else {}
+        prepare_initial_measurement_inputs(
+            root, payload, previous_workspace=previous,
+            eligible_ids=set(initial_input_channels), record=ensure_ideal_measurement(measurement_db_path),
+        )
     if previous_channel_ids is not None and scoped_path.is_file():
         previous = json.loads(scoped_path.read_text(encoding="utf-8"))
         if (previous.get("system_id") == payload["system_id"]

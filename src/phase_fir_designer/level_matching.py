@@ -8,6 +8,23 @@ TARGET_LEVEL_MODE = "Targetに自動で合わせる"
 
 
 @dataclass(frozen=True)
+class LevelProcessingPlan:
+    input_mode: str
+    target_mode: str
+    match_input_to_target: bool
+
+
+def plan_level_processing(input_mode: str, target_mode: str, *, target_locked: bool) -> LevelProcessingPlan:
+    """Choose a single dependency direction without changing saved modes."""
+    match = input_mode == TARGET_LEVEL_MODE
+    return LevelProcessingPlan(
+        "Off" if match else input_mode,
+        "手動シフト" if match or target_locked else target_mode,
+        match,
+    )
+
+
+@dataclass(frozen=True)
 class LevelMatch:
     shift_db: float
     low_hz: float

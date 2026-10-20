@@ -7,7 +7,7 @@ import numpy as np
 from scipy.signal import find_peaks
 
 
-SHAPING_VERSION = 2
+SHAPING_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -49,8 +49,10 @@ SHAPING_UI_DEFAULTS = {'auto_iir_shape_' + k: v for k, v in asdict(
 
 
 def input_signature(speaker, target, sample_rate, manual):
+    from .response_support import support_for
     digest = hashlib.sha256()
     for response in (speaker, target):
+        digest.update(support_for(response).signature.encode())
         for values in (response.frequency, response.gain_db):
             data = np.asarray(values, dtype='<f8')
             digest.update(str(data.shape).encode())
@@ -102,19 +104,9 @@ def _limit_lift(lift, available):
 
 
 def source_validity(response, frequency):
-    """Do not bridge missing samples or unusually large source log gaps."""
-    f, g = np.asarray(response.frequency, float), np.asarray(response.gain_db, float)
-    valid = np.zeros(len(frequency), bool)
-    usable = np.isfinite(f) & (f > 0)
-    f, g = f[usable], g[usable]
-    if len(f) < 2 or np.any(np.diff(f) <= 0):
-        return valid
-    steps = np.diff(np.log2(f))
-    max_step = max(1/6, 4 * float(np.median(steps)))
-    for i in range(len(f)-1):
-        if np.isfinite(g[i:i+2]).all() and steps[i] <= max_step:
-            valid |= (frequency >= f[i]) & (frequency <= f[i+1])
-    return valid
+    """Shared support policy, including native linear FFT sampling."""
+    from .response_support import support_for
+    return support_for(response).validity(frequency)
 
 
 def shape_error(frequency, error, valid, settings, *, speaker_trace=None):
@@ -210,9 +202,10 @@ def prepare_speaker_input(speaker, target, sample_rate, shaping, *, f_min=0.,
     # Twice the original shaping resolution; fitting still uses the unchanged
     # legacy grid and optimizer. Only this preparation step receives more detail.
     frequency = np.geomspace(lo, hi, max(3, min(8192, int(np.ceil(np.log2(hi/lo)*192))+1)))
-    source = _response_gain_on_log_axis(speaker, frequency)
-    target_gain = _response_gain_on_log_axis(target, frequency)
-    valid = source_validity(speaker, frequency) & source_validity(target, frequency)
+    from .response_support import evaluate_response, inherit_support
+    source, source_valid = evaluate_response(speaker, frequency)
+    target_gain, target_valid = evaluate_response(target, frequency)
+    valid = source_valid & target_valid
     requested = (frequency >= f_min) & (frequency <= f_max)
     if require_complete and (not np.all(valid[requested]) or np.count_nonzero(valid & requested) < 3):
         # The existing fitter interpolates through gaps. Do not silently fill
@@ -224,9 +217,13 @@ def prepare_speaker_input(speaker, target, sample_rate, shaping, *, f_min=0.,
     # the entire measured curve would change even an already matching input.
     original_f = np.asarray(speaker.frequency, float)
     original_gain = np.asarray(speaker.gain_db, float).copy()
-    in_context = np.isfinite(original_f) & (original_f >= lo) & (original_f <= hi)
-    original_gain[in_context] += np.interp(np.log2(original_f[in_context]), np.log2(frequency),
-                                         error-(source-target_gain))
+    for ids in runs(valid):
+        if len(ids) < 2:
+            continue
+        in_context = (np.isfinite(original_f) & (original_f >= frequency[ids[0]])
+                      & (original_f <= frequency[ids[-1]]))
+        original_gain[in_context] += np.interp(np.log2(original_f[in_context]),
+            np.log2(frequency[ids]), (error-(source-target_gain))[ids])
     prepared = SpeakerResponse(list(speaker.frequency), original_gain.tolist(),
                                None if speaker.phase_deg is None else list(speaker.phase_deg))
-    return prepared, dips
+    return inherit_support(prepared, speaker), dips

@@ -21,6 +21,7 @@ from collections.abc import Callable
 import numpy as np
 import pandas as pd
 import streamlit as st
+from ui.multiway_channel_editor import channel_field
 from utils.list_menu_ui import selectbox as shared_selectbox, radio as shared_radio, segmented_control as shared_segmented_control
 
 from crossover_engine.recipe import METHODS as CROSSOVER_METHODS, from_studio as band_split_from_studio
@@ -1332,16 +1333,16 @@ def _watch_phaseeq_result_inbox() -> None:
         for row in configured
         if isinstance(row, dict) and row.get("source") == "generated_band"
     }))
-    from utils.multiway_measurements import mapping_path
+    from utils.multiway_measurements import measurement_input_snapshot, measurement_update_required
     from utils.composite_exchange import read_multiway_workspace
     try:
-        measurement_workspace = read_multiway_workspace(_exchange_root())
+        measurement_workspace = st.session_state.get('_measurement_active_workspace')
         if measurement_workspace is not None:
-            path = mapping_path(_exchange_root(), measurement_workspace)
-            signature = path.stat().st_mtime_ns if path.exists() else 0
-            previous = st.session_state.get('_measurement_inbox_signature', 0)
-            st.session_state['_measurement_inbox_signature'] = signature
-            if previous != signature:
+            signature, _inputs = measurement_input_snapshot(_exchange_root(), measurement_workspace)
+            previous = st.session_state.get('_measurement_applied_generation')
+            if measurement_update_required(previous,
+                    st.session_state.get('_measurement_pending_generation'), signature):
+                st.session_state['_measurement_pending_generation'] = signature
                 st.rerun()
         st.session_state.pop('_measurement_inbox_error', None)
     except (OSError, ValueError) as exc:
@@ -1687,6 +1688,7 @@ def render_composite_sidebar(
     assignment_controls_host: object | None = None,
 ) -> None:
     """Append PhaseEQ-owned transport controls without replacing Studio controls."""
+    st.session_state['_multiway_channel_snapshot_ready'] = False
     with st.sidebar:
         st.markdown(ui_message('ui.c5910f25faa7ae'))
         st.caption(
@@ -1948,6 +1950,10 @@ def render_composite_sidebar(
             on_change=_commit_output_layout,
         format_func=localized_formatter(str)) or "Mono"
         stereo = layout == "Stereo"
+        st.session_state['_multiway_channel_editor_owner'] = (
+            current_record.system.id if current_record is not None else '',
+            mode_key, int(sample_rate_hz), layout,
+        )
         shared_sub_key = "composite_studio_shared_sub"
         if shared_sub_key not in st.session_state:
             st.session_state[shared_sub_key] = bool(
@@ -2003,22 +2009,22 @@ def render_composite_sidebar(
             with st.expander(ui_message('ui.ab230f2e6e2c40', p0=f'{default_name}'), expanded=False):
                 if missing_package_id:
                     st.warning(ui_message('ui.a57c26aeed4f75', p0=f'{missing_package_id}'))
-                enabled = st.checkbox(ui_message('ui.d0941e1ca405c3'), key=f"{prefix}_enabled")
-                name = st.text_input(ui_message('ui.ce4683e7013a18'), key=f"{prefix}_name")
-                group = st.text_input(ui_message('ui.aa513354c66d58'), key=f"{prefix}_group")
+                enabled = channel_field(st.checkbox, ui_message('ui.d0941e1ca405c3'), key=f"{prefix}_enabled")
+                name = channel_field(st.text_input, ui_message('ui.ce4683e7013a18'), key=f"{prefix}_name")
+                group = channel_field(st.text_input, ui_message('ui.aa513354c66d58'), key=f"{prefix}_group")
                 from ui.multiway_dc_gain import render_channel_dc_gain
                 dc_gain_normalize = render_channel_dc_gain(
                     prefix, fir_enabled=int((band_tap_lengths or {}).get(band, 0) or 0) > 0,
                 )
                 speaker_package_id = str(st.session_state.get(f"{prefix}_speaker_package_id", ""))
                 measurement_source_slots.append(st.empty())
-                gain_db = st.number_input(
+                gain_db = channel_field(st.number_input,
                     ui_message('ui.c2c39b6c05e00a'), step=0.1, format="%.3f", key=f"{prefix}_gain",
                 )
-                polarity = shared_selectbox(
+                polarity = channel_field(shared_selectbox,
                     ui_message('ui.589bc4b7a26b66'), ["Normal (+)", "Invert (-)"], key=f"{prefix}_polarity",
                 format_func=localized_formatter(str))
-                delay = st.number_input(
+                delay = channel_field(st.number_input,
                     ui_message('ui.34ce50a9edd47c'), step=0.1, format="%.3f", key=f"{prefix}_delay",
                 )
                 speaker_response = None
@@ -2095,7 +2101,7 @@ def render_composite_sidebar(
         st.session_state.setdefault("composite_studio_extra_count", 0)
         count_column, add_column, remove_column = st.columns([1.5, 1, 1])
         with count_column:
-            extra_count = st.number_input(
+            extra_count = channel_field(st.number_input,
                 ui_message('ui.cbecd3ed842460'), min_value=0, max_value=32, step=1,
                 key="composite_studio_extra_count",
             )
@@ -2126,16 +2132,16 @@ def render_composite_sidebar(
             st.session_state.setdefault(f"{prefix}_polarity", "Normal (+)")
             st.session_state.setdefault(f"{prefix}_delay", 0.0)
             with st.expander(ui_message('ui.d4dbd6762febb7', p0=f'{index + 1}'), expanded=False):
-                name = st.text_input(ui_message('ui.ce4683e7013a18'), key=f"{prefix}_name")
-                way = st.text_input(ui_message('ui.bea4d7970552bd'), key=f"{prefix}_way")
-                group = st.text_input(ui_message('ui.aa513354c66d58'), key=f"{prefix}_group")
-                gain_db = st.number_input(
+                name = channel_field(st.text_input, ui_message('ui.ce4683e7013a18'), key=f"{prefix}_name")
+                way = channel_field(st.text_input, ui_message('ui.bea4d7970552bd'), key=f"{prefix}_way")
+                group = channel_field(st.text_input, ui_message('ui.aa513354c66d58'), key=f"{prefix}_group")
+                gain_db = channel_field(st.number_input,
                     ui_message('ui.c2c39b6c05e00a'), step=0.1, format="%.3f", key=f"{prefix}_gain",
                 )
-                polarity = shared_selectbox(
+                polarity = channel_field(shared_selectbox,
                     ui_message('ui.589bc4b7a26b66'), ["Normal (+)", "Invert (-)"], key=f"{prefix}_polarity",
                 format_func=localized_formatter(str))
-                delay = st.number_input(
+                delay = channel_field(st.number_input,
                     ui_message('ui.34ce50a9edd47c'), step=0.1, format="%.3f", key=f"{prefix}_delay",
                 )
                 upload = st.file_uploader(
@@ -2393,6 +2399,14 @@ def render_composite_sidebar(
             for row in channel_rows:
                 row["phaseeq_link_pending"] = True
 
+        invalid_channels = [row for row in channel_rows if row.get('enabled', True)
+                            and any(not str(row.get(field, '')).strip()
+                                    for field in ('name', 'way', 'group'))]
+        identities = [(str(row.get('group', '')), str(row.get('name', '')))
+                      for row in channel_rows if row.get('enabled', True)]
+        if invalid_channels or len(identities) != len(set(identities)):
+            st.error(ui_message('ui.cf57d567867352'))
+            return
         st.markdown(ui_message('ui.42cbe1ed92e65b'))
         current_system = _render_system_library_save(
             channel_rows,
@@ -2409,9 +2423,10 @@ def render_composite_sidebar(
             if (row.get("dc_gain_normalize") and isinstance(source, dict)
                     and source.get("target_dc_abs") is None):
                 st.warning(ui_message('ui.7c549553053c3f', p0=str(row["name"])))
-        st.session_state["composite_studio_channels"] = channel_rows
         try:
             editable_channels = _phaseeq_assignment_rows(channel_rows)
+            saved_channel_ids = ({item.channel_id for item in current_system.channels}
+                                 if current_system is not None else set())
             write_multiway_workspace(
                 _exchange_root(), system_id=current_system.id if current_system is not None else "",
                 system_name=str(current_system.name if current_system is not None else st.session_state.get("composite_studio_system_name", "")),
@@ -2420,23 +2435,36 @@ def render_composite_sidebar(
                 channels=[{key: str(row.get(key, '')) for key in ('channel_id', 'name', 'group', 'way')}
                           for row in editable_channels.values()],
                 previous_channel_ids=[str(row["channel_id"]) for row in channel_rows if row.get("enabled", True)],
+                initial_input_channels=[identifier for identifier, row in editable_channels.items()
+                                        if resolve_speaker_source(row) is None
+                                        and not row.get("phaseeq_working_session")
+                                        and identifier not in saved_channel_ids],
+                measurement_db_path=_design_library_paths()[0].with_name("speaker_measurements.sqlite3"),
             )
         except (OSError, ValueError) as exc:
             st.error(ui_message('ui.43ef8f9eba56ca', p0=f'{exc}'))
             return
 
-        from utils.multiway_measurements import apply_measurement_inputs
+        from utils.multiway_measurements import apply_measurement_inputs, measurement_input_snapshot
         from utils.composite_exchange import read_multiway_workspace
         try:
+            measurement_workspace = read_multiway_workspace(_exchange_root())
+            generation, inputs = measurement_input_snapshot(_exchange_root(), measurement_workspace)
             applied_measurements = apply_measurement_inputs(
-                _exchange_root(), read_multiway_workspace(_exchange_root()), channel_rows)
+                _exchange_root(), measurement_workspace, channel_rows, inputs=inputs)
+            st.session_state['_measurement_applied_generation'] = generation
+            st.session_state['_measurement_active_workspace'] = measurement_workspace
+            st.session_state.pop('_measurement_pending_generation', None)
+            st.session_state["composite_studio_channels"] = channel_rows
             for slot, row in zip(measurement_source_slots, channel_rows):
                 source = resolve_speaker_source(row)
                 slot.caption(display_text("現在の入力：") + (source.label if source is not None else display_text("未設定")))
             for applied in applied_measurements:
                 st.caption(f"{applied['name']} ← {applied['measurement']}")
+            st.session_state['_multiway_channel_snapshot_ready'] = True
         except (ValueError, OSError) as exc:
             st.error(str(exc))
+            return
 
         for row in channel_rows:
             if str(row.get("channel_id")) in st.session_state.get("_history_pending_phaseeq", {}):

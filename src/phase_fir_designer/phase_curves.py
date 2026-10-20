@@ -829,7 +829,8 @@ def auto_gain_shaped_speaker_response(config: DesignConfig):
     gain = np.asarray(speaker.gain_db, dtype=float)[positive].copy()
     if config.iir_filters:
         gain = fir_input_transfer(config.iir_filters, config.sample_rate, f).gain_db(gain)
-    source = SpeakerResponse(f.tolist(), gain.tolist(), None)
+    from .response_support import inherit_support
+    source = inherit_support(SpeakerResponse(f.tolist(), gain.tolist(), None), speaker)
     target = effective_target(config)
     if target is None:
         target = SpeakerResponse(f.tolist(), np.zeros_like(f).tolist(), None)

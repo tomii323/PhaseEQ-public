@@ -381,6 +381,7 @@ from utils.speaker_db import (
     save_speaker_spec,
     speaker_spec_facets,
 )
+from utils.ideal_speaker_library import is_builtin_ideal
 from utils.speaker_web_import import (
     fetch_external_speaker_spec_url,
     has_external_spec_data,
@@ -4029,7 +4030,8 @@ def _config_payload(
         "band_split_iir_crossover": active_assignment_crossover(st.session_state),
         "detached_channel_band_split": deepcopy(st.session_state.get("_detached_channel_band_split")),
     }
-    extra_io = {"speaker_calibration_state": st.session_state.get("_speaker_calibration_state", "raw")}
+    extra_io = {"speaker_calibration_state": st.session_state.get("_speaker_calibration_state", "raw"),
+                "speaker_input_definition": deepcopy(st.session_state.get("_speaker_input_definition"))}
     timing_provenance = st.session_state.get("_current_speaker_timing_provenance")
     if isinstance(timing_provenance, dict):
         extra_io["speaker_timing_provenance"] = dict(timing_provenance)
@@ -4418,6 +4420,8 @@ def _apply_response_payload_to_state(payload: dict[str, Any], config: DesignConf
     response_refs = io_payload.get("response_refs", {})
     if not isinstance(response_refs, dict):
         response_refs = {}
+    from phase_fir_designer.ideal_input import normalize_input_definition, ideal_speaker_response, IDEAL_INPUT_ID, IDEAL_INPUT_NAME
+    input_definition = normalize_input_definition(io_payload.get("speaker_input_definition"))
 
     resolved_refs: dict[str, dict[str, Any] | None] = {}
 
@@ -4445,6 +4449,8 @@ def _apply_response_payload_to_state(payload: dict[str, Any], config: DesignConf
             config.speaker_response,
         )
     )
+    if input_definition is not None:
+        speaker_response = ideal_speaker_response(config.sample_rate, config.analysis_fft_size)
     target_response = speaker_response_from_payload(
         resolved_response(
             "target_response_raw",
@@ -4466,6 +4472,10 @@ def _apply_response_payload_to_state(payload: dict[str, Any], config: DesignConf
                 response.frequency, response.gain_db, response.phase_deg, response.frequency,
             )
     st.session_state["_response_asset_refs"] = resolved_refs
+    st.session_state["_speaker_input_definition"] = input_definition
+    if input_definition is not None:
+        st.session_state["current_speaker_measurement_id"] = IDEAL_INPUT_ID
+        st.session_state["current_speaker_measurement_label"] = IDEAL_INPUT_NAME
     if speaker_response is None:
         st.session_state.pop("_restored_speaker_response_raw", None)
         st.session_state.pop("_restored_speaker_source_name", None)
@@ -4825,6 +4835,7 @@ def _reset_project_state_to_defaults() -> None:
         "_speaker_input_impulse_raw",
         "_speaker_input_impulse_sample_rate",
         "_speaker_input_source_type",
+        "_speaker_input_definition",
         "_target_source_name",
         "_mic_cal_source_name",
     ):
@@ -5302,6 +5313,44 @@ def _has_speaker_input_measurement_applied() -> bool:
     )
 
 
+def _input_operation_availability(operation: str):
+    from phase_fir_designer.input_state import (
+        Availability, ProcessedInputContext,
+    )
+    context = st.session_state.get("_processed_input_context")
+    if not isinstance(context, ProcessedInputContext):
+        return Availability(False, "empty_input")
+    return context.availability(
+        operation, owner=context_owner(st.session_state.get("_active_context_assignment")),
+    )
+
+
+def _input_unavailable_message(availability) -> str:
+    reason = availability.reason
+    if reason in {"missing_target", "missing_target_phase"}:
+        return ui_message("ui.c9ddbbb4a98446")
+    if reason == "missing_phase":
+        return ui_message("ui.7706be805c290a")
+    if reason == "invalid_input":
+        return ui_message("ui.63144e33acc257")
+    if reason == "context_mismatch":
+        return ui_message("ui.faa6236890ec0f")
+    return ui_message("ui.40e104b1e27109")
+
+
+def _render_input_unavailable(availability, *, key: str) -> None:
+    st.info(_input_unavailable_message(availability), icon=":material/info:")
+    channel = st.session_state.get("_active_context_assignment") is not None
+    localized_button(
+        st,
+        ui_message("ui.f5a44f1bbe3870"),
+        key=key,
+        on_click=_navigate_to_page,
+        args=("Multiway Assignment" if channel else "Input",),
+        kwargs={} if channel else {"input_edit_mode": "Input source", "input_edit_mode_widget": "Input source"},
+    )
+
+
 def _navigate_button(label: str, page: str, *, help: str = "", key: str | None = None) -> bool:
     clicked = localized_button(st, label, help=help, key=key)
     if clicked:
@@ -5683,6 +5732,11 @@ def _apply_measurement_record_to_input_state(record: SpeakerMeasurementRecord, *
     restored = speaker_input_from_measurement_payload(record.response_payload)
     if restored is None:
         return False, "測定データを復元できませんでした。"
+    from phase_fir_designer.ideal_input import normalize_input_definition
+    input_definition = normalize_input_definition((record.response_payload or {}).get("input_definition"))
+    from phase_fir_designer.input_state import clear_processed_input_context
+    clear_processed_input_context(st.session_state)
+    st.session_state["_speaker_input_definition"] = input_definition
     st.session_state["_restored_speaker_response_raw"] = restored
     st.session_state["_speaker_calibration_state"] = speaker_calibration_state_from_measurement_payload(
         record.response_payload
@@ -5748,6 +5802,9 @@ def _clear_input_measurement_state(source_type: str, *, from_channel_set: bool =
     if channel_input_locked(st.session_state) and not from_channel_set:
         return False, CHANNEL_INPUT_HELP
     if source_type == "speaker_input_raw":
+        from phase_fir_designer.input_state import clear_processed_input_context
+        clear_processed_input_context(st.session_state)
+        st.session_state.pop("_speaker_input_definition", None)
         for key in (
             "_restored_speaker_response_raw",
             "_restored_speaker_source_name",
@@ -6111,6 +6168,9 @@ def _ensure_initial_state() -> None:
         for key, default in SHAPING_UI_DEFAULTS.items():
             st.session_state[key] = default
     if "settings_initialized" not in st.session_state:
+        from utils.ideal_speaker_library import ensure_ideal_measurement
+        from phase_fir_designer.ideal_input import plan_input_selection
+        ensure_ideal_measurement(SPEAKER_MEASUREMENTS_DB_FILE)
         from ui.composite_context import startup_settings_path, standalone_settings_path
         startup_path = startup_settings_path(SETTINGS_FILE)
         loaded = load_startup_settings(
@@ -6147,7 +6207,21 @@ def _ensure_initial_state() -> None:
                 f"自動保存を停止しました: {loaded.error}"
             )
         else:
-            _apply_config_to_state(DEFAULT_CONFIG)
+            selection = plan_input_selection(saved_state_exists=loaded.status != "missing")
+            initial_payload = build_config_payload(
+                app_name=APP_NAME, app_version=APP_VERSION, app_author=APP_AUTHOR,
+                schema_version=SETTINGS_SCHEMA_VERSION, config=DEFAULT_CONFIG,
+                ui_payload={}, ui_profile={},
+            )
+            if selection.kind == "ideal":
+                from phase_fir_designer.ideal_input import IDEAL_INPUT_NAME
+                initial_payload["io"].update(
+                    speaker_input_definition=selection.definition,
+                    speaker_source_name=IDEAL_INPUT_NAME,
+                )
+            # The same restoration boundary also hands the initialized input
+            # to EQ ownership; a separate default projection would erase it.
+            _apply_config_payload_to_state(initial_payload)
         st.session_state["_settings_file_revision"] = file_revision(SETTINGS_FILE)
         st.session_state["_standalone_settings_file_revision"] = file_revision(standalone_settings_path(SETTINGS_FILE))
         st.session_state["settings_initialized"] = True
@@ -9318,6 +9392,9 @@ def _render_iir_editor(nyquist: float, sample_rate: int, *, view: str) -> list[I
 def _queue_auto_iir_command(command: str) -> None:
     if command in {"run", "clear"}:
         st.session_state["_auto_iir_pending_command"] = command
+        st.session_state["_auto_iir_pending_owner"] = context_owner(
+            st.session_state.get("_active_context_assignment"),
+        )
         _navigate_to_page("IIR EQ")
 
 
@@ -9331,6 +9408,14 @@ def _process_pending_auto_iir_command(nyquist: float, sample_rate: int) -> None:
     command = str(st.session_state.pop("_auto_iir_pending_command", ""))
     if command not in {"run", "clear"}:
         return
+    owner = context_owner(st.session_state.get("_active_context_assignment"))
+    requested_owner = st.session_state.pop("_auto_iir_pending_owner", owner)
+    if requested_owner != owner:
+        from phase_fir_designer.input_state import Availability
+        st.session_state["_iir_auto_error"] = _input_unavailable_message(
+            Availability(False, "context_mismatch"),
+        )
+        _rerun_auto_iir_on_iir_page()
     current = _collect_iir_state(nyquist)
     manual = [item for item in current if item.origin != "auto"]
     if command == "clear":
@@ -9343,13 +9428,12 @@ def _process_pending_auto_iir_command(nyquist: float, sample_rate: int) -> None:
         )
         _rerun_auto_iir_on_iir_page()
 
-    speaker = st.session_state.get("_current_processed_speaker_response")
-    target = st.session_state.get("_current_effective_target_response")
-    if speaker is None or target is None:
-        st.session_state["_iir_auto_error"] = (
-            "Auto IIRにはInputとTargetが必要です。InputとTargetを設定してから実行してください。"
-        )
+    availability = _input_operation_availability("auto_iir")
+    if not availability.allowed:
+        st.session_state["_iir_auto_error"] = _input_unavailable_message(availability)
         _rerun_auto_iir_on_iir_page()
+    context = st.session_state["_processed_input_context"]
+    speaker, target = context.speaker, context.target
     from phase_fir_designer.auto_iir_target_fit import TargetFitSettings, fit_target_peq
     try:
         started = time.perf_counter()
@@ -9534,10 +9618,10 @@ def _render_auto_iir_controls(nyquist: float, sample_rate: int) -> None:
                 step=0.5,
                 help=ui_message('ui.7ce7d08eb1832d'),
             )
-        speaker = st.session_state.get("_current_processed_speaker_response")
-        target = st.session_state.get("_current_effective_target_response")
-        if speaker is None or target is None:
+        availability = _input_operation_availability("auto_iir")
+        if not availability.allowed:
             st.session_state.pop("_iir_auto_diagnostics", None)
+            _render_input_unavailable(availability, key="auto_iir_input_navigation")
         auto_iir_applied = auto_filter_count > 0
         with st.container(horizontal=True, gap="small"):
             localized_button(
@@ -9546,8 +9630,7 @@ def _render_auto_iir_controls(nyquist: float, sample_rate: int) -> None:
                 key="run_auto_iir",
                 disabled=(
                     auto_iir_applied
-                    or speaker is None
-                    or target is None
+                    or not availability.allowed
                 ),
                 help=(
                     ui_message('ui.dc5caa07ef0e6e')
@@ -9576,8 +9659,6 @@ def _render_auto_iir_controls(nyquist: float, sample_rate: int) -> None:
                 width="content",
             )
         auto_result_rows = _iir_result_rows(current_filters, origin="auto")
-        if speaker is None or target is None:
-            st.info(ui_message('ui.3d8d90e1499122'))
         diagnostics = st.session_state.get("_iir_auto_diagnostics")
         if isinstance(diagnostics, dict) and diagnostics.get("algorithm") == "target_fit":
             with st.expander(display_text("ターゲット追従の結果"), expanded=False):
@@ -13006,6 +13087,10 @@ if _active_target_edit_session is None and (
                     schema_version=SETTINGS_SCHEMA_VERSION,
                     config=DEFAULT_CONFIG, ui_payload={}, ui_profile={},
                 )
+                from phase_fir_designer.ideal_input import plan_input_selection, IDEAL_INPUT_NAME
+                _initial_input = plan_input_selection(saved_state_exists=False)
+                _payload.setdefault("io", {}).update(speaker_input_definition=_initial_input.definition,
+                                      speaker_source_name=IDEAL_INPUT_NAME)
         _restored_workspace = False
         if (same_channel_context(_current_assignment, _destination)
             and assignment_working_session_path(STORAGE_PATHS["composite_exchange"], _requested_context_id) is None
@@ -13177,6 +13262,8 @@ _enforce_standalone_fir_capability()
 from ui import stereo_link as stereo_link
 
 def _stereo_apply_projection(payload):
+    from phase_fir_designer.input_state import clear_processed_input_context
+    clear_processed_input_context(st.session_state)
     _clear_project_profile_widget_state(payload)
     _apply_ui_payload_to_state(payload)
     projected_payload = payload
@@ -15048,8 +15135,10 @@ def _replace_iir_stage_series(
         auto_diagnostics = None
     if isinstance(auto_diagnostics, dict) and auto_diagnostics.get("input_shaping_signature"):
         from phase_fir_designer.auto_iir_input_shaping import input_signature
-        source = st.session_state.get("_current_processed_speaker_response")
-        target = st.session_state.get("_current_effective_target_response")
+        availability = _input_operation_availability("auto_iir")
+        input_context = st.session_state.get("_processed_input_context")
+        source = input_context.speaker if availability.allowed else None
+        target = input_context.target if availability.allowed else None
         manual = tuple(f for f in iir_filters if f.origin != "auto")
         fit_settings = auto_diagnostics.get("input_shaping_fit_settings", {})
         changed_controls = any(float(fit_settings.get(name, default)) != _current_number_setting(key, default)
@@ -15988,11 +16077,12 @@ def _shift_speaker_response_gain(speaker: SpeakerResponse | None, shift_db: floa
     if speaker is None:
         return None
     shifted_gain = (np.asarray(speaker.gain_db, dtype=float) + float(shift_db)).tolist()
-    return SpeakerResponse(
+    from phase_fir_designer.response_support import inherit_support
+    return inherit_support(SpeakerResponse(
         frequency=speaker.frequency,
         gain_db=shifted_gain,
         phase_deg=speaker.phase_deg,
-    )
+    ), speaker)
 
 
 def _shift_target_response_gain(target: SpeakerResponse | None, shift_db: float) -> SpeakerResponse | None:
@@ -16600,6 +16690,11 @@ def _render_auto_eq_sections(
     show_overview: bool = True,
 ) -> list[AutoEQSection]:
     """Render the compact row-selection Auto EQ editor shared by Gain and Phase."""
+    availability = _input_operation_availability(
+        "fir_auto_gain" if mode == "gain" else "fir_auto_phase",
+    )
+    if not availability.allowed:
+        _render_input_unavailable(availability, key=f"auto_{mode}_input_navigation")
     is_gain_page = mode == "gain"
     page_label = "Auto Gain EQ" if is_gain_page else "Auto Phase EQ"
     prefix = "auto_gain_section" if is_gain_page else "auto_phase_section"
@@ -17724,7 +17819,7 @@ if active_page == "Project":
         if profile_selected_record is not None:
             from ui.measurement_original_view import render_original_actions
             render_original_actions(SPEAKER_MEASUREMENTS_DB_FILE, profile_selected_record)
-            if profile_selected_record.source_type == "speaker_input_raw" and not (profile_selected_record.response_payload or {}).get("measurement_session"):
+            if profile_selected_record.source_type == "speaker_input_raw" and not is_builtin_ideal(profile_selected_record) and not (profile_selected_record.response_payload or {}).get("measurement_session"):
                 with st.expander(ui_message('ui.8f75db06a36dd2'), expanded=False):
                     calibrated = st.checkbox(
                         ui_message('ui.24aaf5da10022c'),
@@ -17741,7 +17836,7 @@ if active_page == "Project":
                         if st.session_state.get("current_speaker_measurement_id") == updated.id:
                             _apply_measurement_record_to_input_state(updated)
                         st.rerun()
-            if st.button(display_text("アーカイブする"), key="profile_archive_measurement"):
+            if st.button(display_text("アーカイブする"), key="profile_archive_measurement", disabled=is_builtin_ideal(profile_selected_record)):
                 delete_measurement(SPEAKER_MEASUREMENTS_DB_FILE, profile_selected_record.id)
                 _clear_selection_preview()
                 st.rerun()
@@ -18832,7 +18927,7 @@ if active_page in {"Library", "Mic Library", "Speaker Specs"}:
                         ui_message('ui.66f4804ee23ddc'),
                         key="speaker_db_measurement_delete_selected",
                         icon=":material/delete:",
-                        disabled=selected_measurement is None,
+                        disabled=selected_measurement is None or is_builtin_ideal(selected_measurement),
                         help=ui_message('ui.295d685c8a0dea'),
                     ):
                         if selected_measurement is not None:
@@ -19120,6 +19215,9 @@ if active_page == "Input":
         current_preview = st.session_state.get(SELECTION_PREVIEW_STATE_KEY)
         if isinstance(current_preview, dict) and current_preview.get("page") == "Input":
             _clear_selection_preview()
+    _ideal_input_selected = st.session_state.get("_speaker_input_definition") is not None
+    if _ideal_input_selected:
+        st.caption(display_text("理想スピーカー特性を使用中です。振幅0 dB・位相0°の基準応答にレベル調整を適用します。測定専用処理は適用しません。"))
     input_load_summary = str(
         st.session_state.get("speaker_url", "").strip()
         or st.session_state.get("_restored_speaker_source_name", "")
@@ -19287,7 +19385,7 @@ if active_page == "Input":
         f"{center_offset_summary}"
     )
     phase_center_diagnostics_text = ""
-    phase_timing_open = input_edit_mode == "Timing" and _ui_card_open(
+    phase_timing_open = not _ideal_input_selected and input_edit_mode == "Timing" and _ui_card_open(
         "input_phase_timing_block",
         ui_message('ui.fc4e84255a41a3'),
         summary=phase_center_summary,
@@ -19379,7 +19477,7 @@ if active_page == "Input":
             "input_processing_type",
             default="Extension",
         )
-    response_processing_open = input_edit_mode == "Input process" and _ui_card_open(
+    response_processing_open = not _ideal_input_selected and input_edit_mode == "Input process" and _ui_card_open(
         "input_response_processing_block",
         ui_message('ui.44932898bfbc7c'),
         summary=extension_summary,
@@ -19688,11 +19786,11 @@ if active_page == "Target" and not target_locked:
 if active_page == "IIR EQ":
   with editor_window:
     iir_variant_output_id = None
-    auto_iir_sources_pending_refresh = (
-        st.session_state.get("_current_processed_speaker_response") is None
-        or st.session_state.get("_current_effective_target_response") is None
-    )
-    _process_pending_auto_iir_command(nyquist, int(sample_rate))
+    auto_iir_sources_pending_refresh = not _input_operation_availability("auto_iir").allowed
+    # Clear affects the registry before collection. Fitting waits for this run's
+    # completed Input/Target pipelines, so it cannot use the previous input S.
+    if st.session_state.get("_auto_iir_pending_command") == "clear":
+        _process_pending_auto_iir_command(nyquist, int(sample_rate))
     current_iir = _collect_iir_state(nyquist)
     enabled_iir = [item for item in current_iir if item.enabled]
     section_count = len(biquad_rows(enabled_iir, int(sample_rate)))
@@ -19825,19 +19923,6 @@ if active_page == "Auto Gain":
         st.caption(ui_message('ui.5b90078dd5c746'))
     _flow_section(1, ui_message('ui.c4fe8482f57852'), tag=ui_message('ui.cd843e170534b0'))
     with st.container(border=False):
-            if not _has_speaker_input_measurement_applied():
-                st.info(
-                    ui_message('ui.96d6144fad706b'),
-                    icon=":material/info:",
-                )
-                _navigate_button(
-                    ui_message('ui.2002b78b458f23'),
-                    "Input",
-                    help=ui_message('ui.0ae105d1cdccf4'),
-                    key="auto_gain_nav_input",
-                )
-            elif not _has_target_source_or_edit_configured():
-                st.info(ui_message('ui.a4ad7ef3ad8014'), icon=":material/info:")
             auto_gain_sections = _render_auto_eq_sections(
                 nyquist, mode="gain", show_add=False, show_overview=False,
             )
@@ -19855,17 +19940,6 @@ if active_page == "Auto Phase":
         st.caption(ui_message('ui.5b90078dd5c746'))
     _flow_section(1, ui_message('ui.402386b7c7ac66'), tag=ui_message('ui.cd843e170534b0'))
     with st.container(border=False):
-            if not _has_speaker_input_measurement_applied():
-                st.info(
-                    ui_message('ui.4672115ad9de0f'),
-                    icon=":material/info:",
-                )
-                _navigate_button(
-                    ui_message('ui.2002b78b458f23'),
-                    "Input",
-                    help=ui_message('ui.0ae105d1cdccf4'),
-                    key="auto_phase_nav_input",
-                )
             auto_phase_sections = _render_auto_eq_sections(
                 nyquist, mode="phase", show_add=False, show_overview=False,
             )
@@ -20391,6 +20465,7 @@ if raw_speaker_response is None and speaker_file is None and not speaker_url.str
         "original_ir" if speaker_input_impulse is not None and speaker_input_impulse_sample_rate is not None else "reconstructed_from_response"
     )
 elif raw_speaker_response is not None:
+    st.session_state.pop("_speaker_input_definition", None)
     st.session_state["_speaker_calibration_state"] = "raw"
     st.session_state["_restored_speaker_response_raw"] = raw_speaker_response
     st.session_state["_restored_speaker_source_name"] = speaker_source_name
@@ -20421,6 +20496,14 @@ elif mic_cal_file is None:
         input_messages.append(f"Mic Calibration: {mic_cal_source_name or 'settings.json'} (restored) / {len(mic_cal_response.frequency)} rows")
 
 raw_speaker_response_for_export = raw_speaker_response
+from phase_fir_designer.ideal_input import normalize_input_definition, ideal_speaker_response
+_input_definition = (
+    None if speaker_file is not None or speaker_url.strip()
+    else normalize_input_definition(st.session_state.get("_speaker_input_definition"))
+)
+if _input_definition is not None:
+    raw_speaker_response = ideal_speaker_response(int(sample_rate), int(effective_analysis_fft_size))
+    raw_speaker_response_for_export = raw_speaker_response
 mic_cal_response_for_export = mic_cal_response
 
 raw_speaker_response, speaker_limit_message = _limit_response_to_nyquist_with_message(
@@ -20536,9 +20619,12 @@ elif target_generated_from_flat:
     input_messages.append("Target Response: flat 0 dB / 0 deg generated")
 
 speaker_phase_center_source_impulse = speaker_input_impulse
+from phase_fir_designer.level_matching import plan_level_processing
+_level_plan = plan_level_processing(str(speaker_gain_shift_mode), str(target_gain_shift_mode), target_locked=target_locked)
 input_pipeline_result = process_input(
     InputSource(
         response=raw_speaker_response,
+        input_definition=_input_definition,
         mic_calibration=mic_cal_response_for_export,
         source_impulse=speaker_input_impulse,
         source_sample_rate=speaker_input_impulse_sample_rate,
@@ -20569,13 +20655,13 @@ input_pipeline_result = process_input(
         hf_max_slope_db_per_oct=float(speaker_hf_max_slope_db_per_oct),
         smoothing_fraction=float(speaker_smoothing_fraction),
         smoothing_mode=str(speaker_smoothing_mode),
-        gain_shift_mode="Off" if speaker_gain_shift_mode == TARGET_LEVEL_MODE else str(speaker_gain_shift_mode),
+        gain_shift_mode=_level_plan.input_mode,
         manual_gain_shift_db=float(speaker_gain_shift_db),
     ),
 )
 speaker_polarity_response = input_pipeline_result.polarity_response
 input_messages.extend(input_pipeline_result.messages)
-if speaker_polarity_invert and raw_speaker_response is not None:
+if _input_definition is None and speaker_polarity_invert and raw_speaker_response is not None:
     if speaker_phase_center_source_impulse is not None:
         speaker_phase_center_source_impulse = -np.asarray(speaker_phase_center_source_impulse, dtype=float)
     input_messages.append("Speaker/Input invert before center: ON")
@@ -20610,18 +20696,18 @@ elif raw_speaker_response is not None:
     input_messages.append(f"Speaker/Input Phase Centering source_type={speaker_phase_center_info.source_type}")
 
 speaker_phase_response = input_pipeline_result.phase_adjusted_response
-if raw_speaker_response is not None:
+if _input_definition is None and raw_speaker_response is not None:
     input_messages.append(f"Speaker/Input phase handling: {speaker_phase_mode}")
 
 speaker_extension_response = input_pipeline_result.extended_response
-if raw_speaker_response is not None and speaker_band_extension_enabled:
+if _input_definition is None and raw_speaker_response is not None and speaker_band_extension_enabled:
     input_messages.extend(input_pipeline_result.messages)
     input_messages.append("Speaker/Input Band extension: shared Lo/Hi completion (Lo: 2 Hz; Hi: Nyquist)")
-elif raw_speaker_response is not None:
+elif _input_definition is None and raw_speaker_response is not None:
     input_messages.append("Speaker/Input Band extension: OFF")
 
 speaker_input_response = input_pipeline_result.smoothed_response
-if raw_speaker_response is not None and speaker_smoothing_fraction > 0:
+if _input_definition is None and raw_speaker_response is not None and speaker_smoothing_fraction > 0:
     input_messages.append(
         f"Speaker/Input {speaker_smoothing_mode} smoothing: 1/{int(speaker_smoothing_fraction)} oct"
     )
@@ -20644,7 +20730,7 @@ target_pipeline_result = process_target(
     TargetProcessingSettings(
         sample_rate=int(sample_rate),
         analysis_fft_size=int(effective_analysis_fft_size),
-        gain_shift_mode="手動シフト" if speaker_gain_shift_mode == TARGET_LEVEL_MODE or target_locked else str(target_gain_shift_mode),
+        gain_shift_mode=_level_plan.target_mode,
         manual_gain_shift_db=float(target_gain_shift_db),
         source_gain_only=(str(target_source_content_mode) == "Gain only"),
         phase_enabled=bool(target_phase_enabled),
@@ -20689,7 +20775,7 @@ from phase_fir_designer.acoustic_target import effective_target as acoustic_effe
 target_response = acoustic_effective_target(DesignConfig(
     sample_rate=sample_rate, taps=standalone_design_taps, target_response=base_target_response,
     linear_fir_filters=linear_fir_filters, band_split_recipe=st.session_state.get("band_split_recipe")))
-if speaker_gain_shift_mode == TARGET_LEVEL_MODE:
+if _level_plan.match_input_to_target:
     _reference_range = None
     if st.session_state.get("input_level_reference_mode", "自動検出") == "手動指定":
         _reference_range = (_current_number_setting("input_level_reference_low", 500.0),
@@ -20784,17 +20870,6 @@ st.session_state["_current_processed_speaker_response"] = speaker_response
 st.session_state["_current_effective_target_response"] = target_response
 st.session_state["_current_input_pipeline_result"] = input_pipeline_result
 st.session_state["_current_target_pipeline_result"] = target_pipeline_result
-if (
-    active_page == "IIR EQ"
-    and bool(locals().get("auto_iir_sources_pending_refresh", False))
-    and speaker_response is not None
-    and target_response is not None
-):
-    # The IIR editor is rendered before the restored Input/Target pipelines are
-    # rebuilt. On a fresh browser reload, redraw once after restoration so Auto
-    # IIR availability does not depend on touching or deleting an IIR filter.
-    st.rerun()
-
 primary_auto_section = next((section for section in auto_eq_sections if section.enabled), None)
 if primary_auto_section is None:
     primary_auto_section = AutoEQSection(enabled=False)
@@ -20887,6 +20962,35 @@ config = DesignConfig(
     speaker_response=speaker_response,
     target_response=base_target_response,
 )
+
+from phase_fir_designer.input_state import (
+    ProcessedInputContext, classify_input, input_availability,
+)
+processed_input_context = ProcessedInputContext(
+    owner=context_owner(active_composite_assignment),
+    generation=_config_signature(config, raw_speaker_response_for_export, raw_target_response_for_export),
+    state=classify_input(
+        config.speaker_response, definition=_input_definition,
+        timing_provenance=st.session_state.get("_current_speaker_timing_provenance"),
+        phase_origin=input_pipeline_result.phase_origin,
+    ),
+    speaker=config.speaker_response,
+    target=target_response,
+)
+auto_input_operation = {"Auto Gain": "fir_auto_gain", "Auto Phase": "fir_auto_phase"}.get(active_page)
+previous_auto_availability = (
+    _input_operation_availability(auto_input_operation) if auto_input_operation else None
+)
+st.session_state["_processed_input_context"] = processed_input_context
+if (auto_input_operation
+        and previous_auto_availability != _input_operation_availability(auto_input_operation)):
+    st.rerun()
+if active_page == "IIR EQ":
+    _process_pending_auto_iir_command(nyquist, int(sample_rate))
+    if (bool(locals().get("auto_iir_sources_pending_refresh", False))
+            and _input_operation_availability("auto_iir").allowed):
+        # Project availability after the current owner's input has been rebuilt.
+        st.rerun()
 
 # Resolve enablement and the provisional output frame only after the output-band
 # split FIR exists.  This keeps zero-tap semantics independent from Adaptive
@@ -21800,7 +21904,15 @@ with live_result_body_window:
     if not st.session_state.get("_gain_phase_charts_visible_initialized", False):
         st.session_state[_card_state_key("live_analysis_gain_phase")] = True
         st.session_state["_gain_phase_charts_visible_initialized"] = True
-    if _toggle_section_open(
+    speaker_preview_availability = input_availability(
+        classify_input(active_context["speaker_response"]), "speaker_preview",
+    )
+    speaker_preview_unavailable = (
+        preview_stage == "Speaker/Input" and not speaker_preview_availability.allowed
+    )
+    if speaker_preview_unavailable:
+        _render_input_unavailable(speaker_preview_availability, key="response_input_apply_navigation")
+    if not speaker_preview_unavailable and _toggle_section_open(
         "live_analysis_gain_phase",
         2,
         "Analysis Gain / Phase",
@@ -21932,7 +22044,7 @@ with live_result_body_window:
         )
 
     detail_view_summary = str(_sync_plain_option_widget("result_detail_view", RESULT_DETAIL_VIEWS, "Error"))
-    if _toggle_section_open(
+    if not speaker_preview_unavailable and _toggle_section_open(
         "live_detail",
         3,
         "Detail",
@@ -22377,6 +22489,13 @@ with live_result_body_window:
                         "state_updates": {},
                     }
                     st.rerun()
+            return_availability = processed_input_context.availability(
+                "multiway_return", owner=context_owner(composite_assignment),
+                generation=_config_signature(config, raw_speaker_response_for_export, raw_target_response_for_export),
+                acoustic_target=acoustic_target_enabled(config),
+            )
+            if not return_availability.allowed:
+                _render_input_unavailable(return_availability, key="return_input_apply_navigation")
             export_send_requested = st.button(
                 ui_message('ui.d219fe0c837005'),
                 type="primary",
@@ -22384,7 +22503,8 @@ with live_result_body_window:
                 icon=":material/publish:",
                 key="publish_composite_exchange_source",
                 disabled=standalone_composite_disabled or not design_matches_assignment
-                         or st.session_state.get("_stereo_conflict") is not None,
+                         or st.session_state.get("_stereo_conflict") is not None
+                         or not return_availability.allowed,
             )
             if multiway_send_requested and st.session_state.get("_stereo_conflict") is not None:
                 multiway_send_feedback.warning(ui_message("ui.e53f023a382ffe"))
@@ -22395,11 +22515,11 @@ with live_result_body_window:
                 and not standalone_composite_disabled
                 and design_matches_assignment
                 and st.session_state.get("_stereo_conflict") is None
+                and return_availability.allowed
             ):
                 try:
                     stereo_link.require_context(st.session_state, composite_assignment)
-                    if acoustic_target_enabled(config) and (config.speaker_response is None or config.speaker_response.phase_deg is None):
-                        raise ValueError("音響ターゲット補正には振幅・位相を含むスピーカー測定データを適用してください。")
+                    processed_speaker = processed_input_context.speaker
                     composite_fir_recipe = None
                     composite_recipe_result = None
                     composite_eq_output_fir = np.array([], dtype=float)
@@ -22454,13 +22574,6 @@ with live_result_body_window:
                 else:
                     if composite_assignment is not None and composite_assignment.assignment_id:
                         try:
-                            processed_speaker = st.session_state.get(
-                                "_current_processed_speaker_response"
-                            )
-                            if processed_speaker is None:
-                                raise ValueError(
-                                    "Response ProcessingのSpeaker出力がありません。Inputから再計算してください。"
-                                )
                             speaker_path, speaker_hash = write_assignment_speaker_response(
                                 STORAGE_PATHS["composite_exchange"],
                                 composite_assignment.assignment_id,

@@ -51,7 +51,9 @@ def effective_target(config):
         gain += base_gain
         if base_phase is not None:
             phase += base_phase
-    return SpeakerResponse(frequency=frequency.tolist(), gain_db=gain.tolist(), phase_deg=phase.tolist())
+    from .response_support import inherit_support, generated_support
+    result = SpeakerResponse(frequency=frequency.tolist(), gain_db=gain.tolist(), phase_deg=phase.tolist())
+    return inherit_support(result, base) if base is not None else generated_support(result)
 
 
 def automatic_correction_active(config):

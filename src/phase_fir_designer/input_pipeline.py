@@ -75,6 +75,7 @@ class InputSource:
     source_sample_rate: int | None = None
     near_field_response: SpeakerResponse | None = None
     port_response: SpeakerResponse | None = None
+    input_definition: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -137,74 +138,83 @@ def apply_mic_calibration(
     )
 
 
-@content_cached(revision="input-processing-v5-shared-columns", max_entries=8)
+@content_cached(revision="input-processing-v7-response-support", max_entries=8)
 def process_input(source: InputSource, settings: InputProcessingSettings) -> InputProcessingResult:
     if int(settings.sample_rate) <= 0:
         raise ValueError("sample_rate must be positive")
     messages: list[str] = []
-    # Own the mutable containers once; float values are immutable. Result
-    # stages may share columns, but never mutate the caller's input containers.
-    original = None if source.response is None else replace(
-        source.response, frequency=list(source.response.frequency),
-        gain_db=list(source.response.gain_db),
-        phase_deg=_response_column(source.response.phase_deg, False),
-    )
-    calibrated = (
-        apply_mic_calibration(original, source.mic_calibration, share_unchanged=True)
-        if settings.apply_mic_calibration
-        else original
-    )
-    if settings.apply_mic_calibration and source.mic_calibration is not None:
-        messages.append("Mic Calibration applied")
-
-    polarity_response = invert_response_polarity(calibrated, share_unchanged=True) if settings.polarity_invert else calibrated
-    source_impulse = None if source.source_impulse is None else np.asarray(source.source_impulse, dtype=float)
-    if settings.polarity_invert and source_impulse is not None:
-        source_impulse = -source_impulse
-        messages.append("Polarity inverted before phase centering")
-
-    centered, center_info = _center_cached(
-        polarity_response,
-        int(settings.sample_rate),
-        enabled=bool(settings.phase_center_enabled),
-        mode=str(settings.phase_center_mode),
-        search_start_ms=None,
-        search_end_ms=None,
-        manual_offset_ms=float(settings.phase_center_manual_offset_ms),
-        fft_size=int(settings.analysis_fft_size),
-        source_impulse=source_impulse,
-        source_sample_rate=source.source_sample_rate,
-    )
-    # Stage caches restore independent objects. Reconnect only columns whose
-    # invariance follows from the operation, without scanning sample values.
-    centered = _reconnect_columns(centered, polarity_response, "frequency", "gain_db")
-    if (not settings.phase_center_enabled or settings.phase_center_mode == "Off"
-            or polarity_response is None or polarity_response.phase_deg is None):
-        centered = polarity_response
-    phase_adjusted = apply_phase_mode(centered, settings.phase_mode, share_unchanged=True)
-    extended = _extend_cached(
-        phase_adjusted,
-        enabled=bool(settings.band_extension_enabled),
-        sample_rate=int(settings.sample_rate),
-    )
-    if not settings.band_extension_enabled:
-        extended = phase_adjusted
-    if settings.band_extension_enabled and phase_adjusted is not None:
-        f = np.asarray(phase_adjusted.frequency, float)
-        if len(f) >= 2 and f[-1] < settings.sample_rate / 2 and np.count_nonzero(f >= f[-1] / 2**(1/6)) < 3:
-            messages.append("Hi補完：近傍の測定点が不足するためGainを端値保持しています。")
-    smoothing_label = str(settings.smoothing_mode)
-    smoothing_mode = "complex_gain" if smoothing_label == "Complex Gain" else smoothing_label
-    if smoothing_label == "Gain + Phase":
-        smoothing_mode = "gain_phase"
-    if smoothing_mode not in {"gain_phase", "complex_gain"}:
-        smoothing_mode = "gain_phase"
-    smoothed = _smooth_cached(extended, float(settings.smoothing_fraction), mode=smoothing_mode)
-    if settings.smoothing_fraction <= 0:
-        smoothed = extended
+    from .ideal_input import normalize_input_definition, ideal_speaker_response
+    definition = normalize_input_definition(source.input_definition)
+    if definition is not None:
+        original = ideal_speaker_response(settings.sample_rate, settings.analysis_fft_size)
+        calibrated = polarity_response = centered = phase_adjusted = extended = smoothed = original
+        source_impulse = None
+        center_info = PhaseCenterInfo(None, "generated_ideal", "Off")
+        messages.append("Generated ideal speaker input: 0 dB / 0 degrees")
     else:
-        smoothed = _reconnect_columns(smoothed, extended, "frequency")
-    smoothed = unwrap_response_phase(smoothed, share_unchanged=True)
+        # Own the mutable containers once; float values are immutable. Result
+        # stages may share columns, but never mutate the caller's input containers.
+        original = None if source.response is None else replace(
+            source.response, frequency=list(source.response.frequency),
+            gain_db=list(source.response.gain_db),
+            phase_deg=_response_column(source.response.phase_deg, False),
+        )
+        calibrated = (
+            apply_mic_calibration(original, source.mic_calibration, share_unchanged=True)
+            if settings.apply_mic_calibration
+            else original
+        )
+        if settings.apply_mic_calibration and source.mic_calibration is not None:
+            messages.append("Mic Calibration applied")
+
+        polarity_response = invert_response_polarity(calibrated, share_unchanged=True) if settings.polarity_invert else calibrated
+        source_impulse = None if source.source_impulse is None else np.asarray(source.source_impulse, dtype=float)
+        if settings.polarity_invert and source_impulse is not None:
+            source_impulse = -source_impulse
+            messages.append("Polarity inverted before phase centering")
+
+        centered, center_info = _center_cached(
+            polarity_response,
+            int(settings.sample_rate),
+            enabled=bool(settings.phase_center_enabled),
+            mode=str(settings.phase_center_mode),
+            search_start_ms=None,
+            search_end_ms=None,
+            manual_offset_ms=float(settings.phase_center_manual_offset_ms),
+            fft_size=int(settings.analysis_fft_size),
+            source_impulse=source_impulse,
+            source_sample_rate=source.source_sample_rate,
+        )
+        # Stage caches restore independent objects. Reconnect only columns whose
+        # invariance follows from the operation, without scanning sample values.
+        centered = _reconnect_columns(centered, polarity_response, "frequency", "gain_db")
+        if (not settings.phase_center_enabled or settings.phase_center_mode == "Off"
+                or polarity_response is None or polarity_response.phase_deg is None):
+            centered = polarity_response
+        phase_adjusted = apply_phase_mode(centered, settings.phase_mode, share_unchanged=True)
+        extended = _extend_cached(
+            phase_adjusted,
+            enabled=bool(settings.band_extension_enabled),
+            sample_rate=int(settings.sample_rate),
+        )
+        if not settings.band_extension_enabled:
+            extended = phase_adjusted
+        if settings.band_extension_enabled and phase_adjusted is not None:
+            f = np.asarray(phase_adjusted.frequency, float)
+            if len(f) >= 2 and f[-1] < settings.sample_rate / 2 and np.count_nonzero(f >= f[-1] / 2**(1/6)) < 3:
+                messages.append("Hi補完：近傍の測定点が不足するためGainを端値保持しています。")
+        smoothing_label = str(settings.smoothing_mode)
+        smoothing_mode = "complex_gain" if smoothing_label == "Complex Gain" else smoothing_label
+        if smoothing_label == "Gain + Phase":
+            smoothing_mode = "gain_phase"
+        if smoothing_mode not in {"gain_phase", "complex_gain"}:
+            smoothing_mode = "gain_phase"
+        smoothed = _smooth_cached(extended, float(settings.smoothing_fraction), mode=smoothing_mode)
+        if settings.smoothing_fraction <= 0:
+            smoothed = extended
+        else:
+            smoothed = _reconnect_columns(smoothed, extended, "frequency")
+        smoothed = unwrap_response_phase(smoothed, share_unchanged=True)
 
     mode = str(settings.gain_shift_mode).lower()
     if mode in {"auto", "automatic"} or mode.startswith("auto:"):
@@ -225,6 +235,8 @@ def process_input(source: InputSource, settings: InputProcessingSettings) -> Inp
         )
     if gain_estimate.message:
         messages.append(gain_estimate.message)
+    from .response_support import inherit_support
+    smoothed = inherit_support(smoothed, original, extend=bool(settings.band_extension_enabled))
     processed = shift_response_gain(smoothed, gain_estimate.shift_db, share_unchanged=True)
     return InputProcessingResult(
         original_response=original,
@@ -239,10 +251,10 @@ def process_input(source: InputSource, settings: InputProcessingSettings) -> Inp
         gain_shift_estimate=gain_estimate,
         phase_center_info=center_info,
         messages=tuple(messages),
-        phase_origin=("missing" if processed is None or processed.phase_deg is None else
+        phase_origin=("generated_ideal" if definition is not None else "missing" if processed is None or processed.phase_deg is None else
                       "estimated_minimum_phase" if str(settings.phase_mode).strip().lower() in
                       {"gainのみから最小位相を生成", "minimum phase", "minimum_phase"} else "measured"),
-        input_range_hz=_response_range(original),
+        input_range_hz=None if definition is not None else _response_range(original),
         processed_range_hz=_response_range(processed),
         extension_affected_ranges=_extension_changes(phase_adjusted, extended),
     )
@@ -297,11 +309,12 @@ def shift_response_gain(
 ) -> SpeakerResponse | None:
     if response is None:
         return None
-    return SpeakerResponse(
+    from .response_support import inherit_support
+    return inherit_support(SpeakerResponse(
         frequency=_response_column(response.frequency, share_unchanged),
         gain_db=(np.asarray(response.gain_db, dtype=float) + float(shift_db)).tolist(),
         phase_deg=_response_column(response.phase_deg, share_unchanged),
-    )
+    ), response)
 
 
 def invert_response_polarity(

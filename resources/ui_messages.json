@@ -16838,5 +16838,50 @@
     "source": "固定長切り出し [taps]",
     "ja": "固定長切り出し [taps]",
     "en": "Fixed-length removal [taps]"
+  },
+  "ui.d6aac92c85282d": {
+    "source": "組込み理想特性は平坦な基準応答です。変更する場合は現在の入力を別名で登録してください。",
+    "ja": "組込み理想特性は平坦な基準応答です。変更する場合は現在の入力を別名で登録してください。",
+    "en": "The built-in ideal response is a flat reference. To edit it, register the current input under a different name."
+  },
+  "ui.682d264ba1e492": {
+    "source": "理想スピーカー特性を使用中です。振幅0 dB・位相0°の基準応答にレベル調整を適用します。測定専用処理は適用しません。",
+    "ja": "理想スピーカー特性を使用中です。振幅0 dB・位相0°の基準応答にレベル調整を適用します。測定専用処理は適用しません。",
+    "en": "Using the ideal speaker response. Level adjustment applies to a 0 dB / 0 degree reference; measurement-only processing is skipped."
+  },
+  "ui.40e104b1e27109": {
+    "source": "スピーカー入力が適用されていません。理想特性または測定データを入力へ適用してください。",
+    "ja": "スピーカー入力が適用されていません。理想特性または測定データを入力へ適用してください。",
+    "en": "No speaker input is applied. Apply the ideal response or measurement data to the input."
+  },
+  "ui.7706be805c290a": {
+    "source": "この操作には振幅と位相を含む入力が必要です。理想特性または位相を含む測定データを適用してください。",
+    "ja": "この操作には振幅と位相を含む入力が必要です。理想特性または位相を含む測定データを適用してください。",
+    "en": "This operation requires input magnitude and phase. Apply the ideal response or measurement data with phase."
+  },
+  "ui.63144e33acc257": {
+    "source": "入力応答の周波数・振幅・位相を確認してください。無効な応答はこの操作に使用できません。",
+    "ja": "入力応答の周波数・振幅・位相を確認してください。無効な応答はこの操作に使用できません。",
+    "en": "Check the input frequency, magnitude and phase. Invalid response data cannot be used for this operation."
+  },
+  "ui.c9ddbbb4a98446": {
+    "source": "この操作には有効なTargetが必要です。Targetを設定してください。",
+    "ja": "この操作には有効なTargetが必要です。Targetを設定してください。",
+    "en": "This operation requires a valid Target. Configure the Target."
+  },
+  "ui.faa6236890ec0f": {
+    "source": "入力応答と編集対象が一致していません。現在の編集対象の入力を確認してください。",
+    "ja": "入力応答と編集対象が一致していません。現在の編集対象の入力を確認してください。",
+    "en": "The input response does not match the editing context. Check the current context's input."
+  },
+  "ui.f5a44f1bbe3870": {
+    "source": "入力の適用画面を開く",
+    "ja": "入力の適用画面を開く",
+    "en": "Open input assignment"
+  },
+  "ui.cf57d567867352": {
+    "source": "Channel・Way・Composite Groupを入力し、同じGroup内のChannel名を重複させないでください。",
+    "ja": "Channel・Way・Composite Groupを入力し、同じGroup内のChannel名を重複させないでください。",
+    "en": "Enter Channel, Way and Composite Group, and use unique Channel names within each Group."
   }
 }

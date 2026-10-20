@@ -42,6 +42,10 @@ def render_measurement_details(db_path, specs_path, *, navigate=None):
     if selected is None:
         st.info(tr('一覧で編集する測定データを選択してください。'))
         return
+    from utils.ideal_speaker_library import is_builtin_ideal
+    if is_builtin_ideal(selected):
+        st.info(tr('組込み理想特性は平坦な基準応答です。変更する場合は現在の入力を別名で登録してください。'))
+        return
     st.markdown('**' + tr('編集中の測定：') + selected.name + '**')
     projects = measurement_multiway_projects(selected)
     st.caption(tr('利用先プロジェクト：') + (' / '.join(projects) if projects else tr('未登録')))
