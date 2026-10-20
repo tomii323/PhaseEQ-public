@@ -2393,7 +2393,7 @@ def render_composite_sidebar(
             _link_pending_names = invalidate_stale_returns(channel_rows, _exchange_root(),
                 f"{current_system.id if current_system is not None else ''}:{int(sample_rate_hz)}")
             if _link_pending_names:
-                st.warning(ui_message("ui.f1859f958520b5") + ", ".join(_link_pending_names))
+                st.warning(ui_message("ui.c7e71ed9d26de0") + ", ".join(_link_pending_names))
         except (OSError, ValueError) as exc:
             st.error(f"Stereo Linkの返却設定を確認できません: {exc}")
             for row in channel_rows:
@@ -3012,7 +3012,7 @@ def _build_studio_pipelines(
     pending = [str(row.get("name", "")) for row in configured
                if isinstance(row, dict) and row.get("enabled", True) and row.get("phaseeq_link_pending")]
     if pending:
-        raise ValueError(ui_message("ui.1379b62f3433eb") + ", ".join(pending))
+        raise ValueError(ui_message("ui.de85764c013539") + ", ".join(pending))
     finals = {(channel.group, channel.name): channel for channel in (final_channels or ())}
     inputs: list[ChannelPipelineInput] = []
     generated_rows = [

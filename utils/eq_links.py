@@ -23,6 +23,9 @@ CONFIG_FIELDS = {
 }
 SHARED_CATEGORIES = tuple(CONFIG_FIELDS)
 UI_PREFIXES = {"iir": ("auto_iir_",), "fir": ("auto_gain_", "auto_phase_", "auto_iir_shape_")}
+# Persisted implementation provenance belongs to the complete settings payload,
+# not to an editable EQ owner or its optimistic edit baseline.
+UI_FIELD_KINDS = {"auto_iir_shaping_version": "metadata"}
 # Accept the retired category only at the legacy validation boundary.
 LEGACY_CONFIG_FIELDS = {**CONFIG_FIELDS, "target": frozenset({"target_response"})}
 LEGACY_UI_PREFIXES = {**UI_PREFIXES, "target": ("target_",)}
@@ -50,10 +53,18 @@ def extract_eq(payload, categories=SHARED_CATEGORIES):
     return result
 
 
-def ui_setting_category(key):
+def ui_field_kind(key):
+    """Classify provenance before resolving the most specific setting owner."""
+    if key in UI_FIELD_KINDS:
+        return UI_FIELD_KINDS[key]
     matches = [(len(prefix), category) for category, prefixes in UI_PREFIXES.items()
                for prefix in prefixes if key.startswith(prefix)]
     return max(matches)[1] if matches else None
+
+
+def ui_setting_category(key):
+    kind = ui_field_kind(key)
+    return kind if kind in SHARED_CATEGORIES else None
 
 
 def normalize_shaping_projection(payload):
@@ -206,12 +217,12 @@ def transaction(root: Path, scope: str):
         yield model
         encoded = json.dumps(model.snapshot(), ensure_ascii=False, sort_keys=True)
         if not row or encoded != row[0]:
-            if row and model_snapshot_has_target(row[0]):
+            if row and snapshot_needs_normalization(row[0]):
                 preserve_legacy_snapshot(Path(root), scope, row[0])
             connection.execute("INSERT INTO eq_links VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET snapshot=excluded.snapshot", (scope, encoded))
 
 
-def model_snapshot_has_target(encoded):
+def snapshot_needs_normalization(encoded):
     original = json.loads(encoded)
     return normalize_snapshot(original) != original
 

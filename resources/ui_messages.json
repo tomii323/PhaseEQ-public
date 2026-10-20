@@ -16429,16 +16429,6 @@
     "ja": "共有対象：",
     "en": "Shared settings: "
   },
-  "ui.1379b62f3433eb": {
-    "source": "Stereo Linkの更新後にPhaseEQで再生成・送信が必要です：",
-    "ja": "Stereo Linkの更新後にPhaseEQで再生成・送信が必要です：",
-    "en": "Stereo Link changed. Recreate and send these channels from PhaseEQ: "
-  },
-  "ui.f1859f958520b5": {
-    "source": "Stereo Linkの設定が更新されています。PhaseEQで再生成して送信してください：",
-    "ja": "Stereo Linkの設定が更新されています。PhaseEQで再生成して送信してください：",
-    "en": "Stereo Link settings changed. Recreate and send these channels from PhaseEQ: "
-  },
   "ui.e81bcd17291bb6": {
     "source": "リンクから外して独立設定を保持するチャンネル：",
     "ja": "リンクから外して独立設定を保持するチャンネル：",
@@ -16928,5 +16918,15 @@
     "source": "理想スピーカー特性",
     "ja": "理想スピーカー特性",
     "en": "Ideal speaker response"
+  },
+  "ui.de85764c013539": {
+    "source": "チャンネルのEQ設定が返却済みの結果と異なります。PhaseEQで再生成・送信が必要です：",
+    "ja": "チャンネルのEQ設定が返却済みの結果と異なります。PhaseEQで再生成・送信が必要です：",
+    "en": "Channel EQ settings differ from the returned result. Recreate and send these channels from PhaseEQ: "
+  },
+  "ui.c7e71ed9d26de0": {
+    "source": "チャンネルのEQ設定が更新されています。PhaseEQで再生成して送信してください：",
+    "ja": "チャンネルのEQ設定が更新されています。PhaseEQで再生成して送信してください：",
+    "en": "Channel EQ settings changed. Recreate and send these channels from PhaseEQ: "
   }
 }
