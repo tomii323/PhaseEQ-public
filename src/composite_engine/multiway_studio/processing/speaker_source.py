@@ -60,6 +60,9 @@ def assess_speaker_alignment_readiness(
 
 def resolve_speaker_source(row: dict[str, Any]) -> ResolvedSpeakerSource | None:
     """Select exactly one Speaker source using the Studio precedence contract."""
+    from utils.multiway_measurements import input_is_empty
+    if input_is_empty(row.get('measurement_input')):
+        return None
     returned = row.get("phaseeq_speaker_response")
     if isinstance(returned, dict) and returned.get("data"):
         return _from_mapping(

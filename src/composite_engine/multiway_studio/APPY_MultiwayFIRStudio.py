@@ -74,6 +74,7 @@ from composite_engine.multiway_studio.components.visualization import (
     center_fir_lengths,
 )
 from composite_engine.multiway_studio.components.studio_charts import (
+    PROJECTION_REVISION,
     build_studio_chart_bundle,
     render_studio_chart,
 )
@@ -96,6 +97,7 @@ def _studio_chart_source_revision(
     """Identify display projection inputs without coupling them to a renderer."""
     payload = json.dumps(
         {
+            "projection": PROJECTION_REVISION,
             "dsp": str(dsp_revision),
             "display": str(display),
             "points": int(graph_max_points),

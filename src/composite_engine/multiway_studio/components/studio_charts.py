@@ -19,7 +19,7 @@ from utils.ui_localization import display_text, ui_message
 from utils.ui_semantic_colors import semantic_chart_colors
 
 
-PROJECTION_REVISION = 1
+PROJECTION_REVISION = 2
 CHART_IDS = (
     "band_impulse",
     "band_step",
@@ -53,6 +53,7 @@ class ChartSeries:
     width: float = 1.5
     opacity: float = 1.0
     segment_id: np.ndarray | None = None
+    source_scope: str = ""
 
 
 @dataclass(frozen=True)
@@ -99,14 +100,14 @@ def _segments(values) -> np.ndarray:
 def _series(
     series_id, label, role, axis_id, x, y, style_token, *,
     legend_visible=True, dash="solid", width=1.5, opacity=1.0,
-    segmented=False,
+    segmented=False, source_scope="",
 ):
     x_values = _readonly(x)
     y_values = _readonly(y)
     return ChartSeries(
         str(series_id), str(label), str(role), str(axis_id), x_values, y_values,
         str(style_token), bool(legend_visible), str(dash), float(width),
-        float(opacity), _segments(y_values) if segmented else None,
+        float(opacity), _segments(y_values) if segmented else None, str(source_scope),
     )
 
 
@@ -274,8 +275,7 @@ def build_studio_chart_bundle(
 
     def add_response_pair(series_id, label, role, values, token, *,
                           phase_token=None,
-                          gain_legend=True, phase_legend=False,
-                          gain_dash="solid", phase_dash="dot",
+                          gain_legend=True, phase_legend=True,
                           gain_width=1.5, phase_width=1.5,
                           gain_opacity=1.0, phase_opacity=0.7):
         array = np.asarray(values, dtype=np.complex128).reshape(-1)
@@ -290,10 +290,11 @@ def build_studio_chart_bundle(
         x_phase, y_phase = _sample_frequency(frequency[positive], phase[positive], limit, phase=True)
         design_series.extend((
             _series(f"{series_id}:gain", label, role, "design_gain", x_gain, y_gain, token,
-                    legend_visible=gain_legend, dash=gain_dash, width=gain_width, opacity=gain_opacity),
+                    legend_visible=gain_legend, dash="solid", width=gain_width, opacity=gain_opacity,
+                    source_scope=role),
             _series(f"{series_id}:phase", label, "PHASE", "design_phase", x_phase, y_phase, phase_token or token,
-                    legend_visible=phase_legend, dash=phase_dash, width=phase_width,
-                    opacity=phase_opacity, segmented=True),
+                    legend_visible=phase_legend, dash="dash", width=phase_width,
+                    opacity=phase_opacity, segmented=True, source_scope=role),
         ))
 
     for index, (name, values) in enumerate(responses.items()):
@@ -302,11 +303,10 @@ def build_studio_chart_bundle(
         phaseeq = (phaseeq_responses or {}).get(name)
         if phaseeq is not None:
             add_response_pair(
-                f"phaseeq:{name}", f"{name} · PhaseEQ EQ", "PHASEEQ", phaseeq,
+                f"phaseeq:{name}", name, "PHASEEQ", phaseeq,
                 "input", phase_token="correction",
-                gain_dash="dash", gain_width=1.8, gain_opacity=0.95,
-                phase_dash="dashdot", phase_width=1.8, phase_opacity=0.95,
-                phase_legend=True,
+                gain_width=1.8, gain_opacity=0.95,
+                phase_width=1.8, phase_opacity=0.95,
             )
         speaker = (speaker_responses or {}).get(name)
         if speaker is not None:
@@ -315,16 +315,16 @@ def build_studio_chart_bundle(
                 speaker_db = 20.0 * np.log10(np.maximum(np.abs(array), 1e-12))
                 x, y = _sample_frequency(frequency[positive], speaker_db[positive], limit)
                 design_series.append(_series(
-                    f"speaker:{name}:gain", f"{name} · Speaker", "SPEAKER",
-                    "design_gain", x, y, token, dash="dot", width=1.5, opacity=0.9,
+                    f"speaker:{name}:gain", name, "SPEAKER",
+                    "design_gain", x, y, "calibration", dash="solid", width=1.5, opacity=0.9,
+                    source_scope="SPEAKER",
                 ))
     if baffle_response is not None:
         values = np.asarray(baffle_response, dtype=np.complex128).reshape(-1)
         if values.size == frequency.size:
             add_response_pair(
                 "baffle", baffle_label or "Baffle compensation", "BAFFLE",
-                values, "baffle", gain_dash="dashdot", gain_width=1.7,
-                phase_dash="dot", phase_opacity=0.75,
+                values, "baffle", gain_width=1.7, phase_opacity=0.75,
             )
     sums = dict(way_sums or {})
     for index, (label, values) in enumerate(sums.items()):
@@ -400,6 +400,21 @@ def _label(value: str) -> str:
     return ui_message(value) if value.startswith("ui.") else display_text(value)
 
 
+def _series_label(item: ChartSeries) -> str:
+    """Use the semantic axis, not the source name, to identify the quantity."""
+    label = _label(item.label_key_or_text)
+    scope_key = {
+        "WAY": "ui.3b913e8590440f",
+        "PHASEEQ": "ui.08e2135bf0d6a1",
+        "SPEAKER": "ui.228943b0b0fb7c",
+        "SYSTEM_SUM": "ui.64c8ad5b050629",
+    }.get(item.source_scope)
+    if scope_key:
+        label = f"{label} · {ui_message(scope_key)}"
+    quantity = {"design_gain": "Gain (dB)", "design_phase": "Phase (°)"}.get(item.axis_id)
+    return f"{label} · {quantity}" if quantity else label
+
+
 def _color(style_token: str, colors) -> str:
     if style_token.startswith("band:"):
         return colors["bands"][int(style_token.split(":", 1)[1]) % len(colors["bands"])]
@@ -409,6 +424,12 @@ def _color(style_token: str, colors) -> str:
 def _plotly_transfer_values(values) -> np.ndarray:
     """Build a renderer-local float32 array without changing the bundle."""
     return np.array(values, dtype=np.float32, order="C", copy=True)
+
+
+def _design_legend_height(chart: StudioChart) -> int:
+    if chart.chart_id != "crossover_design":
+        return 0
+    return ((sum(item.legend_visible for item in chart.series) + 1) // 2) * 22
 
 
 def _altair_frame_values(item: ChartSeries) -> dict[str, np.ndarray]:
@@ -424,12 +445,18 @@ def plotly_studio_spec(chart: StudioChart, *, theme="light") -> dict:
             "type": "scatter", "mode": "lines",
             "x": _plotly_transfer_values(item.x),
             "y": _plotly_transfer_values(item.y),
-            "name": _label(item.label_key_or_text),
+            "name": _series_label(item),
             "showlegend": item.legend_visible,
             "line": {"color": _color(item.style_token, colors), "width": item.width, "dash": item.dash},
             "opacity": item.opacity,
             "connectgaps": False,
         }
+        unit = {"design_gain": "dB", "design_phase": "°"}.get(item.axis_id)
+        if unit:
+            trace["hovertemplate"] = (
+                "%{x:.2f} Hz<br>%{y:.2f} " + unit
+                + "<extra>%{fullData.name}</extra>"
+            )
         if item.axis_id == chart.y_axes[-1].axis_id and len(chart.y_axes) > 1:
             trace["yaxis"] = "y2"
         traces.append(trace)
@@ -466,6 +493,14 @@ def plotly_studio_spec(chart: StudioChart, *, theme="light") -> dict:
         "font": {"color": colors["text"]},
         "legend": {"font": {"color": colors["text"]}},
     }
+    if chart.chart_id == "crossover_design":
+        legend_height = _design_legend_height(chart)
+        layout["height"] += legend_height
+        layout["margin"]["b"] += legend_height
+        layout["legend"].update({
+            "orientation": "h", "y": -0.22, "x": 0,
+            "entrywidth": 0.5, "entrywidthmode": "fraction",
+        })
     for index, axis in enumerate(chart.y_axes):
         spec = {
             "title": {
@@ -495,22 +530,42 @@ def altair_studio_chart(chart: StudioChart, *, theme="light"):
     for axis_index, axis in enumerate(chart.y_axes):
         layers = []
         axis_series = [item for item in chart.series if item.axis_id == axis.axis_id]
-        visible_items = [item for item in axis_series if item.legend_visible]
-        legend_domain = [_label(item.label_key_or_text) for item in visible_items]
+        # One design-response legend covers both independent numeric axes.
+        # Separate legends merge duplicate source names and lose phase styles.
+        if chart.chart_id == "crossover_design":
+            legend_series = chart.series if axis_index == 0 else ()
+        else:
+            legend_series = axis_series
+        visible_items = [item for item in legend_series if item.legend_visible]
+        legend_domain = [_series_label(item) for item in visible_items]
         legend_range = [_color(item.style_token, colors) for item in visible_items]
         if visible_items:
             # Keep legend labels in a tiny dataset.  Repeating a long label for
             # every sample inflates Arrow payload without changing the graph.
             legend_frame = pd.DataFrame({"series": legend_domain})
-            layers.append(
-                alt.Chart(legend_frame)
-                .transform_filter("false")
-                .mark_line()
-                .encode(color=alt.Color(
+            legend_encoding = {"color": alt.Color(
                     "series:N",
                     scale=alt.Scale(domain=legend_domain, range=legend_range),
                     legend=alt.Legend(title=None, orient="top"),
-                ))
+                )}
+            if chart.chart_id == "crossover_design":
+                design_legend = alt.Legend(
+                    title=None, orient="top", columns=2, labelLimit=360,
+                    symbolType="stroke", symbolSize=900, symbolStrokeWidth=2,
+                )
+                legend_encoding["color"] = alt.Color(
+                    "series:N", scale=alt.Scale(domain=legend_domain, range=legend_range),
+                    legend=design_legend,
+                )
+                legend_encoding["strokeDash"] = alt.StrokeDash(
+                    "series:N", scale=alt.Scale(
+                        domain=legend_domain,
+                        range=[[8, 5] if item.dash == "dash" else [1, 0] for item in visible_items],
+                    ), legend=design_legend,
+                )
+            layers.append(
+                alt.Chart(legend_frame).transform_filter("false").mark_line()
+                .encode(**legend_encoding)
             )
         for item in axis_series:
             segments = item.segment_id
@@ -562,7 +617,7 @@ def altair_studio_chart(chart: StudioChart, *, theme="light"):
         result = result.resolve_scale(y="independent")
     result = result.properties(
         title=_label(chart.title_key),
-        height=430 if len(chart.y_axes) > 1 else 280,
+        height=(430 if len(chart.y_axes) > 1 else 280) + _design_legend_height(chart),
         background=colors["figure"],
     )
     return result.configure_axis(
@@ -584,8 +639,11 @@ def render_studio_chart(chart: StudioChart, *, mode="Light", theme="light") -> N
             config={"displaylogo": False, "scrollZoom": True},
             width="stretch", key=f"studio_plotly_{chart.chart_id}",
         )
-        return
-    st.altair_chart(
-        altair_studio_chart(chart, theme=theme),
-        width="stretch", key=f"studio_altair_{chart.chart_id}",
-    )
+    else:
+        st.altair_chart(
+            altair_studio_chart(chart, theme=theme),
+            width="stretch", key=f"studio_altair_{chart.chart_id}",
+        )
+    if chart.chart_id == "crossover_design":
+        with st.expander(ui_message("ui.ac7faba09c5f5d")):
+            st.markdown(ui_message("ui.1486c2c278e57b"))

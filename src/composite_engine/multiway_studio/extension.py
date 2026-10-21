@@ -764,6 +764,10 @@ def _commit_output_taper() -> None:
 def _apply_library_system(system: MultiwaySystem) -> None:
     """Stage persisted settings and restore editable channel state on the next rerun."""
     st.session_state["_pending_uploaded_settings"] = system.settings
+    if 'speaker_input_assignments' in system.settings:
+        st.session_state['_pending_measurement_restore'] = system.settings['speaker_input_assignments']
+    else:
+        st.session_state.pop('_pending_measurement_restore', None)
     restore_output_fir_settings(system.settings)
     st.session_state["_pending_uploaded_name"] = f"System Library · {system.name}"
     st.session_state["_pending_uploaded_missing_eq"] = []
@@ -965,6 +969,13 @@ def _design_history_path():
     return _multiway_system_db_path().with_name("design_history.sqlite3")
 
 
+def _current_measurement_inputs():
+    from utils.composite_exchange import read_multiway_workspace
+    from utils.multiway_measurements import read_measurement_inputs
+    workspace = read_multiway_workspace(_exchange_root())
+    return read_measurement_inputs(_exchange_root(), workspace) if workspace else {}
+
+
 def _studio_history_payload(system, rows):
     from utils.multiway_system_db import _system_snapshot
     from utils.export_bundle import config_payload_from_project_zip
@@ -972,8 +983,11 @@ def _studio_history_payload(system, rows):
     from utils.composite_exchange import read_composite_assignment, read_multiway_workspace
     from utils.multiway_measurements import read_measurement_inputs
     payload = _system_snapshot(system)
+    payload['settings'] = dict(payload['settings'])
     workspace = read_multiway_workspace(_exchange_root())
     measurements = read_measurement_inputs(_exchange_root(), workspace) if workspace else {}
+    if workspace is not None:
+        payload['settings']['speaker_input_assignments'] = measurements
     payload["speaker_inputs"] = {channel: {
         "speaker_source_name": record.get("name", ""),
         "speaker_response_raw": record.get("response"),
@@ -1092,6 +1106,10 @@ def _clone_studio_history(payload, name):
         validate_settings_restore(item)
     settings = dict(copied["settings"])
     settings["history_target_definitions"] = copied.get("targets", {})
+    if 'speaker_input_assignments' in settings:
+        settings['speaker_input_assignments'] = {
+            channel_ids[key]: {**value, 'request_id': uuid.uuid4().hex, 'project_name': name}
+            for key, value in settings['speaker_input_assignments'].items() if key in channel_ids}
     created = save_multiway_system(_multiway_system_db_path(), new_multiway_system(
         name, mode=copied["mode"], sample_rate_hz=copied["sample_rate_hz"],
         settings=settings, channels=tuple(channels)))
@@ -1099,11 +1117,13 @@ def _clone_studio_history(payload, name):
     from utils.multiway_measurements import read_measurement_inputs, mapping_path, workspace_key
     source_workspace = read_multiway_workspace(_exchange_root())
     if source_workspace:
-        source_inputs = read_measurement_inputs(_exchange_root(), source_workspace)
+        source_inputs = copied['settings'].get('speaker_input_assignments',
+            read_measurement_inputs(_exchange_root(), source_workspace))
         target_workspace = {"system_id": created.system.id, "sample_rate_hz": created.system.sample_rate_hz,
                             "channel_ids": [item.channel_id for item in channels if item.enabled]}
-        copied_inputs = {channel_ids[key]: {**value, "request_id": uuid.uuid4().hex, "project_name": name}
-                         for key, value in source_inputs.items() if key in channel_ids}
+        copied_inputs = settings.get('speaker_input_assignments', {
+            channel_ids[key]: {**value, "request_id": uuid.uuid4().hex, "project_name": name}
+            for key, value in source_inputs.items() if key in channel_ids})
         _atomic_json(mapping_path(_exchange_root(), target_workspace),
                      {"workspace_key": workspace_key(target_workspace), "channels": copied_inputs})
     st.session_state["_history_pending_phaseeq"] = remapped
@@ -1166,6 +1186,12 @@ def _render_system_library_save(
     current_settings: dict[str, object],
 ) -> MultiwaySystem | None:
     current = _current_library_system()
+    from utils.composite_exchange import read_multiway_workspace
+    from utils.multiway_measurements import read_measurement_inputs
+    active_workspace = read_multiway_workspace(_exchange_root())
+    if active_workspace is not None and (current is None or active_workspace['system_id'] == current.id):
+        current_settings = {**current_settings, 'speaker_input_assignments':
+                            read_measurement_inputs(_exchange_root(), active_workspace)}
     default_name = current.name if current is not None else f"{mode_key} System"
     st.session_state.setdefault("composite_studio_system_name", default_name)
     st.caption(
@@ -1226,6 +1252,11 @@ def _render_system_library_save(
                 stereo=str(current_settings.get("output_layout", "Mono")) == "Stereo",
             )
             saved_settings = {**dict(current_settings), "selected_display": selected_display}
+            old_to_new = {old.channel_id: new.channel_id for old, new in zip(references, new_references)}
+            saved_settings['speaker_input_assignments'] = {
+                old_to_new[key]: {**value, 'request_id': uuid.uuid4().hex}
+                for key, value in saved_settings.get('speaker_input_assignments', {}).items()
+                if key in old_to_new}
             created = save_multiway_system(_multiway_system_db_path(), new_multiway_system(
                 name, mode=mode_key, sample_rate_hz=sample_rate_hz,
                 settings=saved_settings, channels=new_references,
@@ -1461,6 +1492,15 @@ def _assignment_result_provenance_valid(
     try:
         assignment = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    from utils.composite_exchange import read_composite_assignment
+    from utils.multiway_measurements import measurement_result_matches
+    try:
+        input_assignment = read_composite_assignment(_exchange_root(), normalized, require_current=False)
+        if input_assignment is not None and not measurement_result_matches(
+                _exchange_root(), input_assignment, result, allow_retained_filters=True):
+            return False
+    except (OSError, ValueError):
         return False
     if int(assignment.get("format_version", 2)) < 3:
         return True
@@ -1728,6 +1768,10 @@ def render_composite_sidebar(
                 else:
                     st.session_state["composite_studio_current_system_id"] = ""
                     imported_settings = resume_workspace.get("multiway_settings")
+                    if isinstance(imported_settings, dict) and 'speaker_input_assignments' in imported_settings:
+                        st.session_state['_pending_measurement_restore'] = imported_settings['speaker_input_assignments']
+                    else:
+                        st.session_state.pop('_pending_measurement_restore', None)
                     restore_output_fir_settings(imported_settings if isinstance(imported_settings, dict) else {})
                     if isinstance(imported_settings, dict):
                         st.session_state["_pending_uploaded_settings"] = imported_settings
@@ -2449,6 +2493,12 @@ def render_composite_sidebar(
         from utils.composite_exchange import read_multiway_workspace
         try:
             measurement_workspace = read_multiway_workspace(_exchange_root())
+            if '_pending_measurement_restore' in st.session_state:
+                from utils.multiway_measurements import restore_measurement_inputs
+                restore_measurement_inputs(_exchange_root(), measurement_workspace,
+                                          st.session_state['_pending_measurement_restore'],
+                                          known_channel_ids=[str(row['channel_id']) for row in channel_rows])
+                st.session_state.pop('_pending_measurement_restore', None)
             generation, inputs = measurement_input_snapshot(_exchange_root(), measurement_workspace)
             applied_measurements = apply_measurement_inputs(
                 _exchange_root(), measurement_workspace, channel_rows, inputs=inputs)
@@ -4736,6 +4786,7 @@ def render_composite_results(
             ),
             "multiway_settings": {
                 **dict(st.session_state.get("settings", {})),
+                "speaker_input_assignments": _current_measurement_inputs(),
                 "selected_display": str(display_group),
             },
             "selected_display": str(display_group),

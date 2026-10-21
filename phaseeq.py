@@ -918,6 +918,8 @@ def _chart_series_style_map() -> dict[str, tuple[list[int], float]]:
         "Auto IIR Preview": ([8, 4], 2.2),
         "Near-field woofer": ([7, 4], 2.0),
         "Near-field port": ([2, 3], 2.0),
+        "現在の割り当て": ([], 2.4),
+        "選択候補（未適用）": ([7, 4], 2.0),
     }
 
 
@@ -4411,6 +4413,9 @@ def _apply_ui_payload_to_state(payload: dict[str, Any]) -> None:
 
 
 def _apply_response_payload_to_state(payload: dict[str, Any], config: DesignConfig) -> None:
+    # Restoring a Working Session must be followed by the channel input owner.
+    st.session_state.pop('_channel_measurement_input_seen', None)
+    st.session_state.pop('_channel_measurement_input_request_id', None)
     io_payload = payload.get("io", {})
     if not isinstance(io_payload, dict):
         io_payload = {}
@@ -5830,6 +5835,10 @@ def _clear_input_measurement_state(source_type: str, *, from_channel_set: bool =
         ):
             st.session_state.pop(key, None)
         st.session_state["speaker_url"] = ""
+        refs = dict(st.session_state.get('_response_asset_refs') or {})
+        refs['speaker_response_raw'] = None
+        st.session_state['_response_asset_refs'] = refs
+        st.session_state['_speaker_calibration_state'] = 'raw'
         return True, "Speaker/InputセットをNoneへクリアしました。"
     if source_type == "mic_calibration_raw":
         for key in (
@@ -5860,6 +5869,52 @@ def _clear_input_measurement_state(source_type: str, *, from_channel_set: bool =
             st.session_state.pop(key, None)
         return True, "Near-field portをNoneへクリアしました。"
     return False, "クリア対象が不明です。"
+
+
+def _speaker_assignment_identity():
+    assignment = st.session_state.get('_active_context_assignment')
+    from utils.multiway_measurements import assignment_measurement_input
+    item = assignment_measurement_input(STORAGE_PATHS['composite_exchange'], assignment)
+    return (getattr(assignment, 'assignment_id', ''), (item or {}).get('request_id', ''),
+            st.session_state.get('current_speaker_measurement_id', ''),
+            st.session_state.get('_restored_speaker_source_name', ''),
+            hashlib.sha256(json.dumps(speaker_response_payload(
+                st.session_state.get('_restored_speaker_response_raw')), sort_keys=True).encode()).hexdigest())
+
+
+def _clear_current_speaker_assignment(expected_identity):
+    """Channel input is owned by its mapping; Standalone owns its local input."""
+    assignment = st.session_state.get('_active_context_assignment')
+    if _speaker_assignment_identity() != expected_identity:
+        return False, '入力または編集対象が変わっています。内容を確認して解除をやり直してください。'
+    if assignment is not None:
+        from utils.multiway_measurements import assignment_measurement_input, clear_measurement_input
+        from utils.composite_exchange import read_multiway_workspace
+        root = STORAGE_PATHS['composite_exchange']
+        item = assignment_measurement_input(root, assignment)
+        workspace = read_multiway_workspace(root, assignment=assignment)
+        if workspace is None:
+            return False, 'チャンネル構成を確認できません。マルチウェイで接続を確認してください。'
+        clear_measurement_input(root, workspace, assignment.channel_id,
+            expected_request_id=(item or {}).get('request_id', ''))
+    return _clear_input_measurement_state('speaker_input_raw', from_channel_set=assignment is not None)
+
+
+def _preview_channel_speaker(snapshot):
+    if snapshot is None:
+        _clear_selection_preview()
+        st.session_state['_selection_preview_last_measurement_destination_preview'] = ''
+        return
+    identity = '|'.join((snapshot['scope'], snapshot['channel_id'],
+        (snapshot.get('current') or {}).get('request_id', ''),
+        hashlib.sha256(json.dumps(snapshot.get('candidate'), sort_keys=True).encode()).hexdigest()))
+    _offer_selection_preview(page='Multiway Assignment', kind='channel_speaker',
+        record_id=identity, name=snapshot['name'],
+        subtitle=display_text('現在の割り当てと選択候補（未適用）'),
+        source_key='measurement_destination_preview', activate_on_first_selection=True)
+    current = st.session_state.get(SELECTION_PREVIEW_STATE_KEY)
+    if isinstance(current, dict) and current.get('kind') == 'channel_speaker' and current.get('record_id') == identity:
+        current['snapshot'] = snapshot
 
 
 def _impedance_payload_from_text(text: str) -> dict[str, Any]:
@@ -7266,9 +7321,10 @@ def _single_row_table_selector(
     height: int,
     default_id: str = "",
     column_config: dict[str, Any] | None = None,
+    required: bool = True,
 ) -> str:
     return shared_single_row_table_selector(data, option_ids, selected_state_key=selected_state_key,
-        table_key=table_key, height=height, default_id=default_id, column_config=column_config)
+        table_key=table_key, height=height, default_id=default_id, column_config=column_config, required=required)
 
 
 FIR_EQ_ADD_TYPE_OPTIONS = (
@@ -13205,12 +13261,6 @@ if _active_target_edit_session is None and (
             st.query_params.pop("assignment", None)
             st.query_params.pop("channel", None)
         st.session_state["_settings_notice"] = f"切替できませんでした。元の設定を保持しています: {exc}"
-from ui.measurement_input_sync import sync_measurement_input
-sync_measurement_input(
-    STORAGE_PATHS["composite_exchange"], SPEAKER_MEASUREMENTS_DB_FILE,
-    st.session_state.get("_active_context_assignment"), lambda record: _apply_measurement_record_to_input_state(record, from_channel_set=True),
-    target_edit=_active_target_edit_session is not None,
-)
 if _open_registered_target_menu:
     if (_target_menu_source_assignment is not None
         and st.session_state.get("_active_context_assignment") is None):
@@ -13304,6 +13354,14 @@ try:
 except (OSError, ValueError, sqlite3.Error) as exc:
     st.error(f"Stereo Linkを読み込めません: {exc}")
     st.stop()
+from ui.measurement_input_sync import sync_measurement_input
+sync_measurement_input(
+    STORAGE_PATHS['composite_exchange'], SPEAKER_MEASUREMENTS_DB_FILE,
+    st.session_state.get('_active_context_assignment'),
+    lambda record: _apply_measurement_record_to_input_state(record, from_channel_set=True),
+    target_edit=_active_target_edit_session is not None,
+    clear_input=lambda: _clear_input_measurement_state('speaker_input_raw', from_channel_set=True),
+)
 # EQ ownership can project a saved payload. Apply channel-owned crossover
 # constraints after that projection, before collecting any graph/design input.
 if _stereo_assignment is not None:
@@ -16375,6 +16433,26 @@ def _render_selection_preview(request: dict[str, Any], config: DesignConfig) -> 
 
     kind = str(request.get("kind", ""))
     record_id = str(request.get("record_id", ""))
+    if kind == 'channel_speaker':
+        from utils.multiway_measurements import input_is_empty
+        snapshot = request['snapshot']
+        current, candidate = snapshot.get('current'), snapshot.get('candidate')
+        responses = []
+        if current and not input_is_empty(current):
+            response = speaker_response_from_payload(current.get('response'))
+            if response is not None:
+                st.caption(display_text('現在の割り当て：') + current['name'])
+                responses.append(('現在の割り当て', response))
+        elif snapshot.get('channel_id'):
+            st.info(display_text('このチャンネルは未設定（Unity）です。'))
+        if candidate:
+            response = speaker_input_from_measurement_payload(candidate['response'])
+            if response is not None:
+                st.caption(display_text('選択候補（未適用）：') + candidate['name'])
+                responses.append(('選択候補（未適用）', response))
+        if responses:
+            _render_preview_gain_phase(responses, config)
+        return
     if kind == "target_preset":
         definition = get_shared_target_preset(APP_ROOT, record_id)
         if definition is None:
@@ -17791,6 +17869,7 @@ if active_page == "Project":
                 measurement_table(profile_measurements), [record.id for record in profile_measurements],
                 selected_state_key="input_speaker_measurement_selected", table_key="profile_measurements_table",
                 height=240, column_config=_db_record_column_config(),
+                required=not st.session_state.get('_profile_measurement_selection_cleared', False),
             )
             profile_selected_record = get_measurement(SPEAKER_MEASUREMENTS_DB_FILE, profile_measurement_id)
             if profile_selected_record is not None:
@@ -17800,6 +17879,9 @@ if active_page == "Project":
                     subtitle="スピーカー測定データ / プレビュー（未適用）",
                     source_key="profile_measurements_table", activate_on_page_open=True,
                 )
+            else:
+                st.session_state['_selection_preview_last_profile_measurements_table'] = ''
+                _clear_selection_preview()
             if st.button(ui_message('ui.f0f02d27cea1d4'), key="profile_use_measurement", type="primary", disabled=_channel_input_locked() or not (profile_selected_record and measurement_is_correction_input(profile_selected_record))):
                 record = profile_selected_record
                 if record is not None:
@@ -17818,6 +17900,33 @@ if active_page == "Project":
         if st.button(display_text("測定条件・メモを編集"), key="profile_edit_measurement_notes", disabled=not profile_measurements):
             _navigate_to_page("Measurement Notes")
             st.rerun()
+        if st.button(display_text('一覧の選択を解除'), key='profile_clear_selection'):
+            from utils.list_menu_ui import clear_table_selection
+            clear_table_selection('input_speaker_measurement_selected', 'profile_measurements_table')
+            st.session_state['_profile_measurement_selection_cleared'] = True
+            st.session_state['_selection_preview_last_profile_measurements_table'] = ''
+            st.session_state.pop(SELECTION_PREVIEW_SUPPRESSED_TOKEN_KEY, None)
+            _clear_selection_preview()
+            st.rerun()
+        st.caption(display_text('一覧の選択解除はプレビューだけを解除します。使用中のSpeaker応答は次の操作で解除します。'))
+        if st.button(display_text('使用中のSpeaker応答を解除'), key='profile_clear_speaker'):
+            st.session_state['_profile_clear_speaker_confirm'] = _speaker_assignment_identity()
+        if st.session_state.get('_profile_clear_speaker_confirm'):
+            st.warning(display_text('Speaker応答を解除します。EQ設定と測定データ原本は保持します。'))
+            if st.button(display_text('解除を確定'), key='profile_clear_speaker_confirm'):
+                try:
+                    ok, message = _clear_current_speaker_assignment(st.session_state['_profile_clear_speaker_confirm'])
+                    if not ok:
+                        raise ValueError(message)
+                except (OSError, ValueError) as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state.pop('_profile_clear_speaker_confirm', None)
+                    _clear_selection_preview()
+                    st.rerun()
+            if st.button(display_text('キャンセル'), key='profile_clear_speaker_cancel'):
+                st.session_state.pop('_profile_clear_speaker_confirm', None)
+                st.rerun()
         if profile_selected_record is not None:
             from ui.measurement_original_view import render_original_actions
             render_original_actions(SPEAKER_MEASUREMENTS_DB_FILE, profile_selected_record)
@@ -18142,6 +18251,7 @@ if active_page == "Multiway Assignment":
         render_measurement_assignment(
             Path(os.environ.get("PHASEEQ_COMPOSITE_EXCHANGE_DIR", str(STORAGE_PATHS["composite_exchange"]))),
             SPEAKER_MEASUREMENTS_DB_FILE,
+            preview=_preview_channel_speaker,
         )
 
 if active_page == "Measurement Notes":
@@ -22550,6 +22660,14 @@ with live_result_body_window:
                     if composite_assignment_fir_enabled and len(composite_eq_output_fir) != requested_taps:
                         raise ValueError("生成したFIRのtap数がAssignmentと一致しません。")
                     zip_name, zip_data = _build_current_working_session()
+                    from utils.multiway_measurements import assignment_measurement_input
+                    current_input = assignment_measurement_input(
+                        STORAGE_PATHS['composite_exchange'], composite_assignment)
+                    input_request_id = st.session_state.get('_channel_measurement_input_request_id')
+                    if current_input is None:
+                        input_request_id = None
+                    if current_input is not None and input_request_id != current_input['request_id']:
+                        raise ValueError('Speaker入力が更新されています。入力の同期完了後に再生成・送信してください。')
                     exchange_state = (
                         upsert_exchange_channel(
                             STORAGE_PATHS["composite_exchange"],
@@ -22604,6 +22722,7 @@ with live_result_body_window:
                                 center_source=speaker_phase_center_info.source_type,
                             )
                             _publication_result = {
+                                    "measurement_input_request_id": input_request_id,
                                     "base_assignment_signature": composite_assignment.assignment_signature,
                                     "system_id": composite_assignment.system_id,
                                     "system_revision_number": composite_assignment.system_revision_number,

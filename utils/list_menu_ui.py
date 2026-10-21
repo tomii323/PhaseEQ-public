@@ -4,6 +4,15 @@ from list_menu_state import resolve_choice, candidate_slice
 from list_menu_state import list_policy
 
 
+def clear_table_selection(selected_state_key, table_key):
+    """Reset both the semantic choice and the browser's selected row."""
+    import streamlit as st
+    st.session_state[selected_state_key] = ''
+    key = table_key + '_selection_nonce'
+    st.session_state[key] = int(st.session_state.get(key, 0)) + 1
+    st.session_state[table_key + '_rendered_selected_id'] = ''
+
+
 def single_row_table_selector(
     data,
     option_ids: list[str],

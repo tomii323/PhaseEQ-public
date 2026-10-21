@@ -1,4 +1,24 @@
 {
+  "ui.3b913e8590440f": {
+    "source": "設計応答", "ja": "設計応答", "en": "Design response"
+  },
+  "ui.08e2135bf0d6a1": {
+    "source": "EQ補正", "ja": "EQ補正", "en": "EQ correction"
+  },
+  "ui.228943b0b0fb7c": {
+    "source": "Speaker入力", "ja": "Speaker入力", "en": "Speaker input"
+  },
+  "ui.64c8ad5b050629": {
+    "source": "設計応答の合成", "ja": "設計応答の合成", "en": "Design sum"
+  },
+  "ui.ac7faba09c5f5d": {
+    "source": "表示するフィルターの範囲", "ja": "表示するフィルターの範囲", "en": "Displayed filter scope"
+  },
+  "ui.1486c2c278e57b": {
+    "source": "Gainは実線・左軸（dB）、Phaseは破線・右軸（°）です。適用中の段を表示します。\n\n|凡例|含まれる応答|\n|---|---|\n|Speaker入力|選択したスピーカー応答（EQ・帯域分割を含まない）|\n|EQ補正|PhaseEQから返送されたIIR EQ・FIR EQ、およびチャンネル設定の追加IIR応答|\n|設計応答|Speaker入力＋EQ補正＋マルチウェイの帯域分割IIR／FIR・Studio FIR EQ・Baffle補償＋Gain・極性・Delay・AP|\n|設計応答の合成|各Wayの設計応答の複素和|\n\nEQ補正の線には、マルチウェイの帯域分割IIR／FIR・Baffle補償を含みません。音響ターゲットをPhaseEQのEQで補正する設定では、返送された補正がEQ補正に含まれます。\n\nチャンネル設定のAdditional FIRは、この設計応答グラフの対象外です。最終クロップ後の応答はComposite Engineの結果で確認してください。",
+    "ja": "Gainは実線・左軸（dB）、Phaseは破線・右軸（°）です。適用中の段を表示します。\n\n|凡例|含まれる応答|\n|---|---|\n|Speaker入力|選択したスピーカー応答（EQ・帯域分割を含まない）|\n|EQ補正|PhaseEQから返送されたIIR EQ・FIR EQ、およびチャンネル設定の追加IIR応答|\n|設計応答|Speaker入力＋EQ補正＋マルチウェイの帯域分割IIR／FIR・Studio FIR EQ・Baffle補償＋Gain・極性・Delay・AP|\n|設計応答の合成|各Wayの設計応答の複素和|\n\nEQ補正の線には、マルチウェイの帯域分割IIR／FIR・Baffle補償を含みません。音響ターゲットをPhaseEQのEQで補正する設定では、返送された補正がEQ補正に含まれます。\n\nチャンネル設定のAdditional FIRは、この設計応答グラフの対象外です。最終クロップ後の応答はComposite Engineの結果で確認してください。",
+    "en": "Gain uses solid lines and the left axis (dB); Phase uses dashed lines and the right axis (°). Only applied stages contribute.\n\n|Legend|Included response|\n|---|---|\n|Speaker input|Selected speaker response, excluding EQ and crossovers|\n|EQ correction|Returned PhaseEQ IIR EQ and FIR EQ, plus the channel's additional IIR response|\n|Design response|Speaker input + EQ correction + Multiway IIR/FIR crossovers, Studio FIR EQ and baffle compensation + gain, polarity, delay and AP|\n|Design sum|Complex sum of the per-Way design responses|\n\nThe EQ correction trace excludes Multiway IIR/FIR crossovers and baffle compensation. When PhaseEQ EQ corrects an acoustic target, its returned correction is included in EQ correction.\n\nThe channel's Additional FIR is outside this design-response graph. Check the Composite Engine results for the response after final cropping."
+  },
   "ui.94074cd0fa8657": {
     "source": "NTM4のLobe Heightです。対応する帯域分割と同じ値を指定します。",
     "ja": "NTM4のLobe Heightです。対応する帯域分割と同じ値を指定します。",
@@ -16923,6 +16943,86 @@
     "source": "チャンネルのEQ設定が返却済みの結果と異なります。PhaseEQで再生成・送信が必要です：",
     "ja": "チャンネルのEQ設定が返却済みの結果と異なります。PhaseEQで再生成・送信が必要です：",
     "en": "Channel EQ settings differ from the returned result. Recreate and send these channels from PhaseEQ: "
+  },
+  "ui.a313466565f456": {
+    "source": "このチャンネルの割り当てを解除",
+    "ja": "このチャンネルの割り当てを解除",
+    "en": "Release this channel assignment"
+  },
+  "ui.5f5838b6188e83": {
+    "source": "Speaker応答の割り当てを解除します。EQ設定と測定データ原本は保持します。",
+    "ja": "Speaker応答の割り当てを解除します。EQ設定と測定データ原本は保持します。",
+    "en": "Release the Speaker response assignment. EQ settings and original measurements are retained."
+  },
+  "ui.49e6e876d979b0": {
+    "source": "解除を確定",
+    "ja": "解除を確定",
+    "en": "Confirm release"
+  },
+  "ui.bca84ea5c65fee": {
+    "source": "キャンセル",
+    "ja": "キャンセル",
+    "en": "Cancel"
+  },
+  "ui.3d28dec88b5e7c": {
+    "source": "割り当て解除を保存しました。対象チャンネルは未設定（Unity）になります。",
+    "ja": "割り当て解除を保存しました。対象チャンネルは未設定（Unity）になります。",
+    "en": "Assignment release saved. The channel now uses Unity without a Speaker response."
+  },
+  "ui.bc548b30f9a7cb": {
+    "source": "一覧の選択を解除",
+    "ja": "一覧の選択を解除",
+    "en": "Clear list selection"
+  },
+  "ui.09f34bec584a0a": {
+    "source": "使用中のSpeaker応答を解除",
+    "ja": "使用中のSpeaker応答を解除",
+    "en": "Release the active Speaker response"
+  },
+  "ui.c312c178f3def1": {
+    "source": "一覧の選択解除はプレビューだけを解除します。使用中のSpeaker応答は次の操作で解除します。",
+    "ja": "一覧の選択解除はプレビューだけを解除します。使用中のSpeaker応答は次の操作で解除します。",
+    "en": "Clearing the list selection clears its preview. Use the next action to release the active Speaker response."
+  },
+  "ui.649a06f802004e": {
+    "source": "Speaker応答を解除します。EQ設定と測定データ原本は保持します。",
+    "ja": "Speaker応答を解除します。EQ設定と測定データ原本は保持します。",
+    "en": "Release the Speaker response. EQ settings and original measurements are retained."
+  },
+  "ui.983cdf77417edb": {
+    "source": "このチャンネルは未設定（Unity）です。",
+    "ja": "このチャンネルは未設定（Unity）です。",
+    "en": "This channel has no Speaker response (Unity)."
+  },
+  "ui.1006820dd7d5c1": {
+    "source": "現在の割り当て：",
+    "ja": "現在の割り当て：",
+    "en": "Current assignment: "
+  },
+  "ui.2466e1ba4f8e30": {
+    "source": "選択候補（未適用）：",
+    "ja": "選択候補（未適用）：",
+    "en": "Selected candidate (not applied): "
+  },
+  "ui.ab7c39a3448d2a": {
+    "source": "現在の割り当てと選択候補（未適用）",
+    "ja": "現在の割り当てと選択候補（未適用）",
+    "en": "Current assignment and selected candidate (not applied)"
+  },
+  "ui.60bf76bd71c002": {
+    "source": "現在の割り当て",
+    "ja": "現在の割り当て",
+    "en": "Current assignment"
+  },
+  "ui.a41a69fee4a130": {
+    "source": "選択候補（未適用）",
+    "ja": "選択候補（未適用）",
+    "en": "Selected candidate (not applied)"
+  },
+  "ui.248e093d0b8750": {
+    "source": "未設定（Unity）",
+    "ja": "未設定（Unity）",
+    "en": "Not set (Unity)"
   },
   "ui.c7e71ed9d26de0": {
     "source": "チャンネルのEQ設定が更新されています。PhaseEQで再生成して送信してください：",
