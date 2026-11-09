@@ -4873,35 +4873,12 @@ def render_composite_results(
         with st.container(border=True):
             st.markdown(ui_message('ui.63a38ef6e96997'))
             from composite_engine.dsp_export import (
-                adapter_by_id,
-                available_adapters,
                 canonical_from_export_inputs,
                 package_filename,
             )
-            adapters = available_adapters()
-            adapter_labels = {adapter.adapter_id: adapter.display_name for adapter in adapters}
             from composite_engine.dsp_export.cdsp_dirac import PROFILE_ID as CDSP_PROFILE_ID
-            adapter_labels[CDSP_PROFILE_ID] = "miniDSP C-DSP 8x12 DL (48kHz)"
-            selected_adapter_id = shared_selectbox(
-                ui_message('ui.5928e6ccdd119b'), tuple(adapter_labels),
-                format_func=lambda value: adapter_labels[value],
-                key="composite_studio_dsp_export_adapter",
-            )
-            selected_adapter = adapter_by_id(
-                "minidsp" if selected_adapter_id == CDSP_PROFILE_ID else selected_adapter_id
-            )
-            profiles = tuple(profile for profile in selected_adapter.profiles()
-                             if (profile.profile_id == CDSP_PROFILE_ID)
-                             == (selected_adapter_id == CDSP_PROFILE_ID))
-            profile_labels = {profile.profile_id: profile.display_name for profile in profiles}
-            selected_profile_id = shared_selectbox(
-                ui_message('ui.1e80a85cbd7c37'), tuple(profile_labels),
-                format_func=lambda value: profile_labels[value],
-                key=f"composite_studio_dsp_export_profile_{selected_adapter_id}",
-            )
-            selected_profile = next(
-                profile for profile in profiles if profile.profile_id == selected_profile_id
-            )
+            from composite_engine.multiway_studio.ui.dsp_destination import render_dsp_destination
+            selected_adapter, selected_profile = render_dsp_destination()
             if selected_profile.profile_id != CDSP_PROFILE_ID:
                 st.caption(ui_message('ui.ec56999cea9d09'))
             system_name = (

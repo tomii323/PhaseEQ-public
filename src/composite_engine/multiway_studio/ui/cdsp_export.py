@@ -1,9 +1,10 @@
 """Dedicated export guidance in the existing Multiway DSP section."""
 import streamlit as st
 
-from composite_engine.dsp_export.cdsp_help import cdsp_guide
+from composite_engine.dsp_export.cdsp_help import cdsp_guide_sections
 from composite_engine.dsp_export.cdsp_dirac import CAUTION
 from utils.ui_language import current_language
+from ui.structured_help import render_help_sections
 
 
 def cdsp_issue_message(issue):
@@ -37,13 +38,13 @@ def render_cdsp_help(package):
     automatic = bool(package.workspace.get('multiway_settings', {}).get('phase_alignment_auto_structure', False))
     st.caption(('Pre: measurement APF / Post: playback crossover. 48 kHz only.' if english else
                 'Pre：測定用APF／Post：再生用クロスオーバー。48 kHz専用です。'))
-    st.caption(('Outputs → Xover → Advanced Biquad: replace the same 8 slots. '
-                'Up to 3Way+SUB or 4Way. Load channel PEQ before measurement; keep it for playback. Channel targets use Group Target magnitude only; measure with Pre APFs loaded.') if english else
-               'Outputs → Xover → Advanced Biquadの同じ8段で置換します。最大3Way+SUB／4Wayです。IIR PEQは測定前に設定し、再生時も保持します。各CHの目標振幅はGroup Targetのみです。Pre APFを設定した状態で測定します。')
+    st.caption('Replace Pre with Post in the same 8 output Xover slots.' if english else
+               '出力Xoverの同じ8段で、測定用Preから再生用Postへ置き換えます。')
     st.caption(f"FIR: {'ON' if fir else 'OFF'} / "
                + ('Automatic structural phase compensation' if english else '位相構造補償の自動適用')
                + f": {'ON' if automatic else 'OFF'}")
     st.warning(('CAUTION: Pre-Dirac APFs do not attenuate out-of-band signals. '
                 'You are responsible for protecting the drivers during measurement.') if english else CAUTION)
     with st.expander('C-DSP Dirac/APF guide' if english else 'C-DSP Dirac/APFの操作手順'):
-        st.text(cdsp_guide('en' if english else 'ja'))
+        sections = cdsp_guide_sections('en' if english else 'ja')
+        render_help_sections(sections)

@@ -1,16 +1,16 @@
 # PhaseEQ ユーザーガイド
 
 - 文書更新日: 2026-11-09
-- 対象公開版: PhaseEQ v1.21.8
+- 対象公開版: PhaseEQ v1.21.9
 - 文書状態: 現行UIに合わせた操作ガイド
 
 PhaseEQは、スピーカーの測定データから目標特性を決め、IIR／FIRの補正フィルターを作るアプリです。マルチウェイ画面では、各帯域の設計、チャンネルの合成、位相・時間整合、実機DSP向け出力を行います。
 
-本書は日本語表示を基準に、現在の操作を説明します。英語名称そのものを説明する箇所では英語表記を保持し、必要に応じて日本語の意味を添えます。グラフの凡例や出力形式など、画面に英語で表示される名称はそのまま記載します。更新内容は[更新履歴](history.md)、今回の変更点は[v1.21.8 更新案内](release-notes-v1.21.8.md)にまとめています。
+本書は日本語表示を基準に、現在の操作を説明します。英語名称そのものを説明する箇所では英語表記を保持し、必要に応じて日本語の意味を添えます。グラフの凡例や出力形式など、画面に英語で表示される名称はそのまま記載します。更新内容は[更新履歴](history.md)、今回の変更点は[v1.21.9 更新案内](release-notes-v1.21.9.md)にまとめています。
 
 マルチウェイの設計からDSP出力までの手順は[簡易操作マニュアル（15ページPDF）](manual/PhaseEQ_Multiway_QuickGuide_15p_Dark_JA.pdf)にまとめています。PhaseEQの「共通設定」、マルチウェイのサイドバー「設定」から同梱PDFをダウンロードできます。
 
-実画面と図解は[画像付き操作マニュアル（PDF）](manual/PhaseEQ_v1.21.8_画像付き操作マニュアル_日本語.pdf)で確認できます。
+実画面と図解は[画像付き操作マニュアル（PDF）](manual/PhaseEQ_v1.21.9_画像付き操作マニュアル_日本語.pdf)で確認できます。
 
 各章の「目的・場所・完了」を確認し、操作手順に沿って進めます。数値条件や互換性の詳細は補足・詳細資料にまとめています。
 
@@ -1072,85 +1072,170 @@ IIRでは任意の振幅・位相へ完全には一致できません。帯域�
 
 #### C-DSP 8x12 DLのDirac/APF出力
 
-出力先DSPに`miniDSP C-DSP 8x12 DL (48kHz)`を選びます。48 kHz、DSP FIR出力OFF、`位相構造補償を自動適用`ON、全境界LR4またはNTM4、音響ターゲットOFFで再計算すると、`PhaseEQ_C-DSP8x12_DiracAPF_48k.zip`を保存できます。最大4帯域（3Way+SUBまたは4Way）です。条件や機器の段数上限に合わない場合は、表示された原因を解消して再計算してください。
+出力先DSPとデバイスプロファイルは自動保存され、再起動・設定読込み・作業バックアップ・System再開で復帰します。
 
-Dirac Live測定用のPre-Dirac APFと、再生用のPost-Diracクロスオーバーを、同じ出力Xoverで切り替えて使います。機器内部のDirac前段へAPFを挿入する意味ではありません。Pre/Postを同時に直列接続しないでください。
+「このDSP用の設定へ変更」で、表示されたマルチウェイ側の設定を一括変更できます。C-DSPは48 kHz、DSP FIR OFF、位相構造補償の自動適用ON、全境界・位相時間整合の音響ターゲット反映OFFへ変更します。PhaseEQのEQ編集値とWorking Sessionは保持します。自動更新OFFの場合は再計算してください。分割方式・帯域数・段数などの残るエラーは、表示内容に従って調整します。
 
-機器設定を保存し、出力をミュートします。`manifest.json`のCH番号・Group・Wayと出力端子を照合します。Gain、極性、DelayはPre/Postで同じ値を設定します。
+出力先DSPに`miniDSP C-DSP 8x12 DL (48kHz)`を選び、出力条件を満たして再計算します。`PhaseEQ_C-DSP8x12_DiracAPF_48k.zip`を保存できます。
 
-##### 原典とPhaseEQのサポート範囲
+<!-- C-DSP shared guide: cdsp_help.py::cdsp_guide_sections -->
+##### 概要
 
-APF方式の実践手順は、Sonnie Parkerによる[miniDSP C-DSP 8x12 DL Processor – Review and Setup/Tuning Guide](https://www.avnirvana.com/threads/minidsp-c-dsp-8x12-dl-processor-%E2%80%93-review-and-setup-tuning-guide.16912/)（AV NIRVANA、2026年6月25日）の`All Pass Filters Method`と`Pre-/Post-Dirac C-DSP Configuration`を参照しています。クロスオーバーの位相を表すAPFで測定し、測定後にクロスオーバーへ切り替える実践例です。メーカー標準手順としてではなく、APF方式の参考にします。
+目的：Dirac Liveの測定時に等価APFを使い、再生時に既存のクロスオーバー係数へ切り替えます。
+Pre/Postは同じ位相基準を使う、出力Xoverの測定用／再生用の切替状態です。
+機器内部のDirac処理より前／後の入力ブロックへ配置する意味ではありません。
 
-**記事のAPF入力先はPEQ、PhaseEQのPre/Post入力先はXoverです。** PhaseEQではIIR PEQを別ファイルに分けてPEQへ読み込みます。記事のBass Management・リアフィル・周波数例をそのまま適用せず、下記手順の読み込み先に従ってください。NTM4と構造補償の係数にはPhaseEQの既存設計を使います。これらの方式の効果は記事の実践例から判断せず、補正後の応答を実測で確認してください。
+Preは位相等価APF＋自動位相保証APF、Postは通常XO＋自動位相保証APFです。
 
-| 段階 | PhaseEQが用意するもの | 機器・Dirac Live側で行うこと |
-|---|---|---|
-| 測定前の準備 | 設定したLR4／NTM4と構造補償APFから、Pre APF・Postクロスオーバー係数を生成 | 出力割当、ルーティング、Gain・極性・Delayを設定 |
-| 測定用の受渡し | チャンネル別Pre係数、IIR PEQ、対応表`manifest.json` | XoverへPre、PEQへIIR PEQを読込み、ユニット保護・音量設定後に測定 |
-| Dirac補正 | Group Targetの振幅だけを`.targetcurve`へ出力 | グループを対応付け、ターゲット読込み・補正範囲の選択・フィルター作成・転送 |
-| 再生への切替 | 同じ出力Xover用のPost係数 | PreをPostへ置換し、設定保存・再生・実測確認 |
-| 機器条件の確認 | 出力条件・段数・機器上限を検査し、不適合時は出力を停止。空き段は通過係数を出力 | 読込結果、実際の出力端子、音量を確認 |
 
-PhaseEQは受渡し用ZIPの生成までを担当します。実機接続・自動書込み・Dirac Liveの操作は外部で行います。
+###### PhaseEQが用意するもの
+1. 準備 → 設定したLR4／NTM4のクロスオーバーと構造補償APFを再利用し、
+   測定用Pre APFと再生用Postクロスオーバーの係数ファイルを生成します。
+2. 受渡し → IIR PEQ、Group Targetの目標振幅、出力対応・Gain・極性・Delayを記した
+   manifest.jsonを、チャンネル別係数と一緒にZIPへまとめます。
+3. 適合確認 → 出力条件と段数・機器上限を確認します。条件不適合時は出力を停止し、空き段は通過係数で埋めます。
 
-**PEQの設計は任意です。REWなどの使用や10点すべてのPEQ設計は必須ではありません。** 必要なIIR PEQだけを使います（0〜10段）。「最大10段」は機器の上限です。PEQなしの場合も、以前の機器設定を残さないため、全10段が通過係数になった`PEQ/CHxx_PEQ.txt`を読み込みます。
 
-| PEQの使用 | PhaseEQへ入力する測定データ |
+###### 機器・Dirac Liveで行うこと
+ファイル読込み、ルーティング・共通出力値の設定、ユニット保護・測定音量の設定、マイク測定、
+Diracグループの対応付け、ターゲット読込み・補正範囲の選択、フィルター作成・転送、PreからPostへの置換を行います。
+PhaseEQはこれらの操作に使うファイルを用意します。実機接続・自動書込み・Dirac Liveの操作・補正後の実測確認は外部で行います。
+NTM4と構造補償の係数はPhaseEQの既存設計に基づきます。実践記事によるこれらの方式の検証や直線位相の保証はありません。
+
+##### 準備
+
+###### PEQは必要な場合だけ使用
+
+| PEQの使用 | PhaseEQで行う準備 |
 |---|---|
-| 使わない | チャンネルごとのマイク測定データ入力は不要です。 |
-| 使う | REWなどでチャンネルごとのマイク測定を行い、測定結果をPhaseEQの対応するチャンネルへ登録した上で、PEQを設定してください。 |
+| 使わない | チャンネルごとのマイク測定データ登録は不要 |
+| 使う（0〜10段） | REWなどで各チャンネルを測定 → 対応チャンネルへ測定結果を登録 → PEQを設定 |
 
-Dirac Live側のマイク測定は別の工程です。PEQの有無にかかわらず、下記のPre-Dirac状態で実施します。
+10点すべてのPEQ設計は必須ではありません。**Dirac Live側のマイク測定は、どちらの場合も実施します。**
 
-##### 聴こえ方・曲目に合わせた微調整
+PEQなしでも、`PEQ/CHxx_PEQ.txt`を読み込んでください。全10段の通過係数で、以前のPEQを消去します。
 
-PhaseEQの`Group Target`を微調整し、ターゲットカーブをファイル出力します。**Dirac Liveの全チャンネルへ同じターゲットカーブを読み込んでください。** グループ分けしている場合は各グループへ同じカーブを読み込み、補正フィルターを再作成して機器へ転送します。
 
-##### Dirac Live ON/OFFでの聴き比べ
+###### Group Targetの設定
 
-Dirac Liveとの差を比較したい場合は、REWなどで各チャンネルをマイク測定し、測定結果をPhaseEQへ登録して、使用帯域内の周波数特性をPEQで平坦に整えた後にDirac Liveを設定することをお勧めします。これは比較のための推奨手順です。PEQなしでAPF方式を使う場合の必須条件ではありません。
+- Group TargetをIIR Auto PEQの目標に使います。
+- 帯域分割の「音響ターゲットに反映」は**全境界でOFF**にします。位相・時間整合側の同名設定もOFFにします。
+- 位相構造補償の自動適用は**ON**にします。
 
-再生用Postの帯域分割・構造補償AP・PEQ・出力Delayを保持して、Dirac LiveをON/OFFします。AP構成は全チャンネルの位相基準をそろえるためのもので、各AP段の配置はWayの役割によって異なります。全出力へ同一のAP係数を複製する操作は不要です。
+`Dirac_Targets/CHxx.targetcurve`へ出力するのはGroup Targetの振幅だけです。通常XOの振幅とGroup Targetの位相は含めません。
 
-機器はDirac補正をOFFにしても、Diracが算出したGain・Delayを保持します（[機器マニュアル4.7](https://www.minidsp.com/images/documents/C-DSP%208x12%20DL%20User%20Manual.pdf)）。ディレー設定を切り替えずに比較し、相対的な到達時間と試聴音量を確認してください。
 
-Dirac補正ONと、OFF時のIIR帯域分割による再生の音の違いを聴き比べられます。Dirac Liveはメーカー資料では**混合位相補正**とされています（同1.2）。聴感上の差は機器構成・測定・ターゲット設定によって異なります。
+###### 位相補正の考え方
 
-##### Pre-Dirac適用時
+測定前の出力Xoverに、位相等価APF＋自動位相保証APFを設定します。この応答を測定し、Diracの位相補正で直線位相化を目指します。補正後の位相は実測で確認してください。
 
-1. C-DSPプラグインの`Outputs`を開きます。
-2. 対象チャンネルの`Xover`を選択します。
-3. `Advanced Biquad`を開きます。
-4. 対応する`Pre_Dirac/CHxx_APF.txt`を全8段へ読み込みます（貼り付け後に`Process`）。
-5. 全チャンネルについて設定を確認します。
+##### 読込み・測定
 
-マイク測定前に、各出力チャンネルの`Outputs → PEQ`で`PEQ/CHxx_PEQ.txt`を`IMPORT`します。未使用段の通過係数を含む全10段を置き換えます。このIIR PEQは測定中から再生時まで保持し、Xoverへ追加しないでください。
+###### ファイルと読込み先
 
-ユニット保護と測定音量をユーザー自身で設定してから、C-DSPの`Start Dirac Live Software`でDirac Liveを起動し、マイク測定を行います。測定後、Dirac Liveのフィルター設計画面で`Dirac_Targets/CHxx.targetcurve`を読み込みます。`manifest.json`のGroupと実機のDiracチャンネル／グループを照合し、補正範囲を確認してからフィルター作成・転送を行います。複数の出力Wayが同じDiracチャンネルを共有する場合があります。
+| ファイル | 読込み先・操作 |
+|---|---|
+| `Pre_Dirac/CHxx_APF.txt` | Outputs → Xover → Advanced Biquad。全8段へ貼付け → Process |
+| `PEQ/CHxx_PEQ.txt` | Outputs → PEQ → IMPORT。通過係数を含む全10段を置換 |
+| `Dirac_Targets/CHxx.targetcurve` | Dirac Liveのフィルター設計画面 |
+| `Post_Dirac/CHxx_XO.txt` | 測定・転送後、Preと同じXover全8段へ貼付け → Process |
 
-ターゲットカーブは各チャンネルに出力し、Multiwayで選択したGroup Targetの振幅だけを含めます。通常XOの振幅とGroup Targetの位相は含めません。
 
-Group TargetをIIR Auto PEQの目標として使用するため、帯域分割の`音響ターゲットに反映`は全境界でOFFにしてください。位相・時間整合側の同名設定もOFFにします。`位相構造補償を自動適用`はONのまま、位相等価APFと自動位相保証APFはXoverへ設定します。ONの反映設定が残っている場合はC-DSP出力を無効化します。
+###### 1. 保存・出力の照合
 
-測定時は、Xoverに位相等価APF＋自動位相保証APFを設定し、PEQも適用した状態を保持します。このAPFを含む応答をDirac Liveで測定・位相補正し、直線位相化を目指します。補正後の位相は実測で確認してください。帯域分割の「音響ターゲット」ON/OFFとは別の設定です。目標の位相はDirac Liveへ転送しません。
+機器設定を保存し、出力をミュートします。`manifest.json`のoutput_index（CH01〜CH12）・Group・Wayを出力端子と照合します。Gain・極性・Delayは記載値を設定し、Pre/Postで共通に使います。
 
-##### Post-Dirac適用時
 
-出力をミュートし、同じ`Outputs → Xover → Advanced Biquad`の操作で`Post_Dirac/CHxx_XO.txt`を読み込み、Pre-Dirac係数を置き換えます。**Pre/Postを追加・重ね掛けせず、同じ8段のXover Advanced Biquad領域で置換してください。** PEQ・Gain・極性・Delay・ルーティングは保持します。
+###### 2. 測定用PreとPEQを読込み
 
-再生用設定を保存し、使用するDiracフィルターを有効にします。再生前に各段の読込結果、出力割当、音量を確認してください。
+全チャンネルのXoverへPre、PEQへIIR PEQを読み込みます。PEQは測定時・再生時とも保持します。Xoverへ追加しないでください。
 
-**CAUTION：Pre-Dirac APFは帯域外信号を減衰させません。測定時のユニット保護はユーザー自身で行ってください。** 本出力は保護フィルターや自動レベル制限を追加しません。
 
-各チャンネルのXoverは8段、出力はCH01〜CH12、Delayは0〜20 ms、Gainは-72〜+12 dBに制限します。空き段は通過係数で上書きします。8段を超える場合は出力を停止し、APFやクロスオーバーを自動変更しません。IIR PEQはチャンネルごとに最大10段を出力し、超過時はダウンロードを無効化します。PEQの自動削減は行いません。Bass ManagementとBaffle EQは出力対象に含めません。詳細は画面の`C-DSP Dirac/APFの操作手順`とZIPの`README.txt`を参照してください。専用ZIPは機器への受渡し用です。編集の再開には、別途`作業バックアップ`を保存してください。
+###### 3. ユニット保護・マイク測定
 
-##### メーカー公式資料
+**Pre APFは帯域外信号を減衰させません。** ユニット保護と安全な測定音量をユーザー自身で設定してください。
 
-- miniDSP [C-DSP 8x12 DL User Manual](https://www.minidsp.com/images/documents/C-DSP%208x12%20DL%20User%20Manual.pdf)、Revision 2.7（2021年8月5日）：4.4（信号フロー）、7.1（出力調整）、7.2.2（係数読込み）、8.1（機器仕様）を参照しています。Xover全8段、PEQ最大10段など、係数の形式と機器上限の根拠です。
-- miniDSP [Dirac Live User Manual](https://www.minidsp.com/images/documents/miniDSP%20Dirac%20Live%20User%20Manual.pdf)、Revision 1.5（2021年11月29日）：4.12（測定）、4.13（グループ）、4.14（ターゲットと補正範囲）、`Filter Export`を参照してください。
+C-DSPの`Start Dirac Live Software`から起動し、ルーティング・チャンネル設定を保持して測定します。
 
-PhaseEQでのファイル分割・読込み先・切替手順は本節の案内に従ってください。実機インポートとDirac測定を通した動作は未検証です。使用時は対象機器への取込結果と補正後の実測応答を確認してください。
+
+###### 4. ターゲット・フィルター転送
+
+`manifest.json`のGroupを実機のDiracチャンネル／グループと照合し、対応するターゲットを読み込みます。複数Wayが同じDiracチャンネルを共有する場合があります。補正範囲を確認し、フィルターを作成・転送します。目標の位相は転送しません。
+
+
+###### 5. 再生用Postへ置換
+
+出力をミュートし、**Preと同じXover全8段をPostで置換**します。Pre/Postを追加・重ね掛けしないでください。PEQ・Gain・極性・Delay・ルーティングは保持します。
+
+
+###### 6. 保存・再生前の確認
+
+再生用設定を保存し、使用するDiracフィルターを有効にします。各段の読込結果・出力割当・音量を確認してから再生します。
+
+##### 再生・比較
+
+聴こえ方や曲目に合わせた微調整は、PhaseEQのGroup Targetを微調整し、ターゲットカーブをファイル出力します。
+Dirac Liveの全チャンネルへ同じターゲットカーブを読み込んでください。
+グループ分けしている場合は各グループへ同じカーブを読み込み、補正フィルターを再作成・転送します。
+
+###### 聴き比べの準備
+
+聴き比べを重視する場合は、REWなどで各チャンネルを測定し、測定結果を登録して、
+使用帯域内の周波数特性をPEQで平坦に整えた後にDirac Liveを設定することをお勧めします。
+これは比較のための推奨手順です。PEQなしでAPF方式を使う場合の必須条件ではありません。
+
+###### Dirac Live ON/OFFの比較
+
+Dirac LiveのON/OFF比較では、再生用Postの帯域分割・構造補償AP・PEQ・出力Delayを保持します。
+AP構成は全チャンネルの位相基準をそろえるためのもので、各AP段の配置はWayの役割によって異なります。
+機器はDirac補正OFF時にもDiracが算出したGain・Delayを保持します（機器マニュアル4.7）。
+ディレー設定を切り替えずに比較し、相対的な到達時間と試聴音量を確認してください。
+Dirac補正ONと、OFF時のIIR帯域分割による再生を聴き比べられます。
+Dirac Liveは混合位相補正です（同1.2）。音の違いは機器構成・測定・ターゲット設定によって異なります。
+
+##### 条件・注意
+
+###### 出力条件
+
+| 項目 | 条件 |
+|---|---|
+| サンプルレート／DSP FIR | 48 kHz専用／OFF |
+| 位相構造補償の自動適用 | ON |
+| 全境界の方式 | LR4またはNTM4 |
+| 音響ターゲットへの反映 | 全境界・位相時間整合ともOFF |
+| 帯域数 | 最大4帯域（3Way+SUB／4Way） |
+| チャンネルごとの段数 | Xover 8段／PEQ 10段 |
+| 出力／Delay／Gain | CH01〜CH12／0〜20 ms／-72〜+12 dB |
+
+出力できない場合は、表示された原因に合わせて設定を見直し、再計算します。段数は切り捨てず、条件不適合時は出力を停止します。空き段は通過係数で上書きします。
+
+
+###### 測定時の注意
+
+**CAUTION：Pre-Dirac APFは帯域外信号を減衰させません。測定時のユニット保護はユーザー自身で行ってください。**
+
+この出力は保護フィルターや自動レベル制限を追加しません。実機への読込み・音響動作は、使用する機器で確認してください。
+
+Bass ManagementとBaffle EQは出力対象に含めません。
+
+##### 原典
+
+- 実践手順：Sonnie Parker「miniDSP C-DSP 8x12 DL Processor – Review and
+  Setup/Tuning Guide」（AV NIRVANA、2026年6月25日）。参照箇所はAll Pass
+  Filters Method、Pre-/Post-Dirac C-DSP Configurationです。
+  https://www.avnirvana.com/threads/minidsp-c-dsp-8x12-dl-processor-%E2%80%93-review-and-setup-tuning-guide.16912/
+  クロスオーバーの位相を表すAPFで測定し、測定後にクロスオーバーへ切り替える実践例です。
+  メーカー標準手順としてではなく、APF方式の参考にします。
+  記事はAPFをPEQへ手入力します。PhaseEQはPre/PostをXover用に出力し、IIR PEQはPEQへ分けます。
+  読み込み先は「読込み・測定」の手順に従ってください。記事のBass Management・リアフィル・周波数例は本出力の対象外です。
+
+- 機器仕様：miniDSP「C-DSP 8x12 DL User Manual」Revision 2.7（2021年8月5日）。
+  4.4（信号フロー）、7.1（出力調整）、7.2.2（係数読込み）、8.1（機器仕様）を参照します。
+  https://www.minidsp.com/images/documents/C-DSP%208x12%20DL%20User%20Manual.pdf
+
+- 測定操作：miniDSP「Dirac Live User Manual」Revision 1.5（2021年11月29日）。
+  4.12（測定）、4.13（グループ）、4.14（ターゲットと補正範囲）、Filter Exportを参照します。
+  https://www.minidsp.com/images/documents/miniDSP%20Dirac%20Live%20User%20Manual.pdf
 
 #### 作業の再開
 
@@ -2610,7 +2695,7 @@ LR4 FIRはLP／HPの5 Hz〜ナイキスト周波数のうち、目標振幅−10
 - [利用者向けドキュメント一覧](README.md)
 - [インストールガイド](installation.md)
 - [更新履歴](history.md)
-- [v1.21.8 更新案内](release-notes-v1.21.8.md)
+- [v1.21.9 更新案内](release-notes-v1.21.9.md)
 - [v1.20.35 更新案内](release-notes-v1.20.35.md)
 - [出力ファイル仕様](output-format.md)
 - [プロジェクトREADME](../../README.md)

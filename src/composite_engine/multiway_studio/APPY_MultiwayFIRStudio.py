@@ -595,6 +595,7 @@ PHASEEQ_INTEGRATION_VERSION = _load_phaseeq_integration_version()
 
 default_settings = {
     "schema_version": 5,
+    "dsp_export": {"destination_id": "minidsp", "profile_ids": {}},
     "2Way": {
         "fs": 96000,
         "cycles": 5.3,
@@ -1529,6 +1530,8 @@ def normalize_settings(raw_settings):
                 raw_settings["last_mode"] = "3Way+SUB"
     settings = _deep_merge_dict(default_settings, raw_settings)
     settings["schema_version"] = 5
+    from composite_engine.dsp_export.destinations import normalize_destination
+    settings["dsp_export"] = normalize_destination(settings.get("dsp_export"))
     settings["phase_alignment_auto_structure"] = bool(settings.get("phase_alignment_auto_structure", False))
     settings["output_layout"] = (
         str(settings.get("output_layout", "Mono"))
@@ -2504,6 +2507,10 @@ if st.session_state.get("_pending_uploaded_settings"):
         st.warning(
             ui_message('ui.90025dac526136')
         )
+
+# Resume replaces the settings object. Build this run from that restored owner,
+# rather than serializing the snapshot taken before the pending import.
+settings = st.session_state["settings"]
 
 # ------------------------ サイドバーUI ------------------------
 dsp_resume_upload = None
