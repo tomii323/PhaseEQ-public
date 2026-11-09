@@ -17,7 +17,7 @@ class ResolvedSpeakerSource:
 
 @dataclass(frozen=True)
 class SpeakerAlignmentReadiness:
-    """Describe whether one alignment set has a coherent Speaker basis."""
+    """Describe whether time fitting has a coherent Speaker basis."""
 
     mode: str
     configured_channels: tuple[str, ...]
@@ -38,7 +38,8 @@ def assess_speaker_alignment_readiness(
     An all-Unity set is a valid filter-only analysis.  Once one physical
     Speaker response participates, every Channel in the alignment set needs a
     Speaker response; otherwise the solver would interpret the missing
-    acoustic phase as a real zero-delay reference.
+    acoustic phase as a real zero-delay reference. This restriction applies to
+    time fitting, not to crossover-topology structural phase compensation.
     """
 
     configured: list[str] = []

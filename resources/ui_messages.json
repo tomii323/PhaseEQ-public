@@ -1,4 +1,24 @@
 {
+  "ui.498f5eee191dcc": {
+    "source": "Target + Band Splitは、目標応答に現在出力へ適用する帯域分割を合成した比較基準です。FIR OFFではFIR帯域分割を含みません。",
+    "ja": "Target + Band Splitは、目標応答に現在出力へ適用する帯域分割を合成した比較基準です。FIR OFFではFIR帯域分割を含みません。",
+    "en": "Target + Band Split combines the target with the effective output band split. With FIR OFF, it excludes FIR band splitting."
+  },
+  "ui.243200d98b4e53": {
+    "source": "誤差を表示するには、スピーカー測定と目標応答を設定してください。",
+    "ja": "誤差を表示するには、スピーカー測定と目標応答を設定してください。",
+    "en": "Set a speaker measurement and target response to display the error."
+  },
+  "ui.c84290390df408": {
+    "source": "誤差は、SP＋実現補正とTarget + Band Splitの差です。FIR OFFではIIRのみの出力を比較します。",
+    "ja": "誤差は、SP＋実現補正とTarget + Band Splitの差です。FIR OFFではIIRのみの出力を比較します。",
+    "en": "Error compares Speaker + Realized with Target + Band Split. With FIR OFF, it compares the IIR-only output."
+  },
+  "ui.0fa0b8c41bc8c8": {
+    "source": "IIR Band Splitは出力側のIIR帯域分割・All Pass・極性を示します。手動IIRとAuto IIRを含む全体はIIR Outputで確認します。",
+    "ja": "IIR Band Splitは出力側のIIR帯域分割・All Pass・極性を示します。手動IIRとAuto IIRを含む全体はIIR Outputで確認します。",
+    "en": "IIR Band Split shows output IIR crossover, all-pass and polarity. IIR Output includes manual and Auto IIR EQ as well."
+  },
   "ui.3b913e8590440f": {
     "source": "設計応答", "ja": "設計応答", "en": "Design response"
   },

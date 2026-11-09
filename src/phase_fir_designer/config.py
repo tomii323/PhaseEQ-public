@@ -310,6 +310,8 @@ class DesignConfig:
     acoustic_correction_enabled: bool = True
     # Internal compatibility switch for published FIR recipes before v3.
     acoustic_boundary_continuation_enabled: bool = True
+    # Internal compatibility policy for published v4 FIR recipes.
+    legacy_input_shaping_order: bool = False
     fir_generation_grid: str = "multiway-v1"
     linear_fir_eq_mask_smoothing_oct: float = LINEAR_FIR_EQ_MASK_SMOOTHING_DEFAULT
     phase_tilt_smoothing_oct: float = 1.0 / 3.0
@@ -335,6 +337,7 @@ class DesignConfig:
             band_split_recipe=self.band_split_recipe,
             acoustic_correction_enabled=bool(self.acoustic_correction_enabled),
             acoustic_boundary_continuation_enabled=bool(self.acoustic_boundary_continuation_enabled),
+            legacy_input_shaping_order=bool(self.legacy_input_shaping_order),
             fir_generation_grid=self.fir_generation_grid,
             analysis_fft_size=int(self.analysis_fft_size),
             peq_filters=[_clip_peq(f, self.sample_rate) for f in self.peq_filters],
@@ -585,6 +588,7 @@ class DesignConfig:
             band_split_recipe=data.get("band_split_recipe"),
             acoustic_correction_enabled=bool(data.get("acoustic_correction_enabled", True)),
             acoustic_boundary_continuation_enabled=bool(data.get("acoustic_boundary_continuation_enabled", True)),
+            legacy_input_shaping_order=bool(data.get("legacy_input_shaping_order", False)),
             fir_generation_grid=data.get("fir_generation_grid", "multiway-v1"),
             analysis_fft_size=int(
                 data.get(

@@ -36,7 +36,8 @@ class TargetFitResult:
 
 
 def _fit_target_peq_existing(speaker: SpeakerResponse, target: SpeakerResponse, sample_rate: int,
-                   *, existing_filters=(), settings=TargetFitSettings()) -> TargetFitResult:
+                   *, existing_filters=(), settings=TargetFitSettings(),
+                   calculation_input: SpeakerResponse | None = None) -> TargetFitResult:
     """Minimize equal-log-frequency RMS error; do not normalize either input level.
 
     Residual extrema seed successive PEQs. Joint bounded least squares refines
@@ -62,7 +63,10 @@ def _fit_target_peq_existing(speaker: SpeakerResponse, target: SpeakerResponse, 
     def gain(filters, axis=frequency):
         return 20.0 * np.log10(np.maximum(np.abs(iir_frequency_response(filters, sample_rate, axis)), 1e-15))
 
-    before = _response_gain_on_log_axis(speaker, frequency) + gain(manual)
+    # A prepared input already includes manual IIR. Keep the cascade separately
+    # for headroom evaluation, without adding it to the fitting input twice.
+    before = (_response_gain_on_log_axis(speaker, frequency) + gain(manual)
+              if calculation_input is None else _response_gain_on_log_axis(calculation_input, frequency))
     target_gain = _response_gain_on_log_axis(target, frequency)
     wanted = target_gain - before
     accepted = []
@@ -119,9 +123,13 @@ def _fit_target_peq_existing(speaker: SpeakerResponse, target: SpeakerResponse, 
     })
 
 
-def prepare_eq_speaker_input(speaker, target, sample_rate, settings):
-    from .auto_iir_input_shaping import prepare_speaker_input
-    return prepare_speaker_input(speaker, target, sample_rate, settings.shaping,
+def prepare_eq_speaker_input(speaker, target, sample_rate, settings, *, existing_filters=()):
+    from .auto_iir_input_shaping import prepare_speaker_input, speaker_input_with_gain
+    frequency = np.asarray(speaker.frequency, dtype=float)
+    manual_gain = 20*np.log10(np.maximum(abs(
+        iir_frequency_response(existing_filters, sample_rate, frequency)), 1e-15))
+    source = speaker_input_with_gain(speaker, manual_gain)
+    return prepare_speaker_input(source, target, sample_rate, settings.shaping,
         f_min=settings.f_min, f_max=settings.f_max,
         reliable_f_min_hz=settings.reliable_f_min_hz,
         reliable_f_max_hz=settings.reliable_f_max_hz)
@@ -134,11 +142,12 @@ def fit_target_peq(speaker: SpeakerResponse, target: SpeakerResponse, sample_rat
         return _fit_target_peq_existing(speaker, target, sample_rate,
                                        existing_filters=existing_filters, settings=settings)
     started = perf_counter()
-    prepared, dips = prepare_eq_speaker_input(speaker, target, sample_rate, settings)
-    preparation_seconds = perf_counter()-started
     manual = tuple(existing_filters)
-    result = _fit_target_peq_existing(prepared, target, sample_rate,
-                                     existing_filters=manual, settings=settings)
+    prepared, dips = prepare_eq_speaker_input(speaker, target, sample_rate, settings,
+                                            existing_filters=manual)
+    preparation_seconds = perf_counter()-started
+    result = _fit_target_peq_existing(speaker, target, sample_rate,
+        existing_filters=manual, settings=settings, calculation_input=prepared)
     diagnostics = dict(result.diagnostics)
     frequency = np.asarray(diagnostics['auto_iir_curve_frequency_hz'])
     source = _response_gain_on_log_axis(speaker, frequency)

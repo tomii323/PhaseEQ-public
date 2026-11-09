@@ -703,6 +703,7 @@ def auto_gain_eq_db(
         frequency,
         manual_gain_db=manual_gain_db,
         response_cache=_response_cache,
+        apply_linear_fir_mask=apply_linear_fir_mask,
     )
     if not sections:
         return np.zeros_like(frequency, dtype=float)
@@ -760,7 +761,8 @@ def auto_gain_phase_eq_deg(
             config, axis, manual_gain, apply_linear_fir_mask=apply_linear_fir_mask,
         )
     else:
-        sections, plans = _auto_gain_section_plans(config, axis, manual_gain)
+        sections, plans = _auto_gain_section_plans(config, axis, manual_gain,
+            apply_linear_fir_mask=apply_linear_fir_mask)
         gain = _combine_auto_eq_sections(
             axis, sections,
             [
@@ -792,7 +794,8 @@ def auto_gain_candidate_plans(
         frequency,
         apply_linear_fir_mask=apply_linear_fir_mask,
     )
-    _sections, plans = _auto_gain_section_plans(config, frequency, manual_gain_db=manual_gain)
+    _sections, plans = _auto_gain_section_plans(config, frequency, manual_gain_db=manual_gain,
+        apply_linear_fir_mask=apply_linear_fir_mask)
     if not apply_linear_fir_mask:
         return plans
     return [
@@ -811,9 +814,9 @@ def auto_gain_candidate_plans(
     ]
 
 
-def auto_gain_shaped_speaker_response(config: DesignConfig):
-    """Shared calculation input for every FIR Auto Gain, after IIR and before FIR EQ."""
-    from .auto_iir_input_shaping import prepare_speaker_input
+def auto_gain_shaped_speaker_response(config: DesignConfig, *, apply_linear_fir_mask: bool = True):
+    """Shared calculation input after all IIR and manual FIR Gain EQ."""
+    from .auto_iir_input_shaping import prepare_speaker_input, speaker_input_with_gain
     from .acoustic_target import effective_target
     from .config import SpeakerResponse
 
@@ -831,6 +834,9 @@ def auto_gain_shaped_speaker_response(config: DesignConfig):
         gain = fir_input_transfer(config.iir_filters, config.sample_rate, f).gain_db(gain)
     from .response_support import inherit_support
     source = inherit_support(SpeakerResponse(f.tolist(), gain.tolist(), None), speaker)
+    if not config.legacy_input_shaping_order:
+        source = speaker_input_with_gain(source, manual_gain_eq_db(
+            config, f, apply_linear_fir_mask=apply_linear_fir_mask))
     target = effective_target(config)
     if target is None:
         target = SpeakerResponse(f.tolist(), np.zeros_like(f).tolist(), None)
@@ -849,6 +855,7 @@ def _auto_gain_section_plans(
     manual_gain_db: np.ndarray | None = None,
     *,
     response_cache: _AxisResponseCache | None = None,
+    apply_linear_fir_mask: bool = False,
 ) -> tuple[list[AutoEQSection], list[GainCorrectionPlan]]:
     sections = _auto_gain_eq_sections(config.auto_eq)
     if not sections:
@@ -889,7 +896,8 @@ def _auto_gain_section_plans(
             out_of_range="hold",
             response_cache=response_cache,
         )
-        prepared = auto_gain_shaped_speaker_response(config)
+        prepared = auto_gain_shaped_speaker_response(config,
+            apply_linear_fir_mask=apply_linear_fir_mask)
         if prepared is not None:
             source, shaped = prepared
             native_f = np.asarray(source.frequency, dtype=float)

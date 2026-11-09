@@ -3839,7 +3839,10 @@ def _render_system_phase_alignment_controls(
         )
         speaker_readiness = assess_speaker_alignment_readiness(list(rows))
         if not speaker_readiness.ready:
-            st.error(alignment_input_notice(speaker_readiness))
+            if automatic_structure:
+                st.info(alignment_input_notice(speaker_readiness))
+            else:
+                st.error(alignment_input_notice(speaker_readiness))
         elif speaker_readiness.mode == "filter_only":
             st.info(alignment_input_notice(speaker_readiness))
         distance_config = (
@@ -4869,9 +4872,6 @@ def render_composite_results(
 
         with st.container(border=True):
             st.markdown(ui_message('ui.63a38ef6e96997'))
-            st.caption(
-                ui_message('ui.ec56999cea9d09')
-            )
             from composite_engine.dsp_export import (
                 adapter_by_id,
                 available_adapters,
@@ -4880,13 +4880,19 @@ def render_composite_results(
             )
             adapters = available_adapters()
             adapter_labels = {adapter.adapter_id: adapter.display_name for adapter in adapters}
+            from composite_engine.dsp_export.cdsp_dirac import PROFILE_ID as CDSP_PROFILE_ID
+            adapter_labels[CDSP_PROFILE_ID] = "miniDSP C-DSP 8x12 DL (48kHz)"
             selected_adapter_id = shared_selectbox(
                 ui_message('ui.5928e6ccdd119b'), tuple(adapter_labels),
                 format_func=lambda value: adapter_labels[value],
                 key="composite_studio_dsp_export_adapter",
             )
-            selected_adapter = adapter_by_id(selected_adapter_id)
-            profiles = selected_adapter.profiles()
+            selected_adapter = adapter_by_id(
+                "minidsp" if selected_adapter_id == CDSP_PROFILE_ID else selected_adapter_id
+            )
+            profiles = tuple(profile for profile in selected_adapter.profiles()
+                             if (profile.profile_id == CDSP_PROFILE_ID)
+                             == (selected_adapter_id == CDSP_PROFILE_ID))
             profile_labels = {profile.profile_id: profile.display_name for profile in profiles}
             selected_profile_id = shared_selectbox(
                 ui_message('ui.1e80a85cbd7c37'), tuple(profile_labels),
@@ -4896,6 +4902,8 @@ def render_composite_results(
             selected_profile = next(
                 profile for profile in profiles if profile.profile_id == selected_profile_id
             )
+            if selected_profile.profile_id != CDSP_PROFILE_ID:
+                st.caption(ui_message('ui.ec56999cea9d09'))
             system_name = (
                 current_system.name if current_system is not None else
                 f"{st.session_state.get('result_mode_key', 'Multiway')} System"
@@ -4903,6 +4911,21 @@ def render_composite_results(
             design_generated_at = str(st.session_state.get("result_generated_at", ""))
             export_workspace = dict(workspace)
             export_workspace["design_generated_at"] = design_generated_at
+            if selected_profile.profile_id == CDSP_PROFILE_ID:
+                export_workspace["targets"] = {
+                    target_group: {"preset_definition": _selected_group_target_definition(
+                        target_group, int(sample_rate_hz))}
+                    for target_group in dict.fromkeys(channel.group for channel in dsp_channels)
+                }
+                result_settings = st.session_state.get("result_settings", {})
+                result_mode = str(st.session_state.get("result_mode_key", ""))
+                result_mode_settings = result_settings.get(result_mode, {})
+                export_workspace["cdsp_export_context"] = {
+                    "current": bool(st.session_state.get("_studio_graphs_current", False)),
+                    "methods": list(result_mode_settings.get("crossover_methods", ())),
+                    "acoustic_target": bool(result_mode_settings.get("phase_alignment_acoustic_target", False))
+                        or any(result_mode_settings.get("boundary_acoustic_targets", ())),
+                }
             canonical_package = canonical_from_export_inputs(
                 tuple(dsp_channels), system_name=system_name,
                 generated_at=datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -4936,6 +4959,9 @@ def render_composite_results(
                         taper_protection_taps=taper_protection_taps,
                     )
             compatibility = selected_adapter.validate(canonical_package, selected_profile)
+            if selected_profile.profile_id == CDSP_PROFILE_ID:
+                from composite_engine.multiway_studio.ui.cdsp_export import render_cdsp_help
+                render_cdsp_help(canonical_package)
             with resume_download_host:
                 st.download_button(
                     ui_message('ui.17cb888870169b'),
@@ -4988,7 +5014,11 @@ def render_composite_results(
             st.dataframe(pd.DataFrame(compatibility.channel_rows), hide_index=True, width="stretch")
             if compatibility.issues:
                 for issue in compatibility.issues:
-                    message = f"{issue.channel_id + ': ' if issue.channel_id else ''}{issue.message}"
+                    issue_message = issue.message
+                    if selected_profile.profile_id == CDSP_PROFILE_ID:
+                        from composite_engine.multiway_studio.ui.cdsp_export import cdsp_issue_message
+                        issue_message = cdsp_issue_message(issue)
+                    message = f"{issue.channel_id + ': ' if issue.channel_id else ''}{issue_message}"
                     if issue.severity == "error":
                         st.error(message)
                     elif issue.severity == "warning":
@@ -5001,7 +5031,9 @@ def render_composite_results(
                 ui_message('ui.0f0028b1a0ab35'),
                 data=deferred_call(first_result, _build_dsp_export_zip,
                                    canonical_package, selected_adapter, selected_profile),
-                file_name=package_filename(canonical_package, selected_adapter),
+                file_name=("PhaseEQ_C-DSP8x12_DiracAPF_48k.zip"
+                           if selected_profile.profile_id == CDSP_PROFILE_ID
+                           else package_filename(canonical_package, selected_adapter)),
                 mime="application/zip", width="stretch",
                 disabled=not compatibility.compatible,
                 icon=":material/download:", key="composite_studio_download_dsp_export_v3",

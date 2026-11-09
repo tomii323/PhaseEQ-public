@@ -21,11 +21,14 @@ STRUCTURAL_PHASE_EXAMPLES = (
 
 STRUCTURAL_PHASE_HELP = {
     'ja': {
+        'mixed_inputs': 'Speaker応答と理想特性／Unityが混在していても、位相構造補償の自動適用を使用できます。構造補償は分割方式・周波数・Way配置に基づきます。',
         'title': '位相構造補償の使い方',
         'tooltip': 'IIRを含む3Way以上で、クロス由来の位相差と合成Gainの山谷を抑えます。ONではWay・分割方式・周波数に合わせて自動更新します。ONからOFFへ切り替えると自動補償を解除し、Delayと手動極性は維持します。数値例と必要なリソースは、すぐ下の「位相構造補償の使い方」で確認できます。',
         'purpose': '''**クロス付近の位相差と、合成Gainの山谷を抑える機能です。**
 
 主にIIR LR2／LR4／NTM4を含む3Way以上で使用します。3WayのMidには上下両方のクロスが作用するため、隣接Wayと比べると別のクロスによる位相回転が残ります。不足する位相回転を、各Wayの振幅を保つオールパスで補います。
+
+Speaker応答と理想特性／Unityが混在していても使用できます。構造補償は分割方式・周波数・Way配置に基づいて更新します。混在した応答からの自動時間整合は別の操作条件に従います。
 
 **設定の流れ**
 
@@ -61,11 +64,14 @@ STRUCTURAL_PHASE_HELP = {
 「位相・時間整合：音響ターゲットに反映」をONにすると、オールパスを直接出力へ追加せず、PhaseEQの目標へ渡します。測定を適用し、補正を設定・更新して返却してください。この経路では補正FIRの長さと実現精度も確認します。''',
     },
     'en': {
+        'mixed_inputs': 'Automatic structural phase compensation is available with mixed speaker responses and ideal responses or Unity. It uses crossover methods, frequencies and Way topology.',
         'title': 'Using structural phase compensation',
         'tooltip': 'Reduces crossover-related phase differences and summed-gain dips or peaks in 3Way or larger systems containing IIR crossovers. ON updates with Way, method and frequency changes. Switching ON to OFF removes automatic compensation while retaining Delay and manual polarity. See the guide immediately below for examples and resource requirements.',
         'purpose': '''**Use this to reduce phase differences and summed-gain dips or peaks around crossovers.**
 
 This mainly applies to 3Way or larger systems containing IIR LR2/LR4/NTM4. In 3Way, Mid passes through both crossover boundaries, so the other boundary adds phase rotation relative to each adjacent Way. All-pass sections supply the missing rotation while preserving each Way's magnitude.
+
+Available with mixed speaker responses and ideal responses or Unity. Structural compensation follows crossover methods, frequencies and Way topology. Automatic time alignment from mixed responses has separate input requirements.
 
 **Procedure**
 

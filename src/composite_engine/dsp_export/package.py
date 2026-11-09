@@ -56,6 +56,9 @@ def build_dsp_export_zip(
     profile: DSPProfile,
 ) -> tuple[bytes, str]:
     exported = adapter.export(package, profile)
+    from .cdsp_dirac import PROFILE_ID, build_cdsp_zip
+    if profile.profile_id == PROFILE_ID:
+        return build_cdsp_zip(exported)
     files = dict(exported.files)
     for channel in package.channels:
         root = f"configuration/channels/{channel_root(channel)}"

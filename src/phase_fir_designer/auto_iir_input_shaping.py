@@ -7,7 +7,7 @@ import numpy as np
 from scipy.signal import find_peaks
 
 
-SHAPING_VERSION = 3
+SHAPING_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -57,8 +57,21 @@ def input_signature(speaker, target, sample_rate, manual):
             data = np.asarray(values, dtype='<f8')
             digest.update(str(data.shape).encode())
             digest.update(data.tobytes())
-    digest.update(json.dumps([sample_rate, [asdict(f) for f in manual]], sort_keys=True).encode())
+    digest.update(json.dumps([SHAPING_VERSION, sample_rate, [asdict(f) for f in manual]], sort_keys=True).encode())
     return digest.hexdigest()
+
+
+def speaker_input_with_gain(speaker, gain_db):
+    """Build a calculation-only input, retaining native support and phase."""
+    from .config import SpeakerResponse
+    from .response_support import inherit_support
+    gain = np.asarray(gain_db, dtype=float)
+    source = np.asarray(speaker.gain_db, dtype=float)
+    if gain.shape != source.shape:
+        raise ValueError('Applied input gain must match the measurement axis')
+    return inherit_support(SpeakerResponse(list(speaker.frequency),
+        (source + gain).tolist(),
+        None if speaker.phase_deg is None else list(speaker.phase_deg)), speaker)
 
 
 def runs(mask):

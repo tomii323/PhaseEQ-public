@@ -76,6 +76,7 @@ from composite_engine.multiway_studio.components.visualization import (
 from composite_engine.multiway_studio.components.studio_charts import (
     PROJECTION_REVISION,
     build_studio_chart_bundle,
+    studio_chart_bundle_is_current,
     render_studio_chart,
 )
 from composite_engine.multiway_studio.extension import _shared_iir_configs
@@ -134,6 +135,13 @@ def _render_studio_chart(bundle, chart_id, *, graph_mode, plot_theme):
     )
 
 
+def _ensure_current_studio_chart_bundle(bundle, source, **projection_options):
+    """Rebuild only obsolete display data from the retained response source."""
+    if studio_chart_bundle_is_current(bundle):
+        return bundle
+    return _project_studio_charts(source, **projection_options)
+
+
 _STUDIO_GRAPH_LAYOUT = (
     ("band_impulse", "ui.e0d37186efff20"),
     ("band_step", "ui.ceb9132f645569"),
@@ -179,6 +187,10 @@ def _render_studio_graph_fragment(
     bundle, *, plot_theme, chart_hosts,
 ):
     """Redraw only the fixed graph slots when renderer mode changes."""
+    if not studio_chart_bundle_is_current(bundle):
+        # A fragment's captured arguments bypass the full-script cache gate.
+        # Return to that gate before reading or rendering obsolete objects.
+        st.rerun(scope="app")
     selected_mode = shared_selectbox(
         ui_message('ui.5e23ec6a300dc6'),
         visualization.GRAPH_MODE_OPTIONS,
@@ -4004,6 +4016,19 @@ if (not should_generate) and st.session_state.get('studio_chart_bundle') is not 
         st.session_state.get("last_conf_signature", ""),
         current_graph_display, graph_max_points,
         db_min, db_max, phase_gain_mask_db,
+    )
+    # Schema recovery also applies when edited DSP settings await regeneration:
+    # project the retained completed response, without accepting those edits.
+    st.session_state["studio_chart_bundle"] = _ensure_current_studio_chart_bundle(
+        st.session_state["studio_chart_bundle"],
+        st.session_state["studio_chart_source"],
+        source_revision=_studio_chart_source_revision(
+            st.session_state.get("last_conf_signature", ""),
+            st.session_state.get("studio_graph_display", current_graph_display),
+            graph_max_points, db_min, db_max, phase_gain_mask_db,
+        ),
+        graph_max_points=graph_max_points,
+        db_min=db_min, db_max=db_max, phase_gain_mask_db=phase_gain_mask_db,
     )
     if (
         not signature_changed

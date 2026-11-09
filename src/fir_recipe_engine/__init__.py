@@ -22,7 +22,7 @@ from phase_fir_designer.export_pipeline import output_fir_for_export_report
 FIR_RECIPE_FORMAT = "phaseeq-fir-recipe"
 FIR_RECIPE_FORMAT_VERSION = 1
 FIR_RECIPE_ALGORITHM_ID = "phaseeq-manual-auto-fir"
-FIR_RECIPE_ALGORITHM_VERSION = "weighted-complex-ls-v4"
+FIR_RECIPE_ALGORITHM_VERSION = "weighted-complex-ls-v5"
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,7 @@ class FIRRecipe:
             raise ValueError("unsupported FIR recipe format version")
         if str(payload.get("algorithm_id", "")) != FIR_RECIPE_ALGORITHM_ID:
             raise ValueError("unsupported FIR recipe algorithm")
-        if str(payload.get("algorithm_version", "")) not in ("weighted-complex-ls-v1", "weighted-complex-ls-v2", "weighted-complex-ls-v3", FIR_RECIPE_ALGORITHM_VERSION):
+        if str(payload.get("algorithm_version", "")) not in ("weighted-complex-ls-v1", "weighted-complex-ls-v2", "weighted-complex-ls-v3", "weighted-complex-ls-v4", FIR_RECIPE_ALGORITHM_VERSION):
             raise ValueError("unsupported FIR recipe algorithm version")
         config = payload.get("config")
         postprocess = payload.get("postprocess", {})
@@ -157,6 +157,7 @@ def recipe_from_config(
         dc_gain_normalize=False,
         fir_auto_gain_enabled=False,
         acoustic_boundary_continuation_enabled=True,
+        legacy_input_shaping_order=False,
     )
     return FIRRecipe(
         config=asdict(recipe_config),
@@ -187,8 +188,10 @@ def _generate_fir_recipe(normalized: FIRRecipe, *, legacy_acoustic_boundary: boo
     config = DesignConfig.from_dict(normalized.config).normalized()
     # Shaping belongs to the versioned design input, never the stored speaker
     # response. Older recipes retain the algorithm used for their saved hash.
-    if normalized.algorithm_version != FIR_RECIPE_ALGORITHM_VERSION:
+    if normalized.algorithm_version in {"weighted-complex-ls-v1", "weighted-complex-ls-v2", "weighted-complex-ls-v3"}:
         config = replace(config, auto_gain_input_shaping=InputShapingSettings())
+    config = replace(config, legacy_input_shaping_order=(
+        normalized.algorithm_version == "weighted-complex-ls-v4"))
     if legacy_acoustic_boundary:
         config = replace(config, acoustic_boundary_continuation_enabled=False)
     config = replace(config, fir_generation_grid=(

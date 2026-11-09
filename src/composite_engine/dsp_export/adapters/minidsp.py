@@ -27,15 +27,25 @@ class MiniDSPAdapter(DSPExportAdapter):
     display_name = "miniDSP"
 
     def profiles(self) -> tuple[DSPProfile, ...]:
+        from ..cdsp_dirac import cdsp_profile
         return (DSPProfile(
             "minidsp_user_defined", self.adapter_id, "User-defined",
             sample_rates_hz=(48_000, 96_000),
             max_iir_sections=16, supports_allpass=True,
             supports_fractional_delay=True,
             options={"fir_format": "float32_raw_le", "iir_format": "advanced_biquad"},
-        ),)
+        ), cdsp_profile())
+
+    def validate(self, package, profile):
+        from ..cdsp_dirac import PROFILE_ID, validate_cdsp
+        if profile.profile_id == PROFILE_ID:
+            return validate_cdsp(package, profile)
+        return super().validate(package, profile)
 
     def export(self, package: CanonicalDSPPackage, profile: DSPProfile) -> ExportedDSPTarget:
+        from ..cdsp_dirac import PROFILE_ID, export_cdsp
+        if profile.profile_id == PROFILE_ID:
+            return export_cdsp(package, profile)
         report = self.validate(package, profile)
         if not report.compatible:
             raise ValueError("miniDSP compatibility validation failed")

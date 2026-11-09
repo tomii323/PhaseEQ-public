@@ -19,7 +19,10 @@ def alignment_input_notice(readiness):
     if readiness.missing_channels:
         details.append(display_text("入力未設定（Unity）：") + " / ".join(readiness.missing_channels))
     if not readiness.ready:
+        from composite_engine.phase_alignment_help import structural_phase_labels
+        from utils.ui_language import current_language
         return " ".join([
+            structural_phase_labels(current_language())['mixed_inputs'],
             display_text("Speaker応答と理想特性／Unityが混在しているため、自動時間整合を実行できません。"),
             *details,
             display_text("全Channelに実測応答を適用するか、全Channelを理想特性またはUnityにしてフィルターだけを解析してください。"),

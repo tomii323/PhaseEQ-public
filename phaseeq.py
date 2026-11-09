@@ -81,7 +81,7 @@ from fir_recipe_engine import generate_fir_recipe, recipe_from_config
 import numpy as np
 import response_analysis as display_analysis
 from response_display import DISPLAY_GRAPH_POINTS, display_fft_length
-from ui.export_response import FIRPreviewPolicy, add_export_output_series, export_iir_sos
+from ui.export_response import FIRPreviewPolicy, add_export_output_series, add_iir_band_split_series, add_output_target_series, output_error_metrics, export_iir_sos
 from ui.composite_context import active_assignment_crossover
 import pandas as pd
 import streamlit as st
@@ -877,6 +877,8 @@ def _chart_series_color_map(colors: dict[str, Any]) -> dict[str, str]:
         "IIR Filter": str(colors["series_delta"]),
         "FIR Output": str(colors["series_correction"]),
         "IIR Output": "#589cc6",
+        "IIR Band Split": "#b8792f",
+        "Target + Band Split": "#9471c7",
         "FIR + IIR Output": str(colors["series_result"]),
         "Target Response": str(colors["series_target"]),
         "Selected Target": "#9471c7",
@@ -903,6 +905,8 @@ def _chart_series_style_map() -> dict[str, tuple[list[int], float]]:
         "IIR Filter": ([7, 4], 2.4),
         "FIR Output": ([9, 4], 2.4),
         "IIR Output": ([3, 3], 2.4),
+        "IIR Band Split": ([9, 3, 2, 3], 2.4),
+        "Target + Band Split": ([7, 4], 2.8),
         "FIR + IIR Output": ([], 2.8),
         "Target Response": ([7, 4], 2.2),
         "Selected Target": ([2, 3], 2.2),
@@ -6279,6 +6283,15 @@ def _ensure_initial_state() -> None:
             # The same restoration boundary also hands the initialized input
             # to EQ ownership; a separate default projection would erase it.
             _apply_config_payload_to_state(initial_payload)
+        # Design ownership stays Standalone; the common display mode belongs
+        # to the latest successful save, including a connected channel session.
+        if startup_path != SETTINGS_FILE:
+            from utils.common_analysis_state import saved_graph_mode
+            common = load_startup_settings(SETTINGS_FILE, expected_schema_version=SETTINGS_SCHEMA_VERSION)
+            mode = saved_graph_mode(common.payload) if common.payload is not None else None
+            if mode is not None:
+                st.session_state["graph_mode"] = mode
+                st.session_state["graph_mode_widget"] = mode
         st.session_state["_settings_file_revision"] = file_revision(SETTINGS_FILE)
         st.session_state["_standalone_settings_file_revision"] = file_revision(standalone_settings_path(SETTINGS_FILE))
         st.session_state["settings_initialized"] = True
@@ -13315,6 +13328,8 @@ from ui import stereo_link as stereo_link
 
 def _stereo_apply_projection(payload):
     from phase_fir_designer.input_state import clear_processed_input_context
+    from utils.common_analysis_state import preserve_common_analysis
+    payload = preserve_common_analysis(payload, {"graph_mode": st.session_state.get("graph_mode")})
     clear_processed_input_context(st.session_state)
     _clear_project_profile_widget_state(payload)
     _apply_ui_payload_to_state(payload)
@@ -14437,41 +14452,13 @@ def _add_composite_iir_chart_series(
     chart_data: ResponseChartData,
     *,
     preview_stage: str,
-    sample_rate: int,
+    config: DesignConfig,
 ) -> ResponseChartData:
-    """Expose the Studio-owned crossover separately from the PhaseEQ FIR."""
+    """Display the current output-owned IIR for either effective FIR state."""
     if preview_stage not in ("Linear FIR", "Export FIR"):
         return chart_data
-    payload = active_assignment_crossover(st.session_state)
-    if not isinstance(payload, dict) or not bool(payload.get("enabled", False)):
-        return chart_data
-    if int(payload.get("coefficient_sample_rate_hz", 0)) != int(sample_rate):
-        return chart_data
-    sos = np.asarray(payload.get("sos", []), dtype=float)
-    if sos.size == 0:
-        return chart_data
-    frequency = np.asarray(chart_data.frequency, dtype=float)
-    _frequency, response = signal.sosfreqz(sos, worN=frequency, fs=float(sample_rate))
-    response *= int(payload.get("lr2_polarity", 1))
-    filter_type = str(payload.get("type", "IIR"))
-    highpass_hz = float(payload.get("highpass_hz", 0.0))
-    lowpass_hz = float(payload.get("lowpass_hz", 0.0))
-    edges = []
-    if highpass_hz > 0.0:
-        edges.append(f"HP {highpass_hz:g} Hz")
-    if lowpass_hz > 0.0:
-        edges.append(f"LP {lowpass_hz:g} Hz")
-    label = f"IIR Crossover {filter_type}" + (f" ({' / '.join(edges)})" if edges else "")
-    gain_series = dict(chart_data.gain_series)
-    phase_series = dict(chart_data.phase_series)
-    realized_label = "Correction Filter Realized"
-    if realized_label in gain_series and preview_stage != "Export FIR":
-        gain_series["Correction Filter Realized + IIR Crossover"] = gain_series.pop(realized_label)
-    if realized_label in phase_series and preview_stage != "Export FIR":
-        phase_series["Correction Filter Realized + IIR Crossover"] = phase_series.pop(realized_label)
-    gain_series[label] = 20.0 * np.log10(np.maximum(np.abs(response), 1e-12))
-    phase_series[label] = np.rad2deg(np.unwrap(np.angle(response)))
-    return replace(chart_data, gain_series=gain_series, phase_series=phase_series)
+    return add_iir_band_split_series(
+        chart_data, config, active_assignment_crossover(st.session_state))
 
 
 def _previous_stage_result_for_delta(
@@ -21964,12 +21951,6 @@ with live_result_body_window:
                               else np.ones_like(result.frequency, dtype=complex))
         raw_chart_data = add_export_output_series(
             raw_chart_data, result, output_iir_response, fir_enabled=fir_preview.fir_enabled)
-    else:
-        raw_chart_data = _add_composite_iir_chart_series(
-            raw_chart_data,
-            preview_stage=preview_stage,
-            sample_rate=int(live_config.sample_rate),
-        )
     raw_chart_data = _project_chart_data_to_shared_display_grid(
         raw_chart_data,
         result,
@@ -21980,6 +21961,8 @@ with live_result_body_window:
         stage=preview_stage,
         fir_enabled=fir_preview.fir_enabled,
     )
+    raw_chart_data = _add_composite_iir_chart_series(
+        raw_chart_data, preview_stage=preview_stage, config=live_config)
     phase_gain_threshold_db = _phase_gain_mask_threshold_db(ui_state.get("phase_gain_mask", DEFAULT_PHASE_GAIN_MASK))
     for chart_warning in _chart_data_warnings(raw_chart_data):
         st.warning(chart_warning)
@@ -21994,6 +21977,10 @@ with live_result_body_window:
             and not st.session_state.get("target_hf_extension_enabled", False)):
         raw_chart_data = _mask_target_chart_above_frequency(
             raw_chart_data, max(raw_target_response.frequency))
+    if fir_preview.output_comparison_required:
+        raw_chart_data = add_output_target_series(
+            raw_chart_data, live_config, active_assignment_crossover(st.session_state),
+            fir_enabled=fir_preview.fir_enabled, cache=_display_analysis_cache())
     chart_data = _mask_chart_phase_by_gain(raw_chart_data, phase_gain_threshold_db)
     target_chart_gain = np.asarray(
         raw_chart_data.gain_series.get("Target Response", np.asarray([], dtype=float)),
@@ -22044,6 +22031,10 @@ with live_result_body_window:
         ) if "Speaker/Input" in chart_data.gain_series else []
         with st.popover(display_text("グラフの見方"), icon=":material/help_outline:",
                         key="gain_phase_chart_help"):
+            if "Target + Band Split" in chart_data.gain_series:
+                st.caption(ui_message('ui.498f5eee191dcc'))
+            if "IIR Band Split" in chart_data.gain_series:
+                st.caption(ui_message('ui.0fa0b8c41bc8c8'))
             if "Current page delta" in chart_data.gain_series:
                 st.caption(ui_message('ui.9dbba456333a09'))
             if eq_total_highlight != "Current page delta":
@@ -22202,11 +22193,18 @@ with live_result_body_window:
                     phase_gain_threshold_db,
                     eq_mask_boundary_markers,
                 )
-            elif preview_stage == "Export FIR":
-                st.caption(ui_message('ui.030e61d9158a5e'))
+            elif fir_preview.output_comparison_required:
+                st.caption(ui_message('ui.c84290390df408'))
+                if ("Target + Band Split" in raw_chart_data.gain_series
+                        and "Speaker + Realized" in raw_chart_data.gain_series):
+                    gain_error, phase_error, reference_gain = output_error_metrics(raw_chart_data)
+                    _error_chart(
+                        raw_chart_data.frequency, gain_error, phase_error, reference_gain,
+                        phase_gain_threshold_db, eq_mask_boundary_markers)
+                else:
+                    st.info(ui_message('ui.243200d98b4e53'))
             else:
                 st.caption(ui_message('ui.015aeafd6f94b1'))
-            if preview_stage != "IIR EQ":
                 _error_chart(
                     result.frequency,
                     result.gain_error_db,

@@ -8,7 +8,7 @@ or infer semantics from another renderer's objects.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -84,6 +84,38 @@ class StudioChartBundle:
 
     def chart(self, chart_id: str) -> StudioChart:
         return self.charts[CHART_IDS.index(chart_id)]
+
+
+def studio_chart_bundle_is_current(bundle) -> bool:
+    """Check retained display objects structurally across module reloads.
+
+    A fragment can retain instances of classes from before a source update.
+    Class identity is therefore unsuitable as the display-cache contract.
+    """
+    def matches(value, model):
+        return all(hasattr(value, field.name) for field in fields(model))
+
+    if not matches(bundle, StudioChartBundle):
+        return False
+    if bundle.projection_revision != PROJECTION_REVISION:
+        return False
+    try:
+        if tuple(chart.chart_id for chart in bundle.charts) != CHART_IDS:
+            return False
+        for chart in bundle.charts:
+            if not matches(chart, StudioChart):
+                return False
+            if not matches(chart.x_axis, AxisSpec):
+                return False
+            if not all(matches(axis, AxisSpec) for axis in chart.y_axes):
+                return False
+            if not all(matches(item, ChartSeries) for item in chart.series):
+                return False
+            if not all(matches(marker, ChartMarker) for marker in chart.markers):
+                return False
+    except (AttributeError, TypeError):
+        return False
+    return True
 
 
 def _readonly(values, *, dtype=float) -> np.ndarray:
