@@ -1,9 +1,55 @@
-"""Localize response labels at the rendering boundary, preserving series IDs."""
+"""Prepare response appearance before caching, preserving numeric series IDs."""
 from copy import deepcopy
 import json
 import re
 
 from utils.ui_localization import display_text
+
+
+def response_series_layers(frame, *, styles, x, y, legend, tooltips=()):
+    """Build styled layers before serialization; resolve labels per series."""
+    import altair as alt
+
+    names = sorted(frame['series'].unique(), key=lambda name: styles[name].drawing_priority)
+    if not names:
+        return []
+    domain = sorted(styles, key=lambda name: (styles[name].legend_priority, name))
+    labels = {name: response_label(name) for name in domain}
+    expression = 'datum.label'
+    for name in domain:
+        if labels[name] != name:
+            expression = (f'datum.label === {json.dumps(name)} ? '
+                          f'{json.dumps(labels[name], ensure_ascii=False)} : ({expression})')
+    legend = deepcopy(legend)
+    legend.labelExpr = expression
+    for attribute, getter in (('symbolDash', lambda style: style.vega_dash),
+                              ('symbolStrokeWidth', lambda style: style.width),
+                              ('symbolOpacity', lambda style: style.opacity)):
+        symbol = json.dumps(getter(styles[domain[0]]))
+        for name in domain:
+            symbol = (f'datum.value === {json.dumps(name)} ? '
+                      f'{json.dumps(getter(styles[name]))} : ({symbol})')
+        setattr(legend, attribute, alt.ExprRef(expr=symbol))
+    translated_tooltips = deepcopy(list(tooltips))
+    for field in translated_tooltips:
+        if getattr(field, 'shorthand', None) == 'series:N':
+            field.shorthand = 'series_label:N'
+            field.title = display_text('Series')
+    layers = []
+    for name in names:
+        style = styles[name]
+        data = frame.loc[frame['series'] == name].copy()
+        data['series_label'] = labels[name]
+        layers.append(alt.Chart(data).mark_line(
+            clip=True, strokeWidth=style.width, strokeDash=style.vega_dash,
+            opacity=style.opacity,
+        ).encode(
+            x=x, y=y, detail=alt.Detail('line_group:N'),
+            color=alt.Color('series:N', title=None, scale=alt.Scale(
+                domain=domain, range=[styles[item].color for item in domain]), legend=legend),
+            tooltip=translated_tooltips,
+        ))
+    return layers
 
 
 def response_label(value):
@@ -20,7 +66,7 @@ def response_label(value):
 
 
 def localized_response_spec(spec, *, styles=None):
-    """Translate Vega legend/tooltip labels without changing scale/filter IDs."""
+    """Reference projection for stored specs/tests; live charts build directly."""
     result = deepcopy(spec)
     styles = styles or {}
     names = set()
@@ -135,6 +181,8 @@ def localized_response_figure(figure, *, styles=None):
 
     result = go.Figure(figure)
     styles = styles or {}
+    legend_ranks = {name: rank for rank, name in enumerate(
+        sorted(styles, key=lambda name: (styles[name].legend_priority, name)))}
     for axis in (*result.select_xaxes(), *result.select_yaxes()):
         if axis.title.text:
             axis.title.text = response_label(axis.title.text)
@@ -147,7 +195,7 @@ def localized_response_figure(figure, *, styles=None):
             if trace.line.width != 0:
                 trace.line.update(color=style.color, width=style.width, dash=style.dash)
                 trace.opacity = style.opacity
-            trace.legendrank = style.legend_priority
+            trace.legendrank = legend_ranks[trace.name]
         if trace.name:
             trace.name = response_label(trace.name)
     result.data = tuple(sorted(result.data, key=lambda trace: (

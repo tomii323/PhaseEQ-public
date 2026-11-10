@@ -13380,36 +13380,42 @@ def _series_chart(
     reference_series: str | None = None,
     series_roles: dict[str, str] | None = None,
 ) -> None:
-    from utils.response_visual_style import phaseeq_response_styles
-    styles = phaseeq_response_styles(
-        [name for name in data if name != x_name],
-        quantity="phase" if break_wrapped_phase else "gain", theme=_current_theme_mode(),
-        roles=series_roles, reference_series=reference_series,
-        highlight_series=highlight_series,
-    )
-    args = (data, x_name, y_domain, break_wrapped_phase, x_zoom_only, boundary_markers, provenance_bands, highlight_series, styles)
+    from utils.response_visual_style import STYLE_REVISION, phaseeq_response_styles
+    args = (data, x_name, y_domain, break_wrapped_phase, x_zoom_only, boundary_markers, provenance_bands, highlight_series)
     context = (current_language(), _table_theme_colors(), _graph_mode(), _effective_chart_max_points_for_x(x_name),
                CHART_MIN_FREQUENCY_HZ, RESPONSE_CHART_HEIGHT_PX)
-    chart = prepared_value(st.session_state, "_series_spec_cache_v1", ("chart-object-v4-plotly", *args, *context),
-                          lambda: _build_series_chart(*args), independent_parts=True)
+
+    def prepare():
+        styles = phaseeq_response_styles(
+            [name for name in data if name != x_name],
+            quantity="phase" if break_wrapped_phase else "gain", theme=_current_theme_mode(),
+            roles=series_roles, reference_series=reference_series,
+            highlight_series=highlight_series,
+        )
+        return _prepare_response_chart(_build_series_chart(*args, styles), styles=styles)
+
+    chart = prepared_value(st.session_state, "_series_spec_cache_v1",
+                          ("response-presentation-v1", STYLE_REVISION, *args, series_roles, reference_series, *context),
+                          prepare, independent_parts=True)
     if chart is not None:
-        _render_response_chart(chart, chart_key, styles=styles)
+        _render_response_chart(chart, chart_key)
 
 
-def _render_response_chart(chart, chart_key: str | None = None, *, styles=None) -> None:
-    from ui.response_presentation import localized_response_figure, localized_response_spec
-    presentation = dict(styles=styles)
+def _prepare_response_chart(chart, *, styles):
+    """Complete presentation only on a cache miss; delivery stays outside."""
+    if chart is not None and _graph_mode() == "Interactive":
+        from ui.response_presentation import localized_response_figure
+        return localized_response_figure(chart, styles=styles)
+    return chart
+
+
+def _render_response_chart(chart, chart_key: str | None = None) -> None:
     if _graph_mode() == "Interactive":
         from response_display.plotly_charts import PLOTLY_CONFIG
-        chart = localized_response_figure(chart, **presentation)
         st.plotly_chart(chart, key=chart_key, width="stretch", theme=None,
                         on_select="ignore", config=PLOTLY_CONFIG)
     else:
-        # Streamlit accepts the full prepared series through Arrow. Serializing
-        # the same chart for label projection must not reintroduce Altair's row cap.
-        with alt.data_transformers.enable("default", max_rows=None):
-            spec = localized_response_spec(chart.to_dict(), **presentation)
-        _altair_chart_stretch(alt.Chart.from_dict(spec))
+        _altair_chart_stretch(chart)
 
 
 def _build_series_chart(
@@ -13423,6 +13429,10 @@ def _build_series_chart(
     highlight_series: str = "Current page delta",
     series_styles=None,
 ) -> None:
+    if series_styles is None:
+        from utils.response_visual_style import phaseeq_response_styles
+        series_styles = phaseeq_response_styles([name for name in data if name != x_name],
+            quantity="phase" if break_wrapped_phase else "gain", theme=_current_theme_mode())
     colors = _table_theme_colors()
     max_points = _effective_chart_max_points_for_x(x_name)
     if x_name == "frequency":
@@ -13524,14 +13534,6 @@ def _build_series_chart(
     highlight_df = long_df[long_df["series"] == highlight_series].copy()
     regular_df = (long_df[long_df["series"] != highlight_series].copy()
                   if highlight_series == "Current page delta" and not highlight_df.empty else long_df)
-    regular_series_names = [str(series) for series in regular_df["series"].dropna().unique().tolist()]
-    regular_color_scale = _chart_color_scale(regular_series_names, colors, series_styles)
-    # Only the highlighted total changes tone; the realized FIR keeps its color.
-    if highlight_series == "Correction Filter" and not highlight_df.empty:
-        regular_color_scale.range = [
-            colors["series_delta"] if name == highlight_series else color
-            for name, color in zip(regular_color_scale.domain, regular_color_scale.range)
-        ]
     y_encoding = alt.Y(
         "value:Q",
         scale=y_scale,
@@ -13543,56 +13545,23 @@ def _build_series_chart(
             labelPadding=8,
         ),
     )
-    regular_line = (
-        alt.Chart(regular_df)
-        .mark_line(clip=True)
-        .encode(
-            x=x_encoding,
-            y=y_encoding,
-            color=alt.Color(
-                "series:N",
-                title=None,
-                scale=regular_color_scale,
-                legend=alt.Legend(
-                    labelColor=colors["text"],
-                    titleColor=colors["text"],
-                    labelFontSize=16,
-                    titleFontSize=17,
-                    symbolSize=150,
-                    symbolStrokeWidth=3,
-                ),
-            ),
-            strokeDash=alt.StrokeDash(
-                "series:N",
-                title=None,
-                scale=_chart_style_scale(
-                    regular_series_names,
-                    style_index=0,
-                    default=[],
-                ),
-                legend=None,
-            ),
-            strokeWidth=alt.StrokeWidth(
-                "series:N",
-                title=None,
-                scale=_chart_style_scale(
-                    regular_series_names,
-                    style_index=1,
-                    default=2.0,
-                ),
-                legend=None,
-            ),
-            detail=alt.Detail("line_group:N"),
-            tooltip=_chart_tooltips([
-                alt.Tooltip(f"{x_name}:Q", format=".0f"),
-                alt.Tooltip("series:N"),
-                alt.Tooltip("value:Q", format=".3f"),
-            ]),
-        )
+    from ui.response_presentation import response_series_layers
+    regular_layers = response_series_layers(
+        regular_df, styles={name: series_styles[name] for name in regular_df['series'].unique()},
+        x=x_encoding, y=y_encoding,
+        legend=alt.Legend(labelColor=colors["text"], titleColor=colors["text"],
+                          labelFontSize=16, titleFontSize=17, symbolSize=150),
+        tooltips=_chart_tooltips([
+            alt.Tooltip(f"{x_name}:Q", format=".0f"),
+            alt.Tooltip("series:N"), alt.Tooltip("value:Q", format=".3f"),
+        ]),
     )
-    layers: list[Any] = [regular_line]
+    layers: list[Any] = regular_layers
     if not highlight_df.empty:
-        highlight_color = _chart_series_color_map(colors)["Current page delta"]
+        highlight_style = series_styles[highlight_series]
+        highlight_color = highlight_style.color
+        from ui.response_presentation import response_label
+        highlight_df["series_label"] = response_label(highlight_series)
         highlight_area = (
             alt.Chart(highlight_df)
             .mark_area(opacity=0.18, interpolate="monotone", clip=True)
@@ -13604,14 +13573,15 @@ def _build_series_chart(
                 color=alt.value(highlight_color),
                 tooltip=_chart_tooltips([
                     alt.Tooltip(f"{x_name}:Q", format=".0f"),
-                    alt.Tooltip("series:N"),
+                    alt.Tooltip("series_label:N", title=display_text("Series")),
                     alt.Tooltip("value:Q", format=".3f"),
                 ]),
             )
         )
         highlight_line = (
             alt.Chart(highlight_df)
-            .mark_line(strokeWidth=3.0, opacity=0.96, interpolate="monotone", clip=True)
+            .mark_line(strokeWidth=highlight_style.width, opacity=highlight_style.opacity,
+                       strokeDash=highlight_style.vega_dash, interpolate="monotone", clip=True)
             .encode(
                 x=x_encoding,
                 y=y_encoding,
@@ -13619,12 +13589,12 @@ def _build_series_chart(
                 detail=alt.Detail("line_group:N"),
                 tooltip=_chart_tooltips([
                     alt.Tooltip(f"{x_name}:Q", format=".0f"),
-                    alt.Tooltip("series:N"),
+                    alt.Tooltip("series_label:N", title=display_text("Series")),
                     alt.Tooltip("value:Q", format=".3f"),
                 ]),
             )
         )
-        layers = [highlight_area, regular_line, highlight_line]
+        layers = [highlight_area, *regular_layers, highlight_line]
     if x_name == "frequency":
         marker_df = _frequency_boundary_marker_frame(boundary_markers, x_name=x_name, y_domain=y_domain)
         if marker_df is not None:
@@ -13860,12 +13830,17 @@ def _error_chart(
             phase_gain_threshold_db, boundary_markers)
     context = (current_language(), _table_theme_colors(), _graph_mode(), _effective_graph_max_points(),
                CHART_MIN_FREQUENCY_HZ, ERROR_CHART_HEIGHT_PX)
-    chart = prepared_value(st.session_state, "_error_spec_cache_v1", ("chart-object-v4-plotly", *args, *context),
-                          lambda: _build_error_chart(*args), independent_parts=True)
+    from utils.response_visual_style import STYLE_REVISION, phaseeq_response_styles
+
+    def prepare():
+        styles = phaseeq_response_styles(["Gain Error", "Phase Error"], theme=_current_theme_mode())
+        return _prepare_response_chart(_build_error_chart(*args, styles), styles=styles)
+
+    chart = prepared_value(st.session_state, "_error_spec_cache_v1",
+                          ("response-presentation-v1", STYLE_REVISION, *args, *context),
+                          prepare, independent_parts=True)
     if chart is not None:
-        from utils.response_visual_style import phaseeq_response_styles
-        _render_response_chart(chart, "phaseeq_error_chart", styles=phaseeq_response_styles(
-            ["Gain Error", "Phase Error"], theme=_current_theme_mode()))
+        _render_response_chart(chart, "phaseeq_error_chart")
 
 
 def _build_error_chart(
@@ -13875,7 +13850,11 @@ def _build_error_chart(
     phase_reference_gain_db: np.ndarray | None = None,
     phase_gain_threshold_db: float | None = None,
     boundary_markers: list[dict[str, Any]] | None = None,
+    series_styles=None,
 ) -> None:
+    if series_styles is None:
+        from utils.response_visual_style import phaseeq_response_styles
+        series_styles = phaseeq_response_styles(["Gain Error", "Phase Error"], theme=_current_theme_mode())
     colors = _table_theme_colors()
     freq = np.asarray(frequency, dtype=float).ravel()
     gain_error = np.asarray(gain_error_db, dtype=float).ravel()
@@ -14013,59 +13992,30 @@ def _build_error_chart(
             titlePadding=12,
         ),
     )
-    gain_chart = (
-        alt.Chart(gain_df)
-        .mark_line(clip=True, strokeWidth=2.2)
-        .encode(
-            x=x_encoding,
-            y=alt.Y(
-                "value:Q",
-                scale=alt.Scale(domain=gain_domain, zero=False, nice=False, clamp=True),
-                axis=alt.Axis(
-                    title=ui_message('ui.319b6e13efe5ba'),
-                    format=".2f",
-                    gridColor=colors["chart_grid"],
-                    labelFontSize=16,
-                    titleFontSize=17,
-                    labelPadding=8,
-                ),
-            ),
-            color=error_color,
-            detail="line_group:N",
-            tooltip=_chart_tooltips([
-                alt.Tooltip("frequency:Q", format=".0f"),
-                alt.Tooltip("series:N"),
-                alt.Tooltip("tooltip_value:Q", title=ui_message('ui.93741d22f0a302'), format=".3f"),
-            ]),
-        )
-    )
-    phase_chart = (
-        alt.Chart(phase_df)
-        .mark_line(clip=True, strokeWidth=2.2, strokeDash=[6, 3])
-        .encode(
-            x=x_encoding,
-            y=alt.Y(
-                "value:Q",
-                scale=alt.Scale(domain=phase_domain, zero=False, nice=False, clamp=True),
-                axis=alt.Axis(
-                    title=ui_message('ui.5d10ef8b35ca7e'),
-                    orient="right",
-                    format=".2f",
-                    grid=False,
-                    labelFontSize=16,
-                    titleFontSize=17,
-                    labelPadding=8,
-                ),
-            ),
-            color=error_color,
-            detail="line_group:N",
-            tooltip=_chart_tooltips([
-                alt.Tooltip("frequency:Q", format=".0f"),
-                alt.Tooltip("series:N"),
-                alt.Tooltip("tooltip_value:Q", title=ui_message('ui.e44ccd9d75720d'), format=".3f"),
-            ]),
-        )
-    )
+    from ui.response_presentation import response_series_layers
+    gain_chart = alt.layer(*response_series_layers(
+        gain_df, styles=series_styles, x=x_encoding,
+        y=alt.Y("value:Q", scale=alt.Scale(domain=gain_domain, zero=False, nice=False, clamp=True),
+                axis=alt.Axis(title=ui_message('ui.319b6e13efe5ba'), format=".2f",
+                              gridColor=colors["chart_grid"], labelFontSize=16,
+                              titleFontSize=17, labelPadding=8)),
+        legend=error_color['legend'],
+        tooltips=_chart_tooltips([
+            alt.Tooltip("frequency:Q", format=".0f"), alt.Tooltip("series:N"),
+            alt.Tooltip("tooltip_value:Q", title=ui_message('ui.93741d22f0a302'), format=".3f"),
+        ]),
+    ))
+    phase_chart = alt.layer(*response_series_layers(
+        phase_df, styles=series_styles, x=x_encoding,
+        y=alt.Y("value:Q", scale=alt.Scale(domain=phase_domain, zero=False, nice=False, clamp=True),
+                axis=alt.Axis(title=ui_message('ui.5d10ef8b35ca7e'), orient="right", format=".2f",
+                              grid=False, labelFontSize=16, titleFontSize=17, labelPadding=8)),
+        legend=error_color['legend'],
+        tooltips=_chart_tooltips([
+            alt.Tooltip("frequency:Q", format=".0f"), alt.Tooltip("series:N"),
+            alt.Tooltip("tooltip_value:Q", title=ui_message('ui.e44ccd9d75720d'), format=".3f"),
+        ]),
+    ))
     layers: list[Any] = [gain_chart, phase_chart]
     marker_df = _frequency_boundary_marker_frame(boundary_markers, x_name="frequency", y_domain=gain_domain)
     if marker_df is not None:

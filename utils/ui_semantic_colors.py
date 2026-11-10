@@ -37,6 +37,21 @@ SEMANTIC_ACCENT_COLORS = {
     },
 }
 
+# Graph lines use a vivid palette independently of control accents.  Light
+# backgrounds retain enough color depth to keep thin response lines visible.
+CHART_SERIES_COLORS = {
+    "light": {
+        "gain": "#087FD5", "target": "#CE7B00", "apply": "#009665",
+        "phase": "#9454DF", "danger": "#DC4945", "warning": "#AD8700",
+        "fir": "#B27B23", "calibration": "#008F99", "delta": "#B88800",
+    },
+    "dark": {
+        "gain": "#46B5FF", "target": "#FFB340", "apply": "#43E38E",
+        "phase": "#C399FF", "danger": "#FF7870", "warning": "#FFE066",
+        "fir": "#E8B36D", "calibration": "#40D8DE", "delta": "#FFD05A",
+    },
+}
+
 
 def semantic_chart_colors(theme_mode: str) -> dict[str, object]:
     """Return the shared chart palette used by PhaseEQ and Multiway.
@@ -45,7 +60,7 @@ def semantic_chart_colors(theme_mode: str) -> dict[str, object]:
     the second distinction, so the plots remain usable without color.
     """
     mode = "dark" if str(theme_mode).lower() == "dark" else "light"
-    accent = SEMANTIC_ACCENT_COLORS[mode]
+    accent = CHART_SERIES_COLORS[mode]
     if mode == "dark":
         return {
             "figure": "#0F1416",
@@ -61,14 +76,14 @@ def semantic_chart_colors(theme_mode: str) -> dict[str, object]:
             "target": accent["target"],
             "result": accent["apply"],
             "correction": accent["phase"],
-            "calibration": "#69A4A8",
-            "delta": "#C2A46F",
+            "calibration": accent["calibration"],
+            "delta": accent["delta"],
             "gain_error": accent["danger"],
             "phase_error": accent["warning"],
             "baffle": accent["fir"],
             "bands": (
                 accent["gain"], accent["apply"], accent["danger"],
-                accent["phase"], "#69A4A8",
+                accent["phase"], accent["calibration"],
             ),
         }
     return {
@@ -85,14 +100,14 @@ def semantic_chart_colors(theme_mode: str) -> dict[str, object]:
         "target": accent["target"],
         "result": accent["apply"],
         "correction": accent["phase"],
-        "calibration": "#2A7378",
-        "delta": "#806943",
+        "calibration": accent["calibration"],
+        "delta": accent["delta"],
         "gain_error": accent["danger"],
         "phase_error": accent["warning"],
         "baffle": accent["fir"],
         "bands": (
             accent["gain"], accent["apply"], accent["danger"],
-            accent["phase"], "#2A7378",
+            accent["phase"], accent["calibration"],
         ),
     }
 

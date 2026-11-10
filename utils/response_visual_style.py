@@ -4,7 +4,7 @@ import hashlib
 
 from utils.ui_semantic_colors import semantic_chart_colors
 
-STYLE_REVISION = 1
+STYLE_REVISION = 2
 
 # token, width, opacity, legend priority, drawing priority
 ROLE_STYLES = {
