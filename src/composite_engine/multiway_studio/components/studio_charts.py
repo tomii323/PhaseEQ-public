@@ -17,9 +17,10 @@ from response_display import DISPLAY_GRAPH_POINTS
 from response_display import phase_segment_ids, sample_series
 from utils.ui_localization import display_text, ui_message
 from utils.ui_semantic_colors import semantic_chart_colors
+from utils.response_visual_style import response_style, way_color_index
 
 
-PROJECTION_REVISION = 2
+PROJECTION_REVISION = 3
 CHART_IDS = (
     "band_impulse",
     "band_step",
@@ -54,6 +55,8 @@ class ChartSeries:
     opacity: float = 1.0
     segment_id: np.ndarray | None = None
     source_scope: str = ""
+    visual_role: str = ""
+    source_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -130,16 +133,22 @@ def _segments(values) -> np.ndarray:
 
 
 def _series(
-    series_id, label, role, axis_id, x, y, style_token, *,
-    legend_visible=True, dash="solid", width=1.5, opacity=1.0,
-    segmented=False, source_scope="",
+    series_id, label, role, axis_id, x, y, *,
+    legend_visible=True,
+    segmented=False, source_scope="", source_id="",
 ):
+    visual_role = {"WAY": "way", "SYSTEM_SUM": "sum", "PHASEEQ": "correction",
+                   "SPEAKER": "input", "BAFFLE": "correction"}[source_scope or role]
+    quantity = "phase" if axis_id in {"phase", "design_phase"} else "gain"
+    style = response_style(visual_role, quantity, way_id=source_id, source_id=source_id)
+    token = f"band:{way_color_index(source_id)}" if visual_role == "way" else visual_role
     x_values = _readonly(x)
     y_values = _readonly(y)
     return ChartSeries(
         str(series_id), str(label), str(role), str(axis_id), x_values, y_values,
-        str(style_token), bool(legend_visible), str(dash), float(width),
-        float(opacity), _segments(y_values) if segmented else None, str(source_scope),
+        token, bool(legend_visible), style.dash, style.width,
+        style.opacity, _segments(y_values) if segmented else None, str(source_scope),
+        visual_role, str(source_id),
     )
 
 
@@ -193,10 +202,14 @@ def build_studio_chart_bundle(
     speaker_responses: Mapping[str, np.ndarray] | None = None,
     baffle_response: np.ndarray | None = None,
     baffle_label: str | None = None,
+    way_ids: Mapping[str, str] | None = None,
+    sum_ids: Mapping[str, str] | None = None,
     max_points: int = DISPLAY_GRAPH_POINTS,
     source_revision: str = "",
 ) -> StudioChartBundle:
     """Project the six Studio graphs without importing a plotting library."""
+    way_ids = dict(way_ids or {name: name for name in responses})
+    sum_ids = dict(sum_ids or {})
     frequency = np.asarray(frequency_hz, dtype=float).reshape(-1)
     fs = float(sample_rate_hz)
     limit = min(4096, max(2, int(max_points)))
@@ -210,36 +223,17 @@ def build_studio_chart_bundle(
 
     impulse_series = []
     step_series = []
-    for index, name in enumerate(band_names):
-        impulse_series.append(_series(
-            f"way:{name}:ir", name, "WAY", "amplitude",
-            time_ms[time_visible], centered[name][time_visible], f"band:{index}",
-        ))
-        step_series.append(_series(
-            f"way:{name}:step", name, "WAY", "integral",
-            time_ms[time_visible], np.cumsum(centered[name])[time_visible],
-            f"band:{index}",
-        ))
+    for name in band_names:
+        impulse_series.append(_series(f'way:{name}:ir', name, 'WAY', 'amplitude', time_ms[time_visible], centered[name][time_visible], source_id=way_ids[name]))
+        step_series.append(_series(f'way:{name}:step', name, 'WAY', 'integral', time_ms[time_visible], np.cumsum(centered[name])[time_visible], source_id=way_ids[name]))
     system_impulse_series = []
-    for index, (label, keys) in enumerate(groups.items()):
+    for label, keys in groups.items():
         combined = grouped_impulse(keys)
         if combined is None:
             continue
-        token = "sum" if index == 0 else "band:3"
-        impulse_series.append(_series(
-            f"sum:{label}:ir", label, "SYSTEM_SUM", "amplitude",
-            time_ms[time_visible], combined[time_visible], token,
-            width=2.0, opacity=0.9,
-        ))
-        step_series.append(_series(
-            f"sum:{label}:step", label, "SYSTEM_SUM", "integral",
-            time_ms[time_visible], np.cumsum(combined)[time_visible], token,
-            width=2.0, opacity=0.9,
-        ))
-        system_impulse_series.append(_series(
-            f"sum:{label}:system-ir", label, "SYSTEM_SUM", "amplitude",
-            time_ms[time_visible], combined[time_visible], token, width=2.0,
-        ))
+        impulse_series.append(_series(f'sum:{label}:ir', label, 'SYSTEM_SUM', 'amplitude', time_ms[time_visible], combined[time_visible], source_id=sum_ids.get(label, label)))
+        step_series.append(_series(f'sum:{label}:step', label, 'SYSTEM_SUM', 'integral', time_ms[time_visible], np.cumsum(combined)[time_visible], source_id=sum_ids.get(label, label)))
+        system_impulse_series.append(_series(f'sum:{label}:system-ir', label, 'SYSTEM_SUM', 'amplitude', time_ms[time_visible], combined[time_visible], source_id=sum_ids.get(label, label)))
 
     time_x = _axis("time", "linear", (-2.0, 10.0), "ui.78f2c5fb6fe469", "bottom")
     marker = ChartMarker("time-zero", "x", 0.0, "center")
@@ -247,7 +241,7 @@ def build_studio_chart_bundle(
     gd_series = []
     if frequency.size >= 2:
         w_rad = 2.0 * np.pi * frequency / fs
-        for index, (name, response) in enumerate(responses.items()):
+        for name, response in responses.items():
             values = np.asarray(response, dtype=np.complex128).reshape(-1)
             if values.size != frequency.size:
                 continue
@@ -259,10 +253,8 @@ def build_studio_chart_bundle(
                 & (frequency[1:] >= 10.0) & (frequency[1:] <= fs / 2.0)
             )
             x, y = _sample_frequency(frequency[1:][valid], delay[valid], limit)
-            gd_series.append(_series(
-                f"way:{name}:gd", name, "WAY", "delay", x, y, f"band:{index}",
-            ))
-        for index, (label, keys) in enumerate(groups.items()):
+            gd_series.append(_series(f'way:{name}:gd', name, 'WAY', 'delay', x, y, source_id=way_ids[name]))
+        for label, keys in groups.items():
             selected = [np.asarray(responses[key], dtype=np.complex128) for key in keys if key in responses]
             if not selected:
                 continue
@@ -274,15 +266,12 @@ def build_studio_chart_bundle(
                 & (frequency[1:] >= 10.0) & (frequency[1:] <= fs / 2.0)
             )
             x, y = _sample_frequency(frequency[1:][valid], delay[valid], limit)
-            gd_series.append(_series(
-                f"sum:{label}:gd", label, "SYSTEM_SUM", "delay", x, y,
-                "sum" if index == 0 else "band:3", width=2.0,
-            ))
+            gd_series.append(_series(f'sum:{label}:gd', label, 'SYSTEM_SUM', 'delay', x, y, source_id=sum_ids.get(label, label)))
 
     frequency_domain = (10.0, fs / 2.0)
     gain_phase_series = []
     frequency_mask = (frequency >= 10.0) & (frequency <= fs / 2.0)
-    for index, (label, keys) in enumerate(groups.items()):
+    for label, keys in groups.items():
         selected = [np.asarray(responses[key], dtype=np.complex128) for key in keys if key in responses]
         if not selected:
             continue
@@ -290,26 +279,21 @@ def build_studio_chart_bundle(
         magnitude = 20.0 * np.log10(np.maximum(np.abs(values), 1e-12))
         phase = np.rad2deg(np.angle(values))
         phase = np.where(frequency_mask & (magnitude >= float(phase_gain_mask_db)), phase, np.nan)
-        token = "sum" if index == 0 else "band:3"
         x_gain, y_gain = _sample_frequency(frequency[frequency_mask], magnitude[frequency_mask], limit)
         x_phase, y_phase = _sample_frequency(
             frequency[frequency_mask], phase[frequency_mask], limit, phase=True,
         )
         gain_phase_series.extend((
-            _series(f"sum:{label}:gain", label, "SYSTEM_SUM", "gain", x_gain, y_gain, token, width=2.0),
-            _series(f"sum:{label}:phase", label, "PHASE", "phase", x_phase, y_phase, token,
-                    legend_visible=False, dash="dot", width=2.0, opacity=0.7, segmented=True),
+            _series(f'sum:{label}:gain', label, 'SYSTEM_SUM', 'gain', x_gain, y_gain, source_id=sum_ids.get(label, label)),
+            _series(f'sum:{label}:phase', label, 'PHASE', 'phase', x_phase, y_phase, legend_visible=True, segmented=True, source_scope='SYSTEM_SUM', source_id=sum_ids.get(label, label)),
         ))
 
     design_series = []
     positive = frequency > 0.0
     design_domain = (10.0, float(frequency[-1]) if frequency.size else fs / 2.0)
 
-    def add_response_pair(series_id, label, role, values, token, *,
-                          phase_token=None,
-                          gain_legend=True, phase_legend=True,
-                          gain_width=1.5, phase_width=1.5,
-                          gain_opacity=1.0, phase_opacity=0.7):
+    def add_response_pair(series_id, label, role, values, *,
+                          gain_legend=True, phase_legend=True):
         array = np.asarray(values, dtype=np.complex128).reshape(-1)
         if array.size != frequency.size:
             return
@@ -321,49 +305,29 @@ def build_studio_chart_bundle(
         x_gain, y_gain = _sample_frequency(frequency[positive], magnitude[positive], limit)
         x_phase, y_phase = _sample_frequency(frequency[positive], phase[positive], limit, phase=True)
         design_series.extend((
-            _series(f"{series_id}:gain", label, role, "design_gain", x_gain, y_gain, token,
-                    legend_visible=gain_legend, dash="solid", width=gain_width, opacity=gain_opacity,
-                    source_scope=role),
-            _series(f"{series_id}:phase", label, "PHASE", "design_phase", x_phase, y_phase, phase_token or token,
-                    legend_visible=phase_legend, dash="dash", width=phase_width,
-                    opacity=phase_opacity, segmented=True, source_scope=role),
+            _series(f'{series_id}:gain', label, role, 'design_gain', x_gain, y_gain, legend_visible=gain_legend, source_scope=role, source_id=way_ids.get(label, sum_ids.get(label, label))),
+            _series(f'{series_id}:phase', label, 'PHASE', 'design_phase', x_phase, y_phase, legend_visible=phase_legend, segmented=True, source_scope=role, source_id=way_ids.get(label, sum_ids.get(label, label))),
         ))
 
-    for index, (name, values) in enumerate(responses.items()):
-        token = f"band:{index}"
-        add_response_pair(f"way:{name}", name, "WAY", values, token)
+    for name, values in responses.items():
+        add_response_pair(f'way:{name}', name, 'WAY', values)
         phaseeq = (phaseeq_responses or {}).get(name)
         if phaseeq is not None:
-            add_response_pair(
-                f"phaseeq:{name}", name, "PHASEEQ", phaseeq,
-                "input", phase_token="correction",
-                gain_width=1.8, gain_opacity=0.95,
-                phase_width=1.8, phase_opacity=0.95,
-            )
+            add_response_pair(f'phaseeq:{name}', name, 'PHASEEQ', phaseeq)
         speaker = (speaker_responses or {}).get(name)
         if speaker is not None:
             array = np.asarray(speaker, dtype=np.complex128).reshape(-1)
             if array.size == frequency.size:
                 speaker_db = 20.0 * np.log10(np.maximum(np.abs(array), 1e-12))
                 x, y = _sample_frequency(frequency[positive], speaker_db[positive], limit)
-                design_series.append(_series(
-                    f"speaker:{name}:gain", name, "SPEAKER",
-                    "design_gain", x, y, "calibration", dash="solid", width=1.5, opacity=0.9,
-                    source_scope="SPEAKER",
-                ))
+                design_series.append(_series(f'speaker:{name}:gain', name, 'SPEAKER', 'design_gain', x, y, source_scope='SPEAKER', source_id=way_ids[name]))
     if baffle_response is not None:
         values = np.asarray(baffle_response, dtype=np.complex128).reshape(-1)
         if values.size == frequency.size:
-            add_response_pair(
-                "baffle", baffle_label or "Baffle compensation", "BAFFLE",
-                values, "baffle", gain_width=1.7, phase_opacity=0.75,
-            )
+            add_response_pair('baffle', baffle_label or 'Baffle compensation', 'BAFFLE', values)
     sums = dict(way_sums or {})
-    for index, (label, values) in enumerate(sums.items()):
-        add_response_pair(
-            f"design-sum:{label}", label, "SYSTEM_SUM", values,
-            "sum" if index == 0 else "band:3", gain_width=2.0, phase_width=2.0,
-        )
+    for label, values in sums.items():
+        add_response_pair(f'design-sum:{label}', label, 'SYSTEM_SUM', values)
 
     charts = (
         StudioChart("band_impulse", "ui.f165a57d1c1366", time_x,
@@ -443,14 +407,21 @@ def _series_label(item: ChartSeries) -> str:
     }.get(item.source_scope)
     if scope_key:
         label = f"{label} · {ui_message(scope_key)}"
-    quantity = {"design_gain": "Gain (dB)", "design_phase": "Phase (°)"}.get(item.axis_id)
-    return f"{label} · {quantity}" if quantity else label
+    quantity = {"design_gain": "Gain (dB)", "design_phase": "Phase (°)",
+                "gain": "Gain (dB)", "phase": "Phase (°)"}.get(item.axis_id)
+    return f"{label} · {display_text(quantity)}" if quantity else label
 
 
 def _color(style_token: str, colors) -> str:
     if style_token.startswith("band:"):
         return colors["bands"][int(style_token.split(":", 1)[1]) % len(colors["bands"])]
-    return str(colors.get(style_token, colors["text"]))
+    return str(colors[style_token])
+
+
+def _item_style(item, theme):
+    quantity = "phase" if item.axis_id in {"phase", "design_phase"} else "gain"
+    return response_style(item.visual_role, quantity, theme=theme,
+                          way_id=item.source_id, source_id=item.source_id)
 
 
 def _plotly_transfer_values(values) -> np.ndarray:
@@ -461,7 +432,7 @@ def _plotly_transfer_values(values) -> np.ndarray:
 def _design_legend_height(chart: StudioChart) -> int:
     if chart.chart_id != "crossover_design":
         return 0
-    return ((sum(item.legend_visible for item in chart.series) + 1) // 2) * 22
+    return ((sum(item.legend_visible for item in chart.series) + 1) // 2) * 30
 
 
 def _altair_frame_values(item: ChartSeries) -> dict[str, np.ndarray]:
@@ -472,18 +443,21 @@ def _altair_frame_values(item: ChartSeries) -> dict[str, np.ndarray]:
 def plotly_studio_spec(chart: StudioChart, *, theme="light") -> dict:
     colors = semantic_chart_colors(theme)
     traces = []
-    for item in chart.series:
+    for item in sorted(chart.series, key=lambda item: _item_style(item, theme).drawing_priority):
+        style = _item_style(item, theme)
         trace = {
             "type": "scatter", "mode": "lines",
             "x": _plotly_transfer_values(item.x),
             "y": _plotly_transfer_values(item.y),
             "name": _series_label(item),
             "showlegend": item.legend_visible,
-            "line": {"color": _color(item.style_token, colors), "width": item.width, "dash": item.dash},
-            "opacity": item.opacity,
+            "line": {"color": style.color, "width": style.width, "dash": style.dash},
+            "opacity": style.opacity,
+            "legendrank": style.legend_priority,
+            "meta": {"series_id": item.series_id, "visual_role": item.visual_role},
             "connectgaps": False,
         }
-        unit = {"design_gain": "dB", "design_phase": "°"}.get(item.axis_id)
+        unit = {"design_gain": "dB", "design_phase": "°", "gain": "dB", "phase": "°"}.get(item.axis_id)
         if unit:
             trace["hovertemplate"] = (
                 "%{x:.2f} Hz<br>%{y:.2f} " + unit
@@ -561,16 +535,18 @@ def altair_studio_chart(chart: StudioChart, *, theme="light"):
     axis_layers = []
     for axis_index, axis in enumerate(chart.y_axes):
         layers = []
-        axis_series = [item for item in chart.series if item.axis_id == axis.axis_id]
+        axis_series = sorted((item for item in chart.series if item.axis_id == axis.axis_id),
+                             key=lambda item: _item_style(item, theme).drawing_priority)
         # One design-response legend covers both independent numeric axes.
         # Separate legends merge duplicate source names and lose phase styles.
-        if chart.chart_id == "crossover_design":
+        if len(chart.y_axes) > 1:
             legend_series = chart.series if axis_index == 0 else ()
         else:
             legend_series = axis_series
-        visible_items = [item for item in legend_series if item.legend_visible]
+        visible_items = sorted((item for item in legend_series if item.legend_visible),
+                               key=lambda item: _item_style(item, theme).legend_priority)
         legend_domain = [_series_label(item) for item in visible_items]
-        legend_range = [_color(item.style_token, colors) for item in visible_items]
+        legend_range = [_item_style(item, theme).color for item in visible_items]
         if visible_items:
             # Keep legend labels in a tiny dataset.  Repeating a long label for
             # every sample inflates Arrow payload without changing the graph.
@@ -580,10 +556,11 @@ def altair_studio_chart(chart: StudioChart, *, theme="light"):
                     scale=alt.Scale(domain=legend_domain, range=legend_range),
                     legend=alt.Legend(title=None, orient="top"),
                 )}
-            if chart.chart_id == "crossover_design":
+            if len(chart.y_axes) > 1:
                 design_legend = alt.Legend(
                     title=None, orient="top", columns=2, labelLimit=360,
                     symbolType="stroke", symbolSize=900, symbolStrokeWidth=2,
+                    symbolLimit=len(visible_items),
                 )
                 legend_encoding["color"] = alt.Color(
                     "series:N", scale=alt.Scale(domain=legend_domain, range=legend_range),
@@ -608,7 +585,7 @@ def altair_studio_chart(chart: StudioChart, *, theme="light"):
             }.get(item.dash, [1, 0])
             mark_options = {
                 "clip": True,
-                "color": _color(item.style_token, colors),
+                "color": _item_style(item, theme).color,
                 "strokeDash": dash,
                 "strokeWidth": item.width,
                 "opacity": item.opacity,

@@ -27,7 +27,11 @@ def render_target_preview(definition, sample_rate, *, key):
         if len(frame) > 2048:
             frame = frame.iloc[np.unique(np.linspace(0, len(frame)-1, 2048).astype(int))]
         unit = "Gain [dB]" if view == "振幅" else "Phase [°]"
-        chart = alt.Chart(frame).mark_line().encode(
+        from utils.response_visual_style import response_style
+        style = response_style("target", "gain" if view == "振幅" else "phase",
+                               theme=str(st.context.theme.type or "light"))
+        chart = alt.Chart(frame).mark_line(color=style.color, strokeWidth=style.width,
+            strokeDash=style.vega_dash, opacity=style.opacity).encode(
             x=alt.X("frequency_hz:Q", title=ui_message('ui.f11c5c8bac5aeb'), scale=alt.Scale(type="log")),
             y=alt.Y("value:Q", title=unit, scale=alt.Scale(zero=False)),
             tooltip=[alt.Tooltip("frequency_hz:Q", title=ui_message('ui.f11c5c8bac5aeb'), format=".1f"), alt.Tooltip("value:Q", title=unit, format=".2f")],

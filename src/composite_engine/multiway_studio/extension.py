@@ -4633,16 +4633,21 @@ def render_composite_results(
         else:
             import matplotlib.pyplot as plt
 
+            from utils.response_visual_style import composite_response_styles
+            styles = composite_response_styles(series, display_projection, configured,
+                theme=str(st.context.theme.type or "light"))
             figure, axis = plt.subplots(figsize=(11, 5.2))
             for (series_name, role), series_frame in frame.groupby(
                 ["series", "role"], sort=False, dropna=False,
             ):
+                style = styles[series_name]
                 axis.plot(
                     series_frame["x"].to_numpy(dtype=float),
                     series_frame["value"].to_numpy(dtype=float),
                     label=str(series_name),
-                    linestyle="--" if role in {"Target", "ReverseNull"} else "-",
-                    linewidth=1.8 if role in {"Target", "ReverseNull"} else 1.2,
+                    linestyle="--" if style.dash == "dash" else "-",
+                    color=style.color, linewidth=style.width, alpha=style.opacity,
+                    zorder=style.drawing_priority,
                 )
             if is_frequency:
                 axis.set_xscale("log")
@@ -4661,11 +4666,13 @@ def render_composite_results(
             axis.set_xlabel("Frequency [Hz]" if is_frequency else "Time [ms]")
             axis.set_ylabel(graph_kind)
             axis.grid(True, which="both", alpha=0.2)
-            axis.legend(loc="best")
+            handles, labels = axis.get_legend_handles_labels()
+            order = sorted(range(len(labels)), key=lambda index: styles[labels[index]].legend_priority)
+            axis.legend([handles[index] for index in order], [labels[index] for index in order], loc="best")
             figure.tight_layout()
             from composite_engine.multiway_studio.components.visualization import studio_figure_revision
             figure_revision = studio_figure_revision((
-                'composite-analysis-v1', graph_kind, frame,
+                'composite-analysis-v2', graph_kind, frame, tuple(styles.items()),
                 tuple(axis.get_xlim()), tuple(axis.get_ylim()),
                 tuple(figure.get_size_inches()),
             ))

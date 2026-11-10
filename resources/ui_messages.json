@@ -1,8 +1,8 @@
 {
-  "ui.498f5eee191dcc": {
-    "source": "Target + Band Splitは、目標応答に現在出力へ適用する帯域分割を合成した比較基準です。FIR OFFではFIR帯域分割を含みません。",
-    "ja": "Target + Band Splitは、目標応答に現在出力へ適用する帯域分割を合成した比較基準です。FIR OFFではFIR帯域分割を含みません。",
-    "en": "Target + Band Split combines the target with the effective output band split. With FIR OFF, it excludes FIR band splitting."
+  "ui.93b085436e3ca7": {
+    "source": "目標＋帯域分割は、目標応答に出力帯域分割の振幅・位相を合成した比較基準です。元の目標応答は細い灰色の参照線で表示します。FIR OFFではFIR帯域分割を含みません。",
+    "ja": "目標＋帯域分割は、目標応答に出力帯域分割の振幅・位相を合成した比較基準です。元の目標応答は細い灰色の参照線で表示します。FIR OFFではFIR帯域分割を含みません。",
+    "en": "Target + Band Split combines the target with the magnitude and phase of the output band split. The original target is shown as a thin gray reference line. With FIR OFF, it excludes FIR band splitting."
   },
   "ui.243200d98b4e53": {
     "source": "誤差を表示するには、スピーカー測定と目標応答を設定してください。",
@@ -20,19 +20,29 @@
     "en": "IIR Band Split shows output IIR crossover, all-pass and polarity. IIR Output includes manual and Auto IIR EQ as well."
   },
   "ui.3b913e8590440f": {
-    "source": "設計応答", "ja": "設計応答", "en": "Design response"
+    "source": "設計応答",
+    "ja": "設計応答",
+    "en": "Design response"
   },
   "ui.08e2135bf0d6a1": {
-    "source": "EQ補正", "ja": "EQ補正", "en": "EQ correction"
+    "source": "EQ補正",
+    "ja": "EQ補正",
+    "en": "EQ correction"
   },
   "ui.228943b0b0fb7c": {
-    "source": "Speaker入力", "ja": "Speaker入力", "en": "Speaker input"
+    "source": "Speaker入力",
+    "ja": "Speaker入力",
+    "en": "Speaker input"
   },
   "ui.64c8ad5b050629": {
-    "source": "設計応答の合成", "ja": "設計応答の合成", "en": "Design sum"
+    "source": "設計応答の合成",
+    "ja": "設計応答の合成",
+    "en": "Design sum"
   },
   "ui.ac7faba09c5f5d": {
-    "source": "表示するフィルターの範囲", "ja": "表示するフィルターの範囲", "en": "Displayed filter scope"
+    "source": "表示するフィルターの範囲",
+    "ja": "表示するフィルターの範囲",
+    "en": "Displayed filter scope"
   },
   "ui.1486c2c278e57b": {
     "source": "Gainは実線・左軸（dB）、Phaseは破線・右軸（°）です。適用中の段を表示します。\n\n|凡例|含まれる応答|\n|---|---|\n|Speaker入力|選択したスピーカー応答（EQ・帯域分割を含まない）|\n|EQ補正|PhaseEQから返送されたIIR EQ・FIR EQ、およびチャンネル設定の追加IIR応答|\n|設計応答|Speaker入力＋EQ補正＋マルチウェイの帯域分割IIR／FIR・Studio FIR EQ・Baffle補償＋Gain・極性・Delay・AP|\n|設計応答の合成|各Wayの設計応答の複素和|\n\nEQ補正の線には、マルチウェイの帯域分割IIR／FIR・Baffle補償を含みません。音響ターゲットをPhaseEQのEQで補正する設定では、返送された補正がEQ補正に含まれます。\n\nチャンネル設定のAdditional FIRは、この設計応答グラフの対象外です。最終クロップ後の応答はComposite Engineの結果で確認してください。",
@@ -16979,11 +16989,6 @@
     "ja": "解除を確定",
     "en": "Confirm release"
   },
-  "ui.bca84ea5c65fee": {
-    "source": "キャンセル",
-    "ja": "キャンセル",
-    "en": "Cancel"
-  },
   "ui.3d28dec88b5e7c": {
     "source": "割り当て解除を保存しました。対象チャンネルは未設定（Unity）になります。",
     "ja": "割り当て解除を保存しました。対象チャンネルは未設定（Unity）になります。",
@@ -17048,5 +17053,75 @@
     "source": "チャンネルのEQ設定が更新されています。PhaseEQで再生成して送信してください：",
     "ja": "チャンネルのEQ設定が更新されています。PhaseEQで再生成して送信してください：",
     "en": "Channel EQ settings changed. Recreate and send these channels from PhaseEQ: "
+  },
+  "ui.5ad80e96a0851e": {
+    "source": "IIR Filter",
+    "ja": "IIRフィルター",
+    "en": "IIR Filter"
+  },
+  "ui.aefe8abd2dbb63": {
+    "source": "FIR Output",
+    "ja": "FIR出力",
+    "en": "FIR Output"
+  },
+  "ui.786ef7e380e85e": {
+    "source": "IIR Output",
+    "ja": "IIR出力",
+    "en": "IIR Output"
+  },
+  "ui.2c5d457cd9f73d": {
+    "source": "IIR Band Split",
+    "ja": "IIR帯域分割",
+    "en": "IIR Band Split"
+  },
+  "ui.be75339fbc745a": {
+    "source": "Target + Band Split",
+    "ja": "目標＋帯域分割",
+    "en": "Target + Band Split"
+  },
+  "ui.ad8fef12848a29": {
+    "source": "FIR + IIR Output",
+    "ja": "FIR＋IIR出力",
+    "en": "FIR + IIR Output"
+  },
+  "ui.9a64a7683d6532": {
+    "source": "Current page delta",
+    "ja": "現在のページの差分",
+    "en": "Current page delta"
+  },
+  "ui.7f57d71f596960": {
+    "source": "Gain Error",
+    "ja": "ゲイン誤差",
+    "en": "Gain Error"
+  },
+  "ui.b025816f3b8856": {
+    "source": "Phase Error",
+    "ja": "位相誤差",
+    "en": "Phase Error"
+  },
+  "ui.ed5096df2924cc": {
+    "source": "Auto IIR Preview",
+    "ja": "自動IIRプレビュー",
+    "en": "Auto IIR Preview"
+  },
+  "ui.f53b69189dea3b": {
+    "source": "Near-field woofer",
+    "ja": "近接測定（ウーファー）",
+    "en": "Near-field woofer"
+  },
+  "ui.6901a0fc279d0e": {
+    "source": "Near-field port",
+    "ja": "近接測定（ポート）",
+    "en": "Near-field port"
+  },
+  "ui.a8295e08ff7a96": {
+    "source": "Series",
+    "ja": "系列",
+    "en": "Series"
+  },
+  "ui.da0360b493d19a": {
+    "source": "入力は青、目標は橙、実現応答は緑、補正は紫、元目標などの参照線は灰色です。ゲインは実線、位相は破線です。各Wayの色は固定し、全体合成は黒／白の太線で表示します。色に加えて凡例名・線種・単位で区別します。",
+    "ja": "入力は青、目標は橙、実現応答は緑、補正は紫、元目標などの参照線は灰色です。ゲインは実線、位相は破線です。各Wayの色は固定し、全体合成は黒／白の太線で表示します。色に加えて凡例名・線種・単位で区別します。",
+    "en": "Input is blue, target amber, realized response green, correction purple, and references such as the original target gray. Gain uses solid lines and phase uses dashed lines. Each Way keeps a fixed color; system sums use thick black/white lines. Legend names, line patterns and units distinguish responses alongside color."
   }
 }

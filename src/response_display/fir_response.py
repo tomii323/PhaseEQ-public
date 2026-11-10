@@ -6,6 +6,8 @@ from plotly.subplots import make_subplots
 from composite_engine.fft import fir_complex_response
 from response_display import array_content_revision, sample_series
 from response_display.cache import content_cached
+from utils.response_visual_style import response_style
+from utils.ui_semantic_colors import semantic_chart_colors
 
 
 @content_cached(revision="final-fir-response-v2", max_entries=32, max_bytes=32*1024*1024)
@@ -33,12 +35,14 @@ def final_fir_response_figure(fir, sample_rate, *, colors, max_points=4096,
     xf, yf = sample_series(frequency, gain, max_points)
     xp, yp = sample_series(frequency, phase, max_points, wrapped_phase=True)
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=.10)
+    theme = "dark" if colors["result"] == semantic_chart_colors("dark")["result"] else "light"
     for row, label, x, y, color in (
         (1, "Gain", xf, yf, colors["result"]),
         (2, "Phase", xp, yp, colors["phase_error"]),
     ):
+        style = response_style("correction", "gain" if row == 1 else "phase", theme=theme)
         fig.add_trace(go.Scatter(x=x, y=y, name=label, mode="lines", connectgaps=False,
-                                 line=dict(color=color, width=2)), row=row, col=1)
+                                 line=dict(color=style.color, width=style.width, dash=style.dash), opacity=style.opacity), row=row, col=1)
     fig.update_layout(template="none", height=560, showlegend=False,
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                       font=dict(color=colors["text"], size=16), dragmode="zoom",

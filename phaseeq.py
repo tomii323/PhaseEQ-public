@@ -82,6 +82,7 @@ import numpy as np
 import response_analysis as display_analysis
 from response_display import DISPLAY_GRAPH_POINTS, display_fft_length
 from ui.export_response import FIRPreviewPolicy, add_export_output_series, add_iir_band_split_series, add_output_target_series, output_error_metrics, export_iir_sos
+from utils.common_analysis_state import GRAPH_MODE_OPTIONS, DEFAULT_GRAPH_MODE, current_graph_mode
 from ui.composite_context import active_assignment_crossover
 import pandas as pd
 import streamlit as st
@@ -488,8 +489,6 @@ LINEAR_FIR_PRESETS_USER_FILE = STORAGE_PATHS["user_presets"] / "linear_fir_prese
 ANALYSIS_FFT_SIZE_OPTIONS = [2048, 4096, 8192, 16_384, 32_768, 65_536]
 GRAPH_MAX_POINTS_OPTIONS = [DISPLAY_GRAPH_POINTS]
 DEFAULT_GRAPH_MAX_POINTS = DISPLAY_GRAPH_POINTS
-GRAPH_MODE_OPTIONS = ["Light", "Interactive"]
-DEFAULT_GRAPH_MODE = "Light"
 GAIN_Y_MIN_OPTIONS = [-144, -40, -30, -20, -10]
 GAIN_Y_MAX_OPTIONS = [10, 20, 30, 40]
 DEFAULT_GAIN_Y_MIN_DB = -20
@@ -871,60 +870,16 @@ def _table_theme_colors() -> dict[str, str]:
 
 
 def _chart_series_color_map(colors: dict[str, Any]) -> dict[str, str]:
-    return {
-        "Speaker/Input": str(colors["series_input"]),
-        "IIR Result": str(colors["series_result"]),
-        "IIR Filter": str(colors["series_delta"]),
-        "FIR Output": str(colors["series_correction"]),
-        "IIR Output": "#589cc6",
-        "IIR Band Split": "#b8792f",
-        "Target + Band Split": "#9471c7",
-        "FIR + IIR Output": str(colors["series_result"]),
-        "Target Response": str(colors["series_target"]),
-        "Selected Target": "#9471c7",
-        "Edited Target (saved response)": "#589cc6",
-        "Correction Filter": str(colors["series_correction"]),
-        "Correction Filter Realized": str(colors["series_correction"]),
-        "Speaker + Realized": str(colors["series_result"]),
-        "Mic Calibration": str(colors["series_calibration"]),
-        "Current page delta": str(colors["series_delta"]),
-        "Gain Error": str(colors["series_gain_error"]),
-        "Phase Error": str(colors["series_phase_error"]),
-        "Auto EQ Calculation Input": "#9471c7",
-        "Auto IIR Preview": "#b8792f",
-        "Near-field woofer": str(colors["series_result"]),
-        "Near-field port": str(colors["series_correction"]),
-    }
+    from utils.response_visual_style import PHASEEQ_SERIES_ROLES, response_style
+    # Preparation and final renderer projection share the role registry.
+    return {name: response_style(role, theme=_current_theme_mode()).color
+            for name, role in PHASEEQ_SERIES_ROLES.items()}
 
 
 def _chart_series_style_map() -> dict[str, tuple[list[int], float]]:
-    """Use the same entity styling in every Gain/Phase chart."""
-    return {
-        "Speaker/Input": ([], 1.8),
-        "IIR Result": ([], 2.2),
-        "IIR Filter": ([7, 4], 2.4),
-        "FIR Output": ([9, 4], 2.4),
-        "IIR Output": ([3, 3], 2.4),
-        "IIR Band Split": ([9, 3, 2, 3], 2.4),
-        "Target + Band Split": ([7, 4], 2.8),
-        "FIR + IIR Output": ([], 2.8),
-        "Target Response": ([7, 4], 2.2),
-        "Selected Target": ([2, 3], 2.2),
-        "Edited Target (saved response)": ([], 2.4),
-        "Correction Filter": ([], 2.0),
-        "Correction Filter Realized": ([9, 4], 2.4),
-        "Speaker + Realized": ([], 3.0),
-        "Mic Calibration": ([2, 3], 1.8),
-        "Current page delta": ([], 3.0),
-        "Gain Error": ([], 2.2),
-        "Phase Error": ([6, 3], 2.2),
-        "Auto EQ Calculation Input": ([3, 5], 1.8),
-        "Auto IIR Preview": ([8, 4], 2.2),
-        "Near-field woofer": ([7, 4], 2.0),
-        "Near-field port": ([2, 3], 2.0),
-        "現在の割り当て": ([], 2.4),
-        "選択候補（未適用）": ([7, 4], 2.0),
-    }
+    from utils.response_visual_style import PHASEEQ_SERIES_ROLES, response_style
+    return {name: (response_style(role).vega_dash, response_style(role).width)
+            for name, role in PHASEEQ_SERIES_ROLES.items()}
 
 
 def _chart_style_scale(
@@ -939,24 +894,12 @@ def _chart_style_scale(
     return alt.Scale(domain=domain, range=values)
 
 
-def _chart_color_scale(series_names: list[str], colors: dict[str, Any]) -> alt.Scale:
-    fixed_colors = _chart_series_color_map(colors)
-    palette = list(colors["chart_range"])
-    domain: list[str] = []
-    range_values: list[str] = []
-    for series_name in series_names:
-        if series_name in domain:
-            continue
-        domain.append(series_name)
-        if series_name in fixed_colors:
-            range_values.append(fixed_colors[series_name])
-        elif match := re.match(r"^IIR (\d+) · ", series_name):
-            # Keep each IIR component the same color in Gain and Phase even
-            # when the available source-phase series differ between charts.
-            range_values.append(str(palette[(int(match.group(1)) - 1) % len(palette)]))
-        else:
-            range_values.append(str(palette[(len(range_values)) % len(palette)]))
-    return alt.Scale(domain=domain, range=range_values)
+def _chart_color_scale(series_names: list[str], colors: dict[str, Any], styles=None) -> alt.Scale:
+    domain = list(dict.fromkeys(series_names))
+    if styles is None:
+        from utils.response_visual_style import phaseeq_response_styles
+        styles = phaseeq_response_styles(domain, theme=_current_theme_mode())
+    return alt.Scale(domain=domain, range=[styles[name].color for name in domain])
 
 
 def _apply_app_theme() -> None:
@@ -11298,8 +11241,10 @@ def _selectbox_setting_widget(
         on_change=_commit_plain_option_widget,
         args=(key, widget_key, tuple(options), default),
     )
-    st.session_state[key] = value
-    return value
+    # Canonical controls commit only in the callback; rendering projects state.
+    if not canonical_wins:
+        st.session_state[key] = value
+    return st.session_state[key]
 
 
 def _segmented_setting_widget(
@@ -13403,8 +13348,7 @@ def _chart(
 
 
 def _graph_mode() -> str:
-    mode = str(_sync_live_result_controls_state()["graph_mode"])
-    return mode if mode in GRAPH_MODE_OPTIONS else DEFAULT_GRAPH_MODE
+    return current_graph_mode(st.session_state)
 
 
 def _effective_graph_max_points() -> int:
@@ -13433,30 +13377,39 @@ def _series_chart(
     provenance_bands: list[dict[str, Any]] | None = None,
     highlight_series: str = "Current page delta",
     chart_key: str | None = None,
+    reference_series: str | None = None,
+    series_roles: dict[str, str] | None = None,
 ) -> None:
-    args = (data, x_name, y_domain, break_wrapped_phase, x_zoom_only, boundary_markers, provenance_bands, highlight_series)
+    from utils.response_visual_style import phaseeq_response_styles
+    styles = phaseeq_response_styles(
+        [name for name in data if name != x_name],
+        quantity="phase" if break_wrapped_phase else "gain", theme=_current_theme_mode(),
+        roles=series_roles, reference_series=reference_series,
+        highlight_series=highlight_series,
+    )
+    args = (data, x_name, y_domain, break_wrapped_phase, x_zoom_only, boundary_markers, provenance_bands, highlight_series, styles)
     context = (current_language(), _table_theme_colors(), _graph_mode(), _effective_chart_max_points_for_x(x_name),
                CHART_MIN_FREQUENCY_HZ, RESPONSE_CHART_HEIGHT_PX)
     chart = prepared_value(st.session_state, "_series_spec_cache_v1", ("chart-object-v4-plotly", *args, *context),
                           lambda: _build_series_chart(*args), independent_parts=True)
     if chart is not None:
-        _render_response_chart(chart, chart_key)
+        _render_response_chart(chart, chart_key, styles=styles)
 
 
-def _render_response_chart(chart, chart_key: str | None = None) -> None:
+def _render_response_chart(chart, chart_key: str | None = None, *, styles=None) -> None:
+    from ui.response_presentation import localized_response_figure, localized_response_spec
+    presentation = dict(styles=styles)
     if _graph_mode() == "Interactive":
         from response_display.plotly_charts import PLOTLY_CONFIG
-        import plotly.graph_objects as go
-        chart = go.Figure(chart)
-        chart.for_each_xaxis(lambda axis: axis.update(title_text=display_text(axis.title.text)) if axis.title.text else None)
-        chart.for_each_yaxis(lambda axis: axis.update(title_text=display_text(axis.title.text)) if axis.title.text else None)
-        for trace in chart.data:
-            if trace.name:
-                trace.name = display_text(trace.name)
+        chart = localized_response_figure(chart, **presentation)
         st.plotly_chart(chart, key=chart_key, width="stretch", theme=None,
                         on_select="ignore", config=PLOTLY_CONFIG)
     else:
-        _altair_chart_stretch(chart)
+        # Streamlit accepts the full prepared series through Arrow. Serializing
+        # the same chart for label projection must not reintroduce Altair's row cap.
+        with alt.data_transformers.enable("default", max_rows=None):
+            spec = localized_response_spec(chart.to_dict(), **presentation)
+        _altair_chart_stretch(alt.Chart.from_dict(spec))
 
 
 def _build_series_chart(
@@ -13468,6 +13421,7 @@ def _build_series_chart(
     boundary_markers: list[dict[str, Any]] | None = None,
     provenance_bands: list[dict[str, Any]] | None = None,
     highlight_series: str = "Current page delta",
+    series_styles=None,
 ) -> None:
     colors = _table_theme_colors()
     max_points = _effective_chart_max_points_for_x(x_name)
@@ -13559,7 +13513,7 @@ def _build_series_chart(
     long_df["line_group"] = long_df["series"].astype(str) + ":" + long_df["segment"].astype(str)
     if _graph_mode() == "Interactive":
         from response_display.plotly_charts import series_figure
-        scale = _chart_color_scale(list(long_df["series"].unique()), colors)
+        scale = _chart_color_scale(list(long_df["series"].unique()), colors, series_styles)
         return series_figure(
             long_df, x_name=x_name, x_domain=[x_min, x_max], y_domain=y_domain,
             colors=colors, series_colors=dict(zip(scale.domain, scale.range)),
@@ -13571,7 +13525,7 @@ def _build_series_chart(
     regular_df = (long_df[long_df["series"] != highlight_series].copy()
                   if highlight_series == "Current page delta" and not highlight_df.empty else long_df)
     regular_series_names = [str(series) for series in regular_df["series"].dropna().unique().tolist()]
-    regular_color_scale = _chart_color_scale(regular_series_names, colors)
+    regular_color_scale = _chart_color_scale(regular_series_names, colors, series_styles)
     # Only the highlighted total changes tone; the realized FIR keeps its color.
     if highlight_series == "Correction Filter" and not highlight_df.empty:
         regular_color_scale.range = [
@@ -13909,7 +13863,9 @@ def _error_chart(
     chart = prepared_value(st.session_state, "_error_spec_cache_v1", ("chart-object-v4-plotly", *args, *context),
                           lambda: _build_error_chart(*args), independent_parts=True)
     if chart is not None:
-        _render_response_chart(chart, "phaseeq_error_chart")
+        from utils.response_visual_style import phaseeq_response_styles
+        _render_response_chart(chart, "phaseeq_error_chart", styles=phaseeq_response_styles(
+            ["Gain Error", "Phase Error"], theme=_current_theme_mode()))
 
 
 def _build_error_chart(
@@ -16327,6 +16283,7 @@ def _render_preview_gain_phase(
     *,
     boundary_markers: list[dict[str, Any]] | None = None,
 ) -> None:
+    from utils.response_visual_style import PHASEEQ_SERIES_ROLES
     if not responses:
         st.info(ui_message('ui.3888f2ef212f49'))
         return
@@ -16344,6 +16301,8 @@ def _render_preview_gain_phase(
         gain_series,
         y_domain=_selection_preview_gain_domain(gain_series, span_db=gain_span_db),
         boundary_markers=boundary_markers,
+        series_roles={label: "input" for label, _ in responses
+                      if label not in PHASEEQ_SERIES_ROLES},
     )
     if len(phase_series) > 1:
         st.markdown(ui_message('ui.4e7301dde15566'))
@@ -16352,6 +16311,8 @@ def _render_preview_gain_phase(
             y_domain=[-180.0, 180.0],
             break_wrapped_phase=True,
             boundary_markers=boundary_markers,
+            series_roles={label: "input" for label, _ in responses
+                      if label not in PHASEEQ_SERIES_ROLES},
         )
     else:
         st.caption(ui_message('ui.c5e5b9bcbe1e8f'))
@@ -22024,6 +21985,8 @@ with live_result_body_window:
             "Correction Filter" if preview_stage in TARGET_DELTA_PREVIEW_STAGES else
             "Current page delta"
         )
+        component_roles = {_iir_component_series_label(index, item): "correction"
+                           for index, item in enumerate(live_config.iir_filters)}
         from response_display.provenance import extension_bands
         speaker_provenance_bands = extension_bands(
             active_context.get("input_range_hz"), active_context.get("processed_range_hz"),
@@ -22031,8 +21994,10 @@ with live_result_body_window:
         ) if "Speaker/Input" in chart_data.gain_series else []
         with st.popover(display_text("グラフの見方"), icon=":material/help_outline:",
                         key="gain_phase_chart_help"):
+            from utils.response_visual_style import response_style_help
+            st.caption(response_style_help())
             if "Target + Band Split" in chart_data.gain_series:
-                st.caption(ui_message('ui.498f5eee191dcc'))
+                st.caption(ui_message('ui.93b085436e3ca7'))
             if "IIR Band Split" in chart_data.gain_series:
                 st.caption(ui_message('ui.0fa0b8c41bc8c8'))
             if "Current page delta" in chart_data.gain_series:
@@ -22113,6 +22078,8 @@ with live_result_body_window:
             provenance_bands=speaker_provenance_bands,
             highlight_series=eq_total_highlight,
             chart_key="phaseeq_gain_chart",
+            series_roles=component_roles,
+            reference_series="Target Response" if fir_preview.output_comparison_required else None,
         )
         st.markdown(ui_message('ui.4e7301dde15566'))
         phase_gain_mask = _sync_plain_option_widget(
@@ -22144,6 +22111,8 @@ with live_result_body_window:
             provenance_bands=speaker_provenance_bands if "Speaker/Input" in chart_data.phase_series else None,
             highlight_series=eq_total_highlight,
             chart_key="phaseeq_phase_chart",
+            series_roles=component_roles,
+            reference_series="Target Response" if fir_preview.output_comparison_required else None,
         )
 
     detail_view_summary = str(_sync_plain_option_widget("result_detail_view", RESULT_DETAIL_VIEWS, "Error"))

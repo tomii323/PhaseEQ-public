@@ -1,20 +1,29 @@
 """Keep application-owned analysis/display settings across context restoration."""
 from collections.abc import Mapping
 
+GRAPH_MODE_OPTIONS = ("Light", "Interactive")
+DEFAULT_GRAPH_MODE = "Light"
+
+
+def current_graph_mode(state: Mapping) -> str:
+    """Read committed presentation state without restoring or changing widgets."""
+    mode = state.get("graph_mode")
+    return mode if mode in GRAPH_MODE_OPTIONS else DEFAULT_GRAPH_MODE
+
 
 def saved_graph_mode(payload: Mapping) -> str | None:
     """Read the canonical saved display mode, with legacy profile fallback."""
     mode = payload.get("ui", {}).get("graph_mode")
     if mode is None:
         mode = payload.get("ui_profile", {}).get("state", {}).get("graph_mode")
-    return mode if mode in {"Light", "Interactive"} else None
+    return mode if mode in GRAPH_MODE_OPTIONS else None
 
 
 def preserve_common_analysis(payload: dict, state: Mapping) -> dict:
     """Copy only changed containers; never mutate the saved source payload."""
     fft = state.get("analysis_fft_size")
     mode = state.get("graph_mode")
-    has_mode = mode in {"Light", "Interactive"}
+    has_mode = mode in GRAPH_MODE_OPTIONS
     if fft is None and not has_mode:
         return payload
     ui = dict(payload.get("ui", {}))

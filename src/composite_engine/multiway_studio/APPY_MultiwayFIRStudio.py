@@ -125,6 +125,7 @@ def _project_studio_charts(source, *, source_revision, graph_max_points,
         speaker_responses=source["speaker_responses"],
         baffle_response=source["baffle_response"],
         baffle_label=source["baffle_label"],
+        way_ids=source.get("way_ids"), sum_ids=source.get("sum_ids"),
         max_points=graph_max_points, source_revision=source_revision,
     )
 
@@ -198,6 +199,9 @@ def _render_studio_graph_fragment(
         help=ui_message('ui.fb8d9182596a2d'),
     )
     _persist_graph_mode(selected_mode)
+    from utils.response_visual_style import response_style_help
+    with st.popover(display_text("グラフの見方"), icon=":material/help_outline:"):
+        st.caption(response_style_help())
     for chart_id, host in chart_hosts:
         with host:
             _render_studio_chart(
@@ -234,6 +238,8 @@ def _studio_display_graph_bundle(
         else ("Main",)
     )
     iir_configs = _shared_iir_configs(mode_key, tuple(crossover_frequencies_hz))
+    way_ids = {}
+    sum_ids = {}
     responses = {}
     settings = {}
     phaseeq_responses = {}
@@ -285,6 +291,7 @@ def _studio_display_graph_bundle(
                 return "SUB"
             return f"{prefix} {way}" if len(groups) > 1 else way
         keys = tuple(renamed(way) for way in side_responses)
+        way_ids.update({renamed(way): way for way in side_responses})
         for target, source in (
             (responses, side_responses),
             (settings, side_settings),
@@ -296,6 +303,7 @@ def _studio_display_graph_bundle(
                 if key not in target:
                     target[key] = value
         sum_label = f"{prefix} System Sum" if prefix else "Main System Sum"
+        sum_ids[sum_label] = physical_group
         sum_groups[sum_label] = keys
         way_sums[sum_label] = side_sum
         if physical_group == groups[0]:
@@ -314,6 +322,7 @@ def _studio_display_graph_bundle(
         "sample_rate_hz": int(sample_rate_hz),
         "frequency_hz": frequency,
         "responses": responses,
+        "way_ids": way_ids, "sum_ids": sum_ids,
         "impulses": impulses,
         "sum_groups": sum_groups,
         "way_sums": way_sums,
@@ -340,6 +349,7 @@ def _studio_display_graph_bundle(
         "settings": settings,
         "primary_settings": primary_settings,
         "responses": responses,
+        "way_ids": way_ids, "sum_ids": sum_ids,
         "chart_source": source,
         "chart_bundle": chart_bundle,
     }
@@ -3622,13 +3632,9 @@ cross_order_valid = (
 fir_cross_required = bool(bands_requiring_split_fir(
     bands, signature_crossover_methods,
 ))
-fir_assets_required = any(
-    isinstance(row.get("phaseeq_fir_response"), dict) or row.get("additional_fir") is not None
-    for row in signature_channel_rows
-)
-fir_configuration_valid = bool(conf.get("fir_output_enabled", False)) or not (
-    fir_cross_required or fir_assets_required
-)
+# Retained FIR EQ is skipped by the OFF processing path; only a direct FIR
+# crossover conflicts with FIR output OFF.
+fir_configuration_valid = bool(conf.get("fir_output_enabled", False)) or not fir_cross_required
 cross_order_valid = cross_order_valid and fir_configuration_valid
 if not fir_configuration_valid:
     st.error(
@@ -3779,6 +3785,8 @@ if should_generate:
     graph_iir_configs = _shared_iir_configs(mode_key, tuple(conf["cross_freqs"]))
     graph_ir_length = ir_length_for_frequency_resolution(fs)
     graph_response_points = response_points_for_frequency_resolution(fs)
+    graph_way_ids = {}
+    graph_sum_ids = {}
     graph_responses = {}
     graph_settings = {}
     phaseeq_graph_responses = {}
@@ -3833,6 +3841,7 @@ if should_generate:
                 return "SUB"
             return f"{prefix} {way}" if len(graph_groups) > 1 else way
         renamed_keys = tuple(rename(way) for way in side_responses)
+        graph_way_ids.update({rename(way): way for way in side_responses})
         for target, source in (
             (graph_responses, side_responses),
             (graph_settings, side_settings),
@@ -3844,6 +3853,7 @@ if should_generate:
                 if key not in target:
                     target[key] = value
         sum_label = f"{prefix} System Sum" if prefix else "Main System Sum"
+        graph_sum_ids[sum_label] = physical_group
         graph_sum_groups[sum_label] = renamed_keys
         graph_way_sums[sum_label] = side_sum
         graph_frequency_hz = side_frequency
@@ -3873,6 +3883,7 @@ if should_generate:
         "sample_rate_hz": int(fs),
         "frequency_hz": graph_frequency_hz,
         "responses": graph_responses,
+        "way_ids": graph_way_ids, "sum_ids": graph_sum_ids,
         "impulses": realized_plot_firs,
         "sum_groups": graph_sum_groups,
         "way_sums": graph_way_sums,
